@@ -27,6 +27,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
+  internalQuery,
   mutation,
   query,
   type MutationCtx,
@@ -978,5 +979,37 @@ export const expireGrace = internalMutation({
       keyId: row.keyId,
       attempt: 0,
     });
+  },
+});
+
+/** OAuth spends through the member's existing current key, never a new budget. */
+export const resolveMcpIdentity = internalQuery({
+  args: { userId: v.string(), orgId: v.string() },
+  handler: async (ctx, { userId, orgId }) => {
+    if (!userId.startsWith("user_") || !orgId.startsWith("org_")) return null;
+    if (await getOrganizationTombstone(ctx, orgId)) return null;
+    if (!(await getActiveOrganizationByClerkId(ctx, orgId))) return null;
+    const rows = await ctx.db
+      .query("keySettings")
+      .withIndex("by_owner_status", (q) =>
+        q
+          .eq("clerkOrgId", orgId)
+          .eq("ownerUserId", userId)
+          .eq("disabled", false),
+      )
+      .collect();
+    const current = rows.filter(
+      (row) =>
+        row.subjectUserId === userId &&
+        row.secretSha256 !== undefined &&
+        row.lifecycle === "active" &&
+        row.graceUntil === undefined &&
+        row.rotationRequiredAt === undefined &&
+        row.membershipRevokedAt === undefined &&
+        (row.expiresAt === undefined || row.expiresAt > Date.now()),
+    );
+    // Ambiguous/transitional rows must never silently select another budget.
+    if (current.length !== 1) return null;
+    return { orgId, keyId: current[0]!.keyId };
   },
 });

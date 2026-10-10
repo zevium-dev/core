@@ -1,3 +1,4 @@
+import { isWalletSession, verifyWalletSession } from "./wallet-session";
 import {
   InternalHttpCatalogueSearch,
   type CatalogueSearchSource,
@@ -9,7 +10,18 @@ import {
 } from "./machine-facilitator";
 import { convexMachineFunder } from "./machine-payments";
 import { WalletSqliteDO, type WalletDO } from "./wallet";
-import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
+import {
+  ClerkMcpOAuthVerifier,
+  oauthConfig,
+  oauthChallenge,
+  protectedResourceMetadata,
+  type McpOAuthVerifier,
+} from "./mcp-oauth";
+import {
+  ClerkKeyVerifier,
+  FixtureKeyVerifier,
+  extractApiKey,
+} from "./key-verifier";
 import {
   CachedSpecSource,
   ConvexPublicSpecSource,
@@ -49,6 +61,9 @@ export interface Env {
   WALLET_SESSION_SECRET?: string;
   WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
+  /** Enable OAuth with the Clerk Frontend API origin and canonical /mcp URL. */
+  MCP_OAUTH_ISSUER?: string;
+  MCP_OAUTH_RESOURCE?: string;
   CONVEX_URL?: string;
   /** Convex .convex.site origin for httpActions (ingest-usage). */
   CONVEX_SITE_URL?: string;
@@ -73,6 +88,7 @@ export interface Env {
 export type WorkerDeps = PipelineDeps & {
   catalogueSource: CatalogueSource;
   searchSource?: CatalogueSearchSource;
+  oauthVerifier?: McpOAuthVerifier;
   /** Credential-free source for discovery, docs, and keyless mocks. */
   publicSpecSource: PublicSpecSource;
 };
@@ -150,6 +166,8 @@ function buildDeps(env: Env): WorkerDeps {
     env.X402_STRIPE_SECRET_KEY ?? "",
     env.WALLET_SESSION_SECRET ?? "",
     env.CLERK_SECRET_KEY ?? "",
+    env.MCP_OAUTH_ISSUER ?? "",
+    env.MCP_OAUTH_RESOURCE ?? "",
     env.CONVEX_URL ?? "",
     env.CONVEX_SITE_URL ?? "",
     env.GATEWAY_INTERNAL_SECRET ?? "",
@@ -229,8 +247,18 @@ function buildDeps(env: Env): WorkerDeps {
           fund: convexMachineFunder(siteUrl, env.GATEWAY_INTERNAL_SECRET),
         }
       : undefined;
+  const oauth = oauthConfig(env.MCP_OAUTH_ISSUER, env.MCP_OAUTH_RESOURCE);
   const deps: WorkerDeps = {
     machinePayments,
+    oauthVerifier:
+      oauth && env.CLERK_SECRET_KEY && siteUrl && env.GATEWAY_INTERNAL_SECRET
+        ? new ClerkMcpOAuthVerifier({
+            ...oauth,
+            secretKey: env.CLERK_SECRET_KEY,
+            siteUrl,
+            internalSecret: env.GATEWAY_INTERNAL_SECRET,
+          })
+        : undefined,
     keyVerifier,
     searchSource:
       siteUrl && env.GATEWAY_INTERNAL_SECRET
@@ -361,10 +389,92 @@ async function dispatchRequest(
     return await handleDiscoveryRequest(request, discoveryDeps(deps, request));
   }
 
+  const oauth = oauthConfig(env.MCP_OAUTH_ISSUER, env.MCP_OAUTH_RESOURCE);
+  if (
+    oauth &&
+    [
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-protected-resource/",
+      "/.well-known/oauth-protected-resource/mcp",
+      "/.well-known/oauth-authorization-server",
+    ].includes(url.pathname)
+  ) {
+    if (request.method !== "GET")
+      return new Response(null, {
+        status: 405,
+        headers: { allow: "GET, OPTIONS" },
+      });
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      // The authoritative document (including DCR and S256 PKCE) belongs to Clerk.
+      return Response.redirect(
+        `${oauth.issuer}/.well-known/oauth-authorization-server`,
+        307,
+      );
+    }
+    return protectedResourceMetadata(oauth);
+  }
+
   // /mcp — MCP Streamable HTTP
   if (parts[0] === "mcp" && parts.length === 1) {
     const deps = buildDeps(env);
-    return await handleMcpRequest(request, mcpDeps(deps, env, request), ctx);
+    const mcp = mcpDeps(deps, env, request);
+    if (oauth) {
+      const apiKey = extractApiKey(request);
+      const token = /^Bearer\s+(\S+)$/i.exec(
+        request.headers.get("authorization") ?? "",
+      )?.[1];
+      if (!apiKey && !token) return oauthChallenge(oauth);
+      const verifier =
+        apiKey && isWalletSession(apiKey)
+          ? {
+              verify: (session: string) =>
+                verifyWalletSession(
+                  session,
+                  deps.machinePayments?.signingSecret ?? "",
+                  url.origin,
+                  (deps.now ?? Date.now)(),
+                ),
+              verifyWithStatus: undefined,
+            }
+          : deps.keyVerifier;
+      const outcome = apiKey
+        ? verifier.verifyWithStatus
+          ? await verifier.verifyWithStatus(apiKey)
+          : await verifier
+              .verify(apiKey)
+              .then((key) =>
+                key
+                  ? { status: "ok" as const, key }
+                  : { status: "invalid" as const },
+              )
+        : await deps.oauthVerifier?.verify(token!);
+      if (!outcome || outcome.status === "unavailable") {
+        return Response.json(
+          {
+            error: "verification_unavailable",
+            message: "Authentication is temporarily unavailable",
+          },
+          { status: 503 },
+        );
+      }
+      if (outcome.status !== "ok")
+        return oauthChallenge(
+          oauth,
+          outcome.status === "insufficient_scope"
+            ? "insufficient_scope"
+            : "invalid_token",
+        );
+      // API key callers retain their existing tool-argument behavior. OAuth
+      // identity is injected only here, never inferred inside the paid pipeline.
+      if (!apiKey) mcp.pipeline.authenticatedKey = outcome.key;
+      // Stateless Streamable HTTP does not provide an SSE listener.
+      if (request.method === "GET")
+        return new Response(null, {
+          status: 405,
+          headers: { allow: "POST, OPTIONS" },
+        });
+    }
+    return await handleMcpRequest(request, mcp, ctx);
   }
 
   const route = parseGatewayPath(url.pathname);

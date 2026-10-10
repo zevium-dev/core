@@ -24,14 +24,14 @@ export async function admit(
   started: number,
 ) {
   const secret = extractApiKey(request);
-  if (!secret) {
+  if (!secret && !deps.authenticatedKey) {
     // Unauthenticated calls never execute — no unmetered path.
     return paymentRequiredResponse(requestId, "API key required", {
       reason: "missing_api_key",
     });
   }
 
-  const verifier = isWalletSession(secret)
+  const verifier = isWalletSession(secret ?? "")
     ? {
         verify: (token: string) =>
           verifyWalletSession(
@@ -43,13 +43,15 @@ export async function admit(
         verifyWithStatus: undefined,
       }
     : deps.keyVerifier;
-  const outcome: VerifyOutcome = verifier.verifyWithStatus
-    ? await verifier.verifyWithStatus(secret)
-    : await verifier
-        .verify(secret)
-        .then((key): VerifyOutcome =>
-          key ? { status: "ok", key } : { status: "invalid" },
-        );
+  const outcome: VerifyOutcome = deps.authenticatedKey
+    ? { status: "ok", key: deps.authenticatedKey }
+    : verifier.verifyWithStatus
+      ? await verifier.verifyWithStatus(secret!)
+      : await verifier
+          .verify(secret!)
+          .then((key): VerifyOutcome =>
+            key ? { status: "ok", key } : { status: "invalid" },
+          );
   if (outcome.status === "unavailable") {
     return jsonError(
       503,

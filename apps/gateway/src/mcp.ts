@@ -1,3 +1,4 @@
+import { isWalletSession, verifyWalletSession } from "./wallet-session";
 /**
  * Minimal MCP Streamable HTTP endpoint for workerd.
  *
@@ -9,7 +10,7 @@
  *   get_api_docs — call reference + pricing + usage notes
  *   call_api     — metered execute via the SAME pipeline (no side door)
  *
- * call_api REQUIRES a consumer API key from the MCP request Authorization /
+ * call_api REQUIRES a verified OAuth identity or a consumer API key from Authorization /
  * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
  */
 
@@ -31,7 +32,7 @@ import {
   type PublicSpecSource,
 } from "./spec-source";
 
-const PROTOCOL_VERSION = "2024-11-05";
+const PROTOCOL_VERSION = "2025-11-25";
 const SERVER_INFO = { name: "zevium-gateway", version: "0.1.0" } as const;
 const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 const MAX_BATCH_SIZE = 100;
@@ -118,7 +119,7 @@ const TOOLS: ToolDef[] = [
   {
     name: "call_api",
     description:
-      "Call an API endpoint using prepaid credits. Supply a Zevium key with Authorization: Bearer on the MCP request or the key argument. A funded wallet is required. A fully buffered 2xx upstream response settles the endpoint price; failed tool results release the reservation.",
+      "Call an API endpoint using prepaid credits. Authenticate the MCP request with OAuth or a Zevium API key. OAuth uses the connected organization and existing key cap; omit the key argument. A funded wallet is required. A fully buffered 2xx upstream response settles the endpoint price; failed tool results release the reservation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -296,14 +297,24 @@ async function handleSearchApis(
   const query = args.query.trim();
   const secret = extractApiKey(request);
   if (
+    !deps.pipeline.authenticatedKey &&
     secret === null &&
     (request.headers.has("authorization") || request.headers.has("x-api-key"))
   ) {
     return toolError("API key is invalid or unavailable");
   }
-  const caller = secret
-    ? await deps.pipeline.keyVerifier.verify(secret)
-    : undefined;
+  const caller =
+    deps.pipeline.authenticatedKey ??
+    (secret
+      ? isWalletSession(secret)
+        ? await verifyWalletSession(
+            secret,
+            deps.pipeline.machinePayments?.signingSecret ?? "",
+            new URL(request.url).origin,
+            (deps.pipeline.now ?? Date.now)(),
+          )
+        : await deps.pipeline.keyVerifier.verify(secret)
+      : undefined);
   if (caller === null) return toolError("API key is invalid or unavailable");
   const result =
     query && deps.searchSource
@@ -389,7 +400,7 @@ async function handleGetApiDocs(
       ...reference,
     },
     trustedUsageNotes: [
-      "Authenticate every call with Authorization: Bearer <ak_…|zev_…> or x-api-key.",
+      "Authenticate MCP calls with OAuth or a Zevium API key; direct gateway calls use Authorization: Bearer <ak_…|zev_…> or x-api-key.",
       "Credits are prepaid on the consumer org wallet; zero balance returns 402.",
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
       "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec. Token rates are credits per million input/output tokens: hold estimated input plus max_tokens (default 4096), settle observed usage, release remainder. Holds round up and actual charges round down to whole credits; missing usage charges zero. Actual never exceeds the hold.",
@@ -429,6 +440,12 @@ async function handleCallApi(
       paymentRequiredResponse(crypto.randomUUID(), "Invalid API key", {
         reason: "invalid_api_key",
       }),
+    );
+  }
+
+  if (deps.pipeline.authenticatedKey && args.key !== undefined) {
+    return toolError(
+      "OAuth calls use the connected organization key; omit the key argument",
     );
   }
 
@@ -633,7 +650,13 @@ async function handleRpc(
   switch (req.method) {
     case "initialize":
       return success(id, {
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion:
+          isRecord(req.params) &&
+          ["2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL_VERSION].includes(
+            String(req.params.protocolVersion),
+          )
+            ? req.params.protocolVersion
+            : PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
       });

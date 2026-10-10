@@ -5,7 +5,7 @@ import {
   paymentHeader,
 } from "./machine-payments";
 import type { WalletDO } from "./wallet";
-import type { KeyVerifier } from "./key-verifier";
+import type { KeyVerifier, VerifiedKey } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { admit } from "./admit";
 import { forward } from "./forward";
@@ -19,6 +19,8 @@ export type PipelineEnv = {
 export type PipelineDeps = {
   machinePayments?: MachinePaymentDeps;
   keyVerifier: KeyVerifier;
+  /** Trusted MCP OAuth identity; never populated from request parameters. */
+  authenticatedKey?: VerifiedKey;
   specSource: SpecSource;
   /** Upstream fetch — inject mock in tests. */
   fetchImpl?: typeof fetch;
