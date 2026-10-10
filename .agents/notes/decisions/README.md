@@ -13,8 +13,8 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-10 | [Platform fee from publisher side](2026-10-10-platform-fee-publisher-side.md)         | accepted                       |
 | 2026-10-10 | [Card-fee floor on top-ups](2026-10-10-card-fee-floor.md)                             | superseded                     |
 | 2026-10-10 | [LLM per-token pricing](2026-10-10-llm-per-token-pricing.md)                          | accepted; built #329           |
-| 2026-10-10 | [Two rails: keys + keyless x402](2026-10-10-dual-rail-keys-and-x402.md)               | accepted direction, not built  |
-| 2026-10-10 | [Anonymous wallet expiry: 1 year](2026-10-10-anonymous-wallet-expiry.md)              | accepted for now               |
+| 2026-10-10 | [Two rails: keys + keyless x402](2026-10-10-dual-rail-keys-and-x402.md)               | built; activation pending      |
+| 2026-10-10 | [Anonymous wallet expiry: 1 year](2026-10-10-anonymous-wallet-expiry.md)              | built (#109)                   |
 | 2026-10-10 | [Docs become .agents/notes](2026-10-10-agents-notes-docs.md)                          | accepted (done)                |
 | 2026-10-10 | [Repo cleanup: dead tooling + legacy files](2026-10-10-repo-cleanup.md)               | accepted (done)                |
 | 2026-10-10 | [Card fee passed through at cost](2026-10-10-card-fee-passthrough.md)                 | accepted direction, not built  |

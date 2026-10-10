@@ -1,4 +1,6 @@
+import type { MachineFunding } from "@zevium/shared";
 export type SettlementIdentityV2 = {
+  machineFunding?: MachineFunding;
   consumerClerkOrgId: string;
   consumerOrganizationId: string;
   publisherOrganizationId: string;
@@ -62,6 +64,15 @@ export async function settlementIdentityFingerprint(
     identity.settleRefId,
     identity.ambiguous ?? false,
     identity.publisherIdempotencyKey ?? null,
+    ...(identity.machineFunding
+      ? [
+          identity.machineFunding.admittedAt,
+          identity.machineFunding.lots.map((lot) => [
+            lot.sourceRef,
+            lot.credits,
+          ]),
+        ]
+      : []),
   ]);
   const digest = await crypto.subtle.digest(
     "SHA-256",

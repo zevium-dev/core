@@ -44,7 +44,7 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 | [api-keys](features/api-keys.md)                             | Keys, per-key caps, rotation                                             |
 | [agent-surface](features/agent-surface.md)                   | MCP endpoint, discovery index, connect-your-agent, agent distribution    |
 | [capability-routing](features/capability-routing.md)         | Route by job across interchangeable providers, fallback, max cost        |
-| [machine-payments](features/machine-payments.md)             | x402 / keyless wallet sessions (planned), 402 envelopes                  |
+| [machine-payments](features/machine-payments.md)             | x402 / keyless wallet sessions (configuration gated), 402 envelopes      |
 | [mock-sandbox](features/mock-sandbox.md)                     | Keyless spec-generated mocks, playground                                 |
 | [publisher-analytics](features/publisher-analytics.md)       | Calls, latency, errors, revenue per endpoint                             |
 | [earnings-payouts](features/earnings-payouts.md)             | 95% earnings, Stripe Connect onboarding, transfers, payouts              |

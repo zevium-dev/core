@@ -1,5 +1,6 @@
 /** Row storage only; all multi-table transitions are owned by WalletDO. */
 export type WalletTable =
+  | "machine_lots"
   | "reservations"
   | "pending_settlements"
   | "applied_grants"

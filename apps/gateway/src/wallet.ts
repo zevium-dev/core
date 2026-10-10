@@ -1,3 +1,16 @@
+import {
+  StripeX402Facilitator,
+  type VerifiedPayment,
+  PaymentRejected,
+} from "./machine-facilitator";
+import type { Env } from "./index";
+import {
+  type MachineGrant,
+  type MachineFunding,
+  MAX_MACHINE_LOTS_PER_CALL,
+  MACHINE_TOPUP_CREDITS,
+  fundingExpiresAt,
+} from "@zevium/shared";
 /**
  * Wallet Durable Object — per-org working balance with crash-safe holds.
  *
@@ -48,6 +61,7 @@ import { WalletRows } from "./wallet-storage";
 // ---------------------------------------------------------------------------
 
 export type InFlightEntry = {
+  machineFunding?: MachineFunding;
   cost: number;
   tokenPricing?: boolean;
   createdAt: number;
@@ -70,6 +84,7 @@ export type KeyBudgetSnapshot = {
 
 /** Usage metadata required to flush a settlement to Convex. */
 export type SettlementUsage = {
+  machineFunding?: MachineFunding;
   /** Publisher's Convex org id — kept for compatibility. */
   organizationId: string;
   /** Consumer's Clerk org id — the org whose wallet actually pays. */
@@ -378,6 +393,8 @@ function parseKeySettings(raw: unknown): KeySetting[] {
 // ---------------------------------------------------------------------------
 
 export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
+  #machineLots: Array<MachineGrant & { remaining: number }> = [];
+  #machineRows: WalletRows<MachineGrant & { remaining: number }>;
   #balance = 0;
   #sequence = -1;
   #inFlight: Record<string, InFlightEntry> = {};
@@ -404,6 +421,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
     const sql = ctx.storage.sql;
+    this.#machineRows = new WalletRows(sql, "machine_lots");
     this.#reservations = new WalletRows(sql, "reservations");
     this.#pending = new WalletRows(sql, "pending_settlements");
     this.#grants = new WalletRows(sql, "applied_grants");
@@ -447,6 +465,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         archived: number;
       }>("SELECT * FROM wallet_checkpoint WHERE id = 1")
       .one();
+    this.#machineLots = this.#machineRows.load().map(([, lot]) => lot);
     this.#balance = row.balance;
     this.#sequence = row.sequence;
     this.#flushSeq = row.flush_seq;
@@ -497,7 +516,37 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
     );
   }
 
-  #available(): number {
+  #machineSlices(cost: number, now: number): MachineFunding["lots"] {
+    const held = new Map<string, number>();
+    for (const entry of Object.values(this.#inFlight))
+      for (const slice of entry.machineFunding?.lots ?? [])
+        held.set(
+          slice.sourceRef,
+          (held.get(slice.sourceRef) ?? 0) + slice.credits,
+        );
+    const result: MachineFunding["lots"] = [];
+    for (const lot of [...this.#machineLots].sort(
+      (a, b) =>
+        a.createdAt - b.createdAt || a.sourceRef.localeCompare(b.sourceRef),
+    )) {
+      if (lot.expiresAt <= now || lot.createdAt > now) continue;
+      const credits = Math.min(
+        cost,
+        lot.remaining - (held.get(lot.sourceRef) ?? 0),
+      );
+      if (credits <= 0) continue;
+      result.push({ sourceRef: lot.sourceRef, credits });
+      cost -= credits;
+      if (cost === 0 || result.length === MAX_MACHINE_LOTS_PER_CALL) break;
+    }
+    return result;
+  }
+  #available(now = Date.now()): number {
+    if (this.#machineLots.length)
+      return this.#machineSlices(Number.MAX_SAFE_INTEGER, now).reduce(
+        (sum, lot) => sum + lot.credits,
+        0,
+      );
     return Math.max(0, this.#balance - sumInFlight(this.#inFlight));
   }
 
@@ -532,7 +581,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       inFlight: { ...this.#inFlight },
       appliedGrantIds: [...this.#appliedGrantIds],
       pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-      available: Math.max(0, this.#balance - inFlightTotal),
+      available: this.#available(),
       deadLetterCount: this.#deadLetters.length,
     };
   }
@@ -587,6 +636,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
     }
     this.ctx.storage.transactionSync(() => {
       const sql = this.ctx.storage.sql;
+      this.#machineRows.write(
+        this.#machineLots.map((lot) => [lot.sourceRef, lot]),
+      );
       if (keys.lastCompactionAt !== undefined)
         this.#compactCounters(keys.lastCompactionAt);
       sql.exec(
@@ -743,6 +795,75 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
    * Terminal membership revocation bypasses 60s checkpoint throttling.
    */
 
+  /** Separate DO name per proof serializes payment attempts, never locks a consumer wallet. */
+  async settleMachineProof(
+    payload: unknown,
+  ): Promise<
+    | { ok: true; payment: VerifiedPayment }
+    | { ok: false; reason: "rejected" | "unavailable" }
+  > {
+    try {
+      return await this.#mutate(async () => {
+        const env = this.env as unknown as Env;
+        const receiptKey = "machine-settlement-receipt";
+        const resultKey = "machine-payment-result";
+        const prior = await this.ctx.storage.get<VerifiedPayment>(resultKey);
+        if (prior) return { ok: true as const, payment: prior };
+        const adapter = new StripeX402Facilitator({
+          depositAddress: env.X402_DEPOSIT_ADDRESS ?? "",
+          facilitatorUrl: env.X402_FACILITATOR_URL ?? "",
+          facilitatorToken: env.X402_FACILITATOR_TOKEN ?? "",
+          stripeKey: env.X402_STRIPE_SECRET_KEY ?? "",
+          settlementReceipt: {
+            load: async () =>
+              (await this.ctx.storage.get<Omit<VerifiedPayment, "paymentId">>(
+                receiptKey,
+              )) ?? null,
+            save: (receipt) => this.ctx.storage.put(receiptKey, receipt),
+          },
+        });
+        const result = await adapter.settle(payload);
+        await this.ctx.storage.put(resultKey, result);
+        return { ok: true as const, payment: result };
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof PaymentRejected ? "rejected" : "unavailable",
+      };
+    }
+  }
+
+  /** Trusted Worker RPC after the Convex funding transaction. Never exposed over HTTP. */
+  async grantMachineLot(grant: MachineGrant): Promise<GrantResult> {
+    return this.#mutate(async () => {
+      if (
+        !/^x402:eip155:[0-9]+:0x[0-9a-f]{40}$/.test(grant.walletId) ||
+        grant.credits !== MACHINE_TOPUP_CREDITS ||
+        !Number.isSafeInteger(grant.createdAt) ||
+        grant.createdAt <= 0 ||
+        grant.expiresAt !== fundingExpiresAt(grant.createdAt) ||
+        !/^x402:pi_[A-Za-z0-9]+$/.test(grant.sourceRef)
+      )
+        return { status: "rejected", reason: "invalid machine grant" };
+      if (this.#machineLots.some((lot) => lot.walletId !== grant.walletId))
+        return { status: "rejected", reason: "wallet mismatch" };
+      const prior = this.#machineLots.find(
+        (lot) => lot.sourceRef === grant.sourceRef,
+      );
+      if (prior) return { status: "duplicate", balance: this.#balance };
+      this.#machineLots.push({ ...grant, remaining: grant.credits });
+      this.#balance += grant.credits;
+      const setting = { keyId: grant.walletId, disabled: false };
+      this.#keySettings.set(grant.walletId, setting);
+      await this.#persist({
+        balance: this.#balance,
+        keySettings: Object.fromEntries(this.#keySettings),
+      });
+      return { status: "applied", balance: this.#balance };
+    });
+  }
+
   async reserve(
     reservationId: string,
     cost: number,
@@ -834,7 +955,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         }
       }
 
-      const available = this.#available();
+      const available = this.#available(now);
       if (opts.tokenPricing && this.#balance > 0) {
         const budget = Math.min(Math.floor(this.#balance / 2), 100_000);
         if (cost > budget)
@@ -863,6 +984,14 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         ...(opts.tokenPricing ? { tokenPricing: true } : {}),
 
         createdAt: reservedAt,
+        ...(this.#machineLots.length
+          ? {
+              machineFunding: {
+                admittedAt: now,
+                lots: this.#machineSlices(cost, now),
+              },
+            }
+          : {}),
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
         keyBudget,
       };
@@ -922,6 +1051,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         const budget = entry.keyBudget;
         authoritativeUsage = {
           ...usage,
+          ...(entry.machineFunding
+            ? { machineFunding: entry.machineFunding }
+            : {}),
           keyId: budget.keyId,
           keyFamilyId: budget.keyFamilyId,
           monthlyCapCredits: budget.monthlyCapCredits,
@@ -932,6 +1064,14 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         };
       }
 
+      for (const slice of entry.machineFunding?.lots ?? []) {
+        const lot = this.#machineLots.find(
+          (l) => l.sourceRef === slice.sourceRef,
+        );
+        if (!lot || lot.remaining < slice.credits)
+          throw new Error("Machine lot underflow");
+        lot.remaining -= slice.credits;
+      }
       delete this.#inFlight[reservationId];
       const nextBalance = this.#balance - cost;
       if (!Number.isSafeInteger(nextBalance) || nextBalance < 0) {
@@ -1082,7 +1222,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
-      if (this.#balance <= 0) {
+      if (
+        (this.#machineLots.length ? this.#available(nowMs) : this.#balance) <= 0
+      ) {
         return {
           status: "rejected",
           reason: "insufficient_credits",
@@ -1146,7 +1288,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
-      if (this.#balance <= 0) {
+      if (
+        (this.#machineLots.length ? this.#available(nowMs) : this.#balance) <= 0
+      ) {
         return {
           status: "rejected",
           reason: "insufficient_credits",
@@ -1336,7 +1480,11 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       }
 
       const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
-      if (!checkpointAccepted && staleCheckpointAdjustment > 0) {
+      if (
+        !this.#machineLots.length &&
+        !checkpointAccepted &&
+        staleCheckpointAdjustment > 0
+      ) {
         this.#balance += staleCheckpointAdjustment;
       }
       if (
@@ -1380,7 +1528,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       this.#pendingSettlements.splice(index, 1);
       // Deterministic batch failure never committed this row upstream. Remove
       // its local pending deduction so working balance matches ledger truth.
-      this.#balance += settlement.cost;
+      if (!this.#machineLots.length) this.#balance += settlement.cost;
       this.#deadLetters = [
         ...this.#deadLetters,
         { ...settlement, reason, deadAt: Date.now() },
@@ -1453,6 +1601,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
           reservationId: s.reservationId,
           cost: s.cost,
           settledAt: s.settledAt,
+          machineFunding: usage.machineFunding,
           organizationId: usage.organizationId,
           consumerClerkOrgId: usage.consumerClerkOrgId,
           projectId: usage.projectId,
@@ -1632,6 +1781,8 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
     clerkOrgId: string,
     nowMs: number = Date.now(),
   ): Promise<SyncGrantsResult> {
+    if (clerkOrgId.startsWith("x402:"))
+      return { status: "ok", balance: this.#balance, sequence: this.#sequence };
     if (this.#syncInFlight) return this.#syncInFlight;
     this.#syncInFlight = this.#refreshGrants(clerkOrgId, nowMs).finally(() => {
       this.#syncInFlight = null;
@@ -1703,6 +1854,13 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
     nowMs: number,
   ): Promise<KeySetting | null | undefined> {
     if (!clerkOrgId) return undefined;
+    if (clerkOrgId.startsWith("x402:")) {
+      // Anonymous sessions never pull Clerk controls or Convex checkpoints.
+      return this.#machineLots[0]?.walletId === clerkOrgId &&
+        keyId === clerkOrgId
+        ? this.#keySettings.get(keyId)
+        : null;
+    }
     if (this.#keySettingsSyncedAt === 0) {
       await this.syncGrants(clerkOrgId, nowMs);
       if (this.#keySettingsSyncedAt === 0) return undefined;
@@ -1747,6 +1905,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
    * per-reference outcome is acknowledged; holds stay in #inFlight.
    */
   #acceptCheckpoint(checkpoint: WalletCheckpoint): boolean {
+    // Anonymous grants and lot deductions are durable here. Ledger acknowledgements
+    // must not reintroduce expired or already spent inventory.
+    if (this.#machineLots.length) return false;
     if (
       !Number.isSafeInteger(checkpoint.sequence) ||
       checkpoint.sequence < 0 ||

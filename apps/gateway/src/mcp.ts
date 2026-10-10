@@ -234,6 +234,9 @@ async function paymentToolError(response: Response) {
       actions: envelope.actions,
       available: envelope.available,
       requiredCredits: envelope.cost,
+      ...(response.headers.has("PAYMENT-REQUIRED")
+        ? { paymentRequired: response.headers.get("PAYMENT-REQUIRED") }
+        : {}),
     }),
   );
 }
@@ -421,14 +424,7 @@ async function handleCallApi(
   if (!key) {
     key = extractApiKey(mcpRequest) ?? undefined;
   }
-  if (!key) {
-    return paymentToolError(
-      paymentRequiredResponse(crypto.randomUUID(), "API key required", {
-        reason: "missing_api_key",
-      }),
-    );
-  }
-  if (!key.startsWith("ak_") && !key.startsWith("zev_")) {
+  if (key && !key.startsWith("ak_") && !key.startsWith("zev_")) {
     return paymentToolError(
       paymentRequiredResponse(crypto.randomUUID(), "Invalid API key", {
         reason: "invalid_api_key",
@@ -459,14 +455,19 @@ async function handleCallApi(
   };
 
   const headers = new Headers();
-  headers.set("authorization", `Bearer ${key}`);
+  if (key) headers.set("authorization", `Bearer ${key}`);
 
   if (isRecord(args.headers)) {
     for (const [hk, hv] of Object.entries(args.headers)) {
       if (typeof hv === "string" && hv.length > 0) {
         // Never let tool headers clobber the consumer key.
         const lower = hk.toLowerCase();
-        if (lower === "authorization" || lower === "x-api-key") continue;
+        if (
+          lower === "authorization" ||
+          lower === "x-api-key" ||
+          lower === "payment-signature"
+        )
+          continue;
         headers.set(hk, hv);
       }
     }
@@ -549,7 +550,7 @@ async function handleCallApi(
     // Never forward upstream error bodies, headers, or exception details.
     const message =
       response.status === 402
-        ? "A valid API key and sufficient prepaid credits are required."
+        ? "A valid API key or wallet session with sufficient credits is required."
         : response.status === 403
           ? "This API call is not permitted. Check your API key and spending limit."
           : response.status === 404

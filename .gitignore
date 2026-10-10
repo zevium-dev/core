@@ -55,3 +55,6 @@
 /apps/gateway/.dev.vars
 /apps/web/.dev.vars
 /convex/.turbo/
+
+# Local task scratch and test runtime files.
+.tmp/

@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import {
+  type MachineFunding,
+  validMachineFunding,
   MAX_ENDPOINT_COST_CREDITS,
   MAX_USAGE_INGEST_EVENTS,
 } from "@zevium/shared";
@@ -26,6 +28,7 @@ import {
   FundingInvariantError,
   MAX_FUNDING_WRITE_UNITS_PER_BATCH,
   preflightFundingAllocation,
+  preflightMachineFunding,
   recordPositiveFundingSource,
   requireVerifiedWalletFunding,
   type FundingPlan,
@@ -694,6 +697,12 @@ export const ensureWallet = mutation({
 });
 
 const usageEventArg = v.object({
+  machineFunding: v.optional(
+    v.object({
+      admittedAt: v.number(),
+      lots: v.array(v.object({ sourceRef: v.string(), credits: v.number() })),
+    }),
+  ),
   organizationId: v.string(),
   projectId: v.string(),
   specVersionId: v.string(),
@@ -743,6 +752,7 @@ const usageEventArg = v.object({
 });
 
 type UsageEventArg = {
+  machineFunding?: MachineFunding;
   organizationId: string;
   projectId: string;
   specVersionId: string;
@@ -996,7 +1006,14 @@ export const recordUsage = internalMutation({
     let projectedWriteUnits = 0;
 
     for (const event of args.events) {
-      if (!validSettlementBoundary(event) || !validSettlementOutcome(event)) {
+      if (
+        !validSettlementBoundary(event) ||
+        !validSettlementOutcome(event) ||
+        (consumerOrg.walletKind === "anonymous"
+          ? !validMachineFunding(event.machineFunding) ||
+            event.machineFunding.admittedAt > event.at
+          : event.machineFunding !== undefined)
+      ) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
@@ -1141,10 +1158,18 @@ export const recordUsage = internalMutation({
 
       let fundingPlan: FundingPlan;
       try {
-        fundingPlan = await preflightFundingAllocation(ctx, {
-          wallet,
-          credits: Math.min(event.credits, wallet.balance),
-        });
+        fundingPlan =
+          consumerOrg.walletKind === "anonymous"
+            ? await preflightMachineFunding(
+                ctx,
+                wallet,
+                event.credits,
+                event.machineFunding,
+              )
+            : await preflightFundingAllocation(ctx, {
+                wallet,
+                credits: Math.min(event.credits, wallet.balance),
+              });
       } catch (error) {
         if (!(error instanceof FundingInvariantError)) throw error;
         results.push({

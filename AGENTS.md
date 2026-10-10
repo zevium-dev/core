@@ -79,7 +79,7 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 ### Product rules (never violate)
 
 - Zero wallet balance **blocks** the call. Never surprise-overage
-- No unmetered execution paths — every gateway/agent call is authenticated (API key, or — planned, [decided 2026-10-10](.agents/notes/decisions/2026-10-10-dual-rail-keys-and-x402.md) — a verified x402 wallet session) and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
+- No unmetered execution paths — every gateway/agent call is authenticated (API key or a verified x402 wallet session) and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
 - The OpenAPI spec is the source of truth: upstream URL, endpoints, pricing (`x-zevium-cost`), free tier (`x-zevium-free-tier`). No parallel pricing tables
 - Published spec versions are immutable
 

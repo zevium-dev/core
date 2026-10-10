@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 import {
+  type MachineFunding,
+  validMachineFunding,
   MAX_ENDPOINT_COST_CREDITS,
   MAX_USAGE_INGEST_EVENTS,
 } from "@zevium/shared";
@@ -328,6 +330,7 @@ http.route({
 });
 
 type IngestUsageEvent = {
+  machineFunding?: MachineFunding;
   organizationId: string;
   projectId: string;
   specVersionId: string;
@@ -387,6 +390,11 @@ export function parseIngestUsageBody(
       return { ok: false, status: 400, error: "invalid event" };
     }
     const event = raw as Record<string, unknown>;
+    if (
+      event.machineFunding !== undefined &&
+      !validMachineFunding(event.machineFunding)
+    )
+      return { ok: false, status: 400, error: "invalid machine funding" };
     const requiredStrings = [
       event.organizationId,
       event.projectId,
@@ -511,6 +519,9 @@ export function parseIngestUsageBody(
     seenSettleRefs.add(settleRefId);
     consumerClerkOrgId = consumer;
     events.push({
+      ...(event.machineFunding === undefined
+        ? {}
+        : { machineFunding: event.machineFunding as MachineFunding }),
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
       specVersionId: event.specVersionId as string,
@@ -943,3 +954,38 @@ http.route({
 });
 
 export default http;
+
+/** Payment-only gateway boundary; never called by ordinary wallet-session requests. */
+http.route({
+  path: "/machine-fund",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (!secret || request.headers.get("x-internal-secret") !== secret)
+      return json({ error: "unauthorized" }, 401);
+    try {
+      const raw: unknown = await request.json();
+      if (!raw || typeof raw !== "object")
+        return json({ error: "invalid payment" }, 400);
+      const body = raw as Record<string, unknown>;
+      if (
+        typeof body.paymentId !== "string" ||
+        typeof body.transaction !== "string" ||
+        typeof body.network !== "string" ||
+        typeof body.payer !== "string"
+      )
+        return json({ error: "invalid payment" }, 400);
+      return json(
+        await ctx.runMutation(internal.machinePayments.fund, {
+          paymentId: body.paymentId,
+          transaction: body.transaction,
+          network: body.network,
+          payer: body.payer,
+        }),
+        200,
+      );
+    } catch {
+      return json({ error: "payment funding unavailable" }, 503);
+    }
+  }),
+});

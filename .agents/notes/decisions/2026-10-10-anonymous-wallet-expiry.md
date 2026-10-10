@@ -1,6 +1,6 @@
 # Anonymous wallet balance expires after one year
 
-> Date: 2026-10-10 · Status: accepted for now (user: "we can change it later")
+> Date: 2026-10-10 · Status: built (#109); policy remains changeable
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
 
 ## Decision
@@ -16,3 +16,7 @@ Unused balance in keyless (x402 wallet-session) wallets expires **per top-up, on
 ## Affects
 
 [machine-payments](../features/machine-payments.md), [wallet-billing](../features/wallet-billing.md)
+
+## Implementation
+
+Built in #109. See [machine-payments](../features/machine-payments.md) for anonymous accounting ownership, top-up/session contract, per-lot expiry, and required sandbox setup.

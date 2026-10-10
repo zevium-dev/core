@@ -1,6 +1,6 @@
 # Two consumer rails: API keys and keyless x402
 
-> Date: 2026-10-10 · Status: accepted direction, not built · Decided by: user
+> Date: 2026-10-10 · Status: built behind configuration (#109); sandbox activation pending · Decided by: user
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
 
 ## Decision
@@ -30,3 +30,7 @@ AGENTS.md product rule "every gateway/agent call is key-authenticated" becomes "
 ## Related
 
 [anonymous wallet expiry](2026-10-10-anonymous-wallet-expiry.md). Feature: [machine-payments](../features/machine-payments.md). Research: [landscape](../research/agent-api-marketplace-landscape.md).
+
+## Implementation
+
+Built in #109. See [machine-payments](../features/machine-payments.md) for anonymous accounting ownership, top-up/session contract, per-lot expiry, and required sandbox setup.

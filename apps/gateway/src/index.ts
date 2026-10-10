@@ -2,6 +2,12 @@ import {
   InternalHttpCatalogueSearch,
   type CatalogueSearchSource,
 } from "./catalogue-search";
+import {
+  StripeX402Facilitator,
+  PaymentRejected,
+  PaymentUnavailable,
+} from "./machine-facilitator";
+import { convexMachineFunder } from "./machine-payments";
 import { WalletSqliteDO, type WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
@@ -36,6 +42,11 @@ export { WalletSqliteDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {
+  X402_DEPOSIT_ADDRESS?: string;
+  X402_FACILITATOR_URL?: string;
+  X402_FACILITATOR_TOKEN?: string;
+  X402_STRIPE_SECRET_KEY?: string;
+  WALLET_SESSION_SECRET?: string;
   WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
   CONVEX_URL?: string;
@@ -133,6 +144,11 @@ function buildDeps(env: Env): WorkerDeps {
 
   // NUL-joined to avoid ambiguity when one field is empty.
   const fingerprint = [
+    env.X402_DEPOSIT_ADDRESS ?? "",
+    env.X402_FACILITATOR_URL ?? "",
+    env.X402_FACILITATOR_TOKEN ?? "",
+    env.X402_STRIPE_SECRET_KEY ?? "",
+    env.WALLET_SESSION_SECRET ?? "",
     env.CLERK_SECRET_KEY ?? "",
     env.CONVEX_URL ?? "",
     env.CONVEX_SITE_URL ?? "",
@@ -175,7 +191,46 @@ function buildDeps(env: Env): WorkerDeps {
       ? new FixtureCatalogueSource()
       : new FailClosedCatalogueSource();
 
+  const machinePayments =
+    env.X402_DEPOSIT_ADDRESS &&
+    env.X402_FACILITATOR_URL &&
+    env.X402_FACILITATOR_TOKEN &&
+    env.X402_STRIPE_SECRET_KEY &&
+    env.WALLET_SESSION_SECRET &&
+    siteUrl &&
+    env.GATEWAY_INTERNAL_SECRET
+      ? {
+          facilitator: {
+            requirements: new StripeX402Facilitator({
+              depositAddress: env.X402_DEPOSIT_ADDRESS,
+              facilitatorUrl: env.X402_FACILITATOR_URL,
+              facilitatorToken: env.X402_FACILITATOR_TOKEN,
+              stripeKey: env.X402_STRIPE_SECRET_KEY,
+            }).requirements,
+            settle: async (payload: unknown) => {
+              const digest = await crypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode(JSON.stringify(payload)),
+              );
+              const proofId = [...new Uint8Array(digest)]
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("");
+              const result = await env.WALLET.get(
+                env.WALLET.idFromName(`x402-proof:${proofId}`),
+              ).settleMachineProof(payload);
+              if (!result.ok)
+                throw result.reason === "rejected"
+                  ? new PaymentRejected()
+                  : new PaymentUnavailable();
+              return result.payment;
+            },
+          },
+          signingSecret: env.WALLET_SESSION_SECRET,
+          fund: convexMachineFunder(siteUrl, env.GATEWAY_INTERNAL_SECRET),
+        }
+      : undefined;
   const deps: WorkerDeps = {
+    machinePayments,
     keyVerifier,
     searchSource:
       siteUrl && env.GATEWAY_INTERNAL_SECRET
@@ -197,6 +252,7 @@ function buildDeps(env: Env): WorkerDeps {
 
 function pipelineOnly(deps: WorkerDeps): PipelineDeps {
   return {
+    machinePayments: deps.machinePayments,
     keyVerifier: deps.keyVerifier,
     specSource: deps.specSource,
     fetchImpl: deps.fetchImpl,

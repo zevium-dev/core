@@ -1,54 +1,54 @@
 # Machine payments (x402)
 
-> Status: planned (P0 since 2026-10-10) — direction decided 2026-10-10, nothing built · Updated: 2026-10-10
-> Code: none for x402. Current non-x402 `402` envelope: `apps/gateway/src/payment-required.ts`, call sites in `apps/gateway/src/pipeline.ts`
-> Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [api-keys](api-keys.md), [agent-surface](agent-surface.md), [mock-sandbox](mock-sandbox.md), [earnings-payouts](earnings-payouts.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: anonymous wallet expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md), [research: landscape](../research/agent-api-marketplace-landscape.md)
-
-Second payment rail for individuals and AI agents: pay with x402 instead of signing up for an API key and org wallet. Decided design: an x402 payment funds an ephemeral wallet keyed to the payer address (a wallet session); later calls draw from it at the edge, with no per-call on-chain settlement. Today only the prepaid-credit rail exists and `/gateway` returns a generic, non-x402 `402` recovery envelope.
+> Status: built behind configuration (#109); real sandbox settlement blocked by owner setup · Updated: 2026-10-10
+> Code: `apps/gateway/src/machine-payments.ts`, `machine-facilitator.ts`, `wallet-session.ts`, `wallet.ts`, `convex/machinePayments.ts`, `convex/lib/funding.ts`, `packages/shared/src/machine-payments.ts`
+> Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [agent-surface](agent-surface.md), [dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md)
 
 ## Product
 
-- **Planned machine-native payments (x402, P1)** beside prepaid credits: a future signed-payment rail may let agents pay per call with zero signup. Current product uses API keys and prepaid credits only
-- Roadmap: P1 #10 — x402 machine-native payments as second rail ([roadmap](../product/roadmap.md))
+Individuals and agents can fund a wallet without an account or API key. One $1 payment buys 10,000 credits. Calls spend those credits at the published spec price, with the existing 95% publisher / 5% platform split. There is no anonymous signup credit. Zero spendable balance blocks even free endpoints.
 
-Decided 2026-10-10 (ACCEPTED, not built — [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md)):
-
-- **Two rails.** Enterprises: API keys + org wallet + prepaid top-ups ([wallet-billing](wallet-billing.md)). Individuals/agents: keyless x402
-- **No per-call settlement.** Calls cost $0.002–$0.05; payment-rail minimums (0.01 USDC per settlement, $0.50 card) make paying each call individually unworkable. Instead an x402 payment funds a wallet tied to the payer; later calls draw from that balance
-- **Zero balance still blocks the call.** Never a surprise overage
-- **Same 95/5 split** as the key rail
-- **Product rule amendment required**: "every gateway/agent call is key-authenticated" becomes "every call is authenticated by an API key or a verified wallet session"
-- **Anonymous wallet expiry** (ACCEPTED, [decision](../decisions/2026-10-10-anonymous-wallet-expiry.md)): unused balance in anonymous (keyless) wallets expires after one year, "for now, can change later". Whether the clock starts at last top-up or last activity is open
+Each top-up expires one calendar year after funding. Spending uses the oldest unexpired top-ups first; a later top-up does not extend earlier funds. Organizations using API keys retain their existing non-expiring wallets.
 
 ## Flow
 
-### x402 machine payments (P1) — current state
-
-- Future signed-payment retry, facilitator verification, and settlement flow; no x402 payment implementation exists in the current tree
-- Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. That envelope contains no x402 payment requirements and cannot authorize or settle a payment. Keyless `/mock` has no authentication or payment failure path; missing, unsafe, or unreadable projects/specs/routes return generic `404` responses
-
-### Target machine flow (decided, not built)
-
-- Agent calls a gateway URL without a key or with an empty wallet session → `402` carrying a payable offer
-- Agent pays via x402 → payment funds an ephemeral wallet keyed to its payer address
-- Subsequent calls authenticated by that verified wallet session draw from the wallet at the edge; zero balance → `402` again
-- Recommended rail order (research): Stripe-hosted x402 + MPP as a top-up rail first
+1. Call `/gateway/:publisher/:project/*` without credentials. When configured, the 402 includes a $1 x402 offer and existing create-key, top-up, and docs actions.
+2. Retry with the signed payment proof. Confirmed settlement funds the payer's wallet; the same request runs through the normal metered pipeline.
+3. Save the returned wallet session and send it as a Bearer credential on later HTTP calls or MCP `call_api` calls. The session lasts 24 hours and accesses public APIs only.
+4. Empty wallets receive another payable 402. Another payment from the same payer restores access to all remaining unexpired funds. A repeated payment cannot fund twice and does not issue another session.
 
 ## Tech
 
-- **Payment-required errors**: unauthenticated, invalid-key, and insufficient-credit responses on `/gateway` return a generic `402` with machine-readable create-key, top-up, and docs actions. This is prepaid-credit recovery metadata, not x402: no payment requirements, signed-payment verification, facilitator, or settlement exists in this tree. `/mock` is keyless and free; project, spec, and route failures return generic `404` responses (copy; canonical home [gateway](gateway.md))
-- **Later (explicitly deferred)** — x402 rail: entirely deferred to P1 per [roadmap](../product/roadmap.md). Any future implementation needs signed-payment retry, facilitator verification, settlement/replay controls, tests, data inventory, and approved operating evidence; generic current `402` action envelopes are not an x402 stub
+- x402 V2 headers: `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, `PAYMENT-RESPONSE`; the credential is returned in `X-Zevium-Wallet-Session`. Requirements advertise Base USDC, `exact`, 1,000,000 atomic units ($1). The `zevium-wallet` extension explains the top-up and credential contract. The offer is funding, not an alternate endpoint price.
+- Stripe's current x402 docs use an **external facilitator** for `/verify` and `/settle`, a **Stripe-owned deposit address**, then a Stripe `transaction_verification` PaymentIntent. The adapter requires a succeeded $1 USD PaymentIntent before crediting Convex. Stripe remains the funds/off-ramp provider; Connect earnings/payout processing stays on the existing ledger path. MPP is not a second wire protocol in this implementation.
+- `MachineFacilitator` isolates that integration. The default adapter uses a configured private V2 facilitator proxy (CDP authentication stays at the proxy), validates the server-owned requirements, verifies payer identity, checks settlement network/transaction, and records Stripe with a transaction-derived idempotency key. No chain SDK enters the gateway bundle.
+- A proof-scoped Durable Object serializes payment attempts and persists the settlement receipt before recording Stripe. Retries after Stripe failure reuse that receipt. Convex deduplicates both Stripe payment ID and `(network, transaction)`. Duplicate funding returns 409; projection retry can repair a missing edge grant without issuing a new session or adding funds twice.
+- Accounting owner: `organizations.walletKind = anonymous`, with namespaced `clerkOrgId = x402:<network>:<lowercase payer>`. This is an internal accounting container, not a Clerk organization: no members, public handle, customer creation, or signup grant. Reusing the existing org foreign keys preserves settlement, funding allocation, publisher earnings and Connect behavior.
+- Each payment creates a `machine_payment` funding lot with `expiresAt`. These lots never compact together. Expired unused lots remain in the audit ledger; the raw ledger balance includes that inventory, while the edge's **spendable** balance excludes it. This avoids recognizing accounting breakage prematurely or discarding valid late usage. No expiry grant or signup credit can extend a lot.
+- Edge reservations record exact lot slices and admission time, persisted with holds and settlements. Convex validates wallet ownership, admission before expiry, remaining lot inventory and amount totals before committing the standard ledger entry and earnings. Out-of-order delivery cannot switch funding sources. A reservation admitted before expiry may complete afterward. Refunded/expired holds do not revive expired funds. At most 24 lots fund one call, matching the existing transaction budget; larger fragmentation fails closed.
+- Session: HMAC-SHA256, versioned `zev_ws_` credential, payer/network subject, gateway-origin audience, `gateway:public` scope, issuance and expiry timestamps. Local verification only. Anonymous key controls and grants never fetch Convex/Clerk on admission, including a cold DO. Paid usage still flushes asynchronously. Payment proofs and session headers are stripped before upstream forwarding; CORS exposes payment/session response headers.
+- `POST /machine-fund` is gateway-secret protected and only accepts verified payment facts. It calls an internal mutation. It is not a public client-funded credit mutation.
+- Tests: `apps/gateway/test/machine-payments.test.ts` and `convex/machinePayments.test.ts` cover the offer/pay/session/empty/replay path, no admission-time control-plane calls, session tampering/audience/expiry, lot admission/expiry, payment HTTP contract, source attribution, and 95/5 earnings.
 
-### Decided design (2026-10-10, not built)
+### Owner setup and sandbox evidence
 
-From [dual-rail decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md):
+The rail is disabled unless all optional gateway bindings are present: `X402_DEPOSIT_ADDRESS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_TOKEN`, `X402_STRIPE_SECRET_KEY`, `WALLET_SESSION_SECRET`. The usual Convex URL and gateway shared secret are also required.
 
-- No per-call on-chain settlement: Stripe minimum 0.01 USDC per settlement, $0.50 card minimum; Zevium calls are $0.002–$0.05
-- x402 payment funds an ephemeral wallet keyed to the payer address (wallet session); later calls draw from it at the edge (wallet DO); zero balance still blocks; same 95/5
-- Authentication rule becomes "API key or verified wallet session"
-- Rail order recommended by research: Stripe-hosted x402 + MPP as top-up rail first
+1. Replace the expired configured Stripe test key with a test restricted key permitted to create deposit addresses and transaction-verification PaymentIntents. Request machine/stablecoin access. Provision the Stripe-owned Base deposit address outside the request path; never use a Zevium custody address.
+2. Provide a private V2 facilitator proxy with appropriate CDP credentials and verify its `/verify` and `/settle` contracts against the adapter tests. Confirm a Stripe-supported sandbox network/transaction flow with Stripe before sending any real funds; this adapter advertises Base, not Tempo or Base Sepolia.
+3. Supply the bindings as gateway secrets and deploy Convex schema/functions before gateway. Use an independent random signing secret of at least 32 characters.
+4. Complete a **real sandbox** offer → pay → session → calls → exhaustion journey, verify the Stripe PaymentIntent and Convex lot/earnings, then replay the proof and verify no second grant. This has not been completed. Test-double contract coverage is not a real Stripe settlement.
+5. If choosing MPP instead, first create a sandbox business profile and implement a payer-address-bearing adapter; an SPT alone is not a wallet address. Do not advertise MPP support until that wire protocol is implemented and tested.
 
-### Research facts (research 2026-10-10, not built)
+Observed 2026-10-10: the configured test account initially accepted Base deposit-address creation (HTTP 200); MPP business-profile lookup returned 404 `not_found`. A later test-only transaction-verification probe returned 401 `api_key_expired`. No live keys or live money were used. No full sandbox journey is claimed.
+
+### Operational limits
+
+- Refund/expiry breakage policy remains an owner launch decision. Anonymous lots are classified non-refundable in the current automatic allocation path; no automatic machine-payment refund/reversal projection is advertised.
+- A lost successful HTTP response also loses its bearer session. Replaying the payment remains refused; a fresh top-up from the same payer can access existing unexpired funds. Wallet-signature session recovery is not built.
+- A crash between external on-chain settlement and durable receipt persistence requires facilitator transaction recovery/manual reconciliation. Never tell an operator to pay a second time to repair that gap.
+
+### Research facts (historical research, 2026-10-10)
 
 Source: [landscape](../research/agent-api-marketplace-landscape.md), raw notes [agent_payment_rails.md](../research/agent-api-marketplace-landscape/agent_payment_rails.md). Secondary-source figures are labeled.
 
@@ -67,15 +67,11 @@ Source: [landscape](../research/agent-api-marketplace-landscape.md), raw notes [
 
 ## Decisions
 
-- 2026-10-10 — ACCEPTED: two rails (enterprise keys + org wallet + prepaid top-ups; individual/agent keyless x402). x402 funds an ephemeral wallet keyed to payer address; no per-call on-chain settlement; zero balance blocks; 95/5; auth rule amended to "API key or verified wallet session"; Stripe-hosted x402 + MPP top-up rail first. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
-- 2026-10-10 — ACCEPTED: unused anonymous-wallet balance expires after one year (for now, can change later). [decision](../decisions/2026-10-10-anonymous-wallet-expiry.md)
-- 2026-10-10 — ACCEPTED: x402 keyless rail promoted P1 → P0. [decision](../decisions/2026-10-10-p0-agent-bet.md)
-- 2026-10-10 — ACCEPTED: anonymous balance expires per top-up, one year after each top-up (funding-lot expiry). [decision](../decisions/2026-10-10-anonymous-wallet-expiry.md)
+- 2026-10-10 — BUILT behind configuration: payer-bound wallet sessions, zero-balance gate, 95/5 split, $1 top-up default, anonymous accounting organizations. [Dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md).
+- 2026-10-10 — BUILT: per-top-up one-year expiry, oldest-first admission. [Expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md).
+- 2026-10-10 — P0 priority. [Agent bet](../decisions/2026-10-10-p0-agent-bet.md).
 
 ## Open questions
 
-- Product rule amended in AGENTS.md on 2026-10-10 ("API key, or — planned — a verified x402 wallet session"). Wallet-session verification itself is unbuilt
-- PRODUCT says "there is no separate personal-wallet model"; ephemeral payer-address wallets are a new wallet kind. Decide ledger shape (ephemeral org vs new wallet type) and identity mapping
-- Top-up amount semantics for the 402 offer (fixed pack vs call price + buffer) undecided
-- Compliance for anonymous payers (sanctions screening, refunds of expired/unused balance) not analyzed
-- Stale code comment: `apps/gateway/src/payment-required.ts` says the envelope serves "/gateway and /mock"; only `pipeline.ts` (`/gateway`) calls it, matching TECH (`/mock` returns `404`s). Code behavior wins; comment is stale
+- Complete owner setup and the real sandbox settlement evidence before enabling production.
+- Accounting breakage, anonymous refunds, sanctions screening and session recovery policy before launch.

@@ -23,6 +23,7 @@ export default defineSchema({
   // Mirror of Clerk orgs (Clerk is auth truth; app data keys off clerkOrgId)
   organizations: defineTable({
     clerkOrgId: v.string(),
+    walletKind: v.optional(v.literal("anonymous")),
     name: v.string(),
     /** Clerk identity mirror; never emitted into public routing contracts. */
     slug: v.string(),
@@ -386,6 +387,18 @@ export default defineSchema({
     .index("by_project_published", ["projectId", "publishedAt"]),
 
   // One wallet per org; balance is materialized from ledger entries
+  machinePayments: defineTable({
+    paymentId: v.string(),
+    transaction: v.string(),
+    network: v.string(),
+    payer: v.string(),
+    walletId: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_payment", ["paymentId"])
+    .index("by_transaction", ["network", "transaction"]),
+
   wallets: defineTable({
     organizationId: v.id("organizations"),
     balance: v.number(),
@@ -431,12 +444,14 @@ export default defineSchema({
     organizationId: v.id("organizations"),
     sourceKind: v.union(
       v.literal("stripe_payment"),
+      v.literal("machine_payment"),
       v.literal("promotion"),
       v.literal("admin_adjustment"),
       v.literal("restoration"),
       v.literal("compaction"),
     ),
     sourceRef: v.string(),
+    expiresAt: v.optional(v.number()),
     paymentId: v.optional(v.id("payments")),
     refundable: v.boolean(),
     grantedCredits: v.number(),

@@ -12,6 +12,9 @@ const HOP_BY_HOP: Record<string, true> = {
   "transfer-encoding": true,
   upgrade: true,
   // Request auth must not leak to upstream; gateway authenticates itself later.
+  "payment-signature": true,
+  "payment-required": true,
+  "payment-response": true,
   authorization: true,
   "x-api-key": true,
   // Cloudflare / intermediate noise

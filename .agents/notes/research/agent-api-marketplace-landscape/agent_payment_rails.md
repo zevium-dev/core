@@ -219,3 +219,9 @@ Rails now come with discovery. Coinbase's x402 Bazaar auto-indexes endpoints tha
 
 - Exact Bazaar listing mechanics (the "Get discovered" page was not fetched), whether non-CDP facilitators or aggregators can list many endpoints, and whether listing under one marketplace `payTo` is allowed.
 - Stripe Directory size and traffic are unknown.
+
+## Implementation check for #109 (2026-10-10)
+
+Re-read the official [Stripe x402 guide](https://docs.stripe.com/payments/machine/x402) and [MPP guide](https://docs.stripe.com/payments/machine/mpp) during implementation. The x402 guide separates the external CDP facilitator from Stripe: `/verify` and `/settle` send Base USDC to a Stripe-created deposit address; afterward a `transaction_verification` PaymentIntent records the transaction using its hash as the idempotency key (`2026-05-27.preview`). “Stripe-hosted x402” in the earlier recommendation describes where funds land, not a Stripe-hosted `/verify` endpoint. MPP uses a Stripe business profile and a separate protocol/SDK; it must not be advertised merely because x402 is implemented.
+
+Test account probes: Base deposit address creation initially succeeded; business-profile lookup returned `not_found`; the later test-only transaction-verification probe returned `api_key_expired`. No live-money test. Owner activation and a real sandbox journey remain required; [machine-payments](../../features/machine-payments.md) owns those steps.
