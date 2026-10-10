@@ -3,7 +3,8 @@ import { FixtureCatalogueSource } from "../../src/catalogue-source";
 import { FixtureKeyVerifier } from "../../src/key-verifier";
 import { FixtureSpecSource } from "../../src/spec-source";
 
-export { WalletDO } from "../../src/index";
+// Keep fixture exports aligned with every Durable Object in the live config.
+export * from "../../src/index";
 
 const specs = new FixtureSpecSource();
 specs.set("test-publisher", "test-api", {

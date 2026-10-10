@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "test": "vitest run --allowOnly=false",
-    "test:dev-origin": "node --test scripts/discovery-dev-origin.smoke.mjs",
+    "test:dev-origin": "node --test --test-timeout=60000 scripts/discovery-dev-origin.smoke.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
