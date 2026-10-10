@@ -29,3 +29,5 @@
 ## Verification
 
 `pnpm format:check`, `pnpm lint:repo`, `pnpm quality:static` (incl. gitleaks full history + current tree), `pnpm test` all green after deletion.
+
+- 2026-10-10 — #365/#366: removed meta-checkers, tooling self-tests, unused payment drill/proof/evidence machinery, four off-stack skills, and duplicate CI setup/builds. Retained real browser journeys, runtime security checks, and gitleaks history/range/tree scans. CI is one job; Convex secrets precede production function deploy, previews receive credential/HMAC secrets, retries retain lane session isolation. Web publisher share derives from shared `PLATFORM_CUT`; Convex accounting math is unchanged. Workspace TypeScript versions align with root.

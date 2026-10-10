@@ -6,7 +6,6 @@ set -euo pipefail
 
 E2E_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E_BASE_URL="${E2E_BASE_URL:-http://localhost:3000}"
-E2E_ARTIFACTS="${E2E_ARTIFACTS:-$E2E_ROOT/artifacts}"
 E2E_EMAIL="${E2E_EMAIL:-}"
 E2E_PASSWORD="${E2E_PASSWORD:-}"
 E2E_OTP="${E2E_OTP:-}"
@@ -20,9 +19,7 @@ E2E_REDUCED_MOTION="${E2E_REDUCED_MOTION:-no-preference}"
 E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}"
 E2E_OWNS_RUNTIME="${E2E_OWNS_RUNTIME:-0}"
 
-# Resolve the agent-browser CLI without mutating PATH (workflow supply-chain
-# audit forbids shell PATH overrides): PATH first so tests can stub the
-# binary, then the workspace install for bare-shell CI steps.
+# Resolve the installed CLI for standalone shell journeys.
 E2E_AGENT_BROWSER="$(command -v agent-browser || true)"
 if [[ -z "$E2E_AGENT_BROWSER" && -x "$E2E_ROOT/../node_modules/.bin/agent-browser" ]]; then
   E2E_AGENT_BROWSER="$E2E_ROOT/../node_modules/.bin/agent-browser"
@@ -33,9 +30,7 @@ if [[ -z "${E2E_RUNTIME_DIR:-}" ]]; then
   E2E_RUNTIME_DIR="$(mktemp -d /tmp/zevium-e2e-runtime.XXXXXX)"
   E2E_OWNS_RUNTIME=1
 fi
-E2E_RAW_DIR="${E2E_RAW_DIR:-$E2E_RUNTIME_DIR/raw}"
 E2E_FIXTURES_DIR="${E2E_FIXTURES_DIR:-$E2E_RUNTIME_DIR/fixtures}"
-E2E_MANIFEST_STATE="${E2E_MANIFEST_STATE:-$E2E_RUNTIME_DIR/manifest-state.json}"
 E2E_EXPECTED_COMMIT="${E2E_EXPECTED_COMMIT:-}"
 
 case "$E2E_COLOR_SCHEME" in
@@ -49,30 +44,11 @@ esac
 [[ "$E2E_VIEWPORT_WIDTH" =~ ^[0-9]+$ ]] || { printf '[e2e] invalid viewport width.\n' >&2; exit 1; }
 [[ "$E2E_VIEWPORT_HEIGHT" =~ ^[0-9]+$ ]] || { printf '[e2e] invalid viewport height.\n' >&2; exit 1; }
 
-assert_no_symlink_path() {
-  local target="$1" current="/" part
-  local absolute
-  local -a parts=()
-  absolute="$(realpath -ms "$target")"
-  IFS='/' read -r -a parts <<<"${absolute#/}"
-  for part in "${parts[@]}"; do
-    [[ -n "$part" ]] || continue
-    current="${current%/}/$part"
-    if [[ -L "$current" ]]; then
-      printf '[e2e] unsafe symlink path rejected: %s\n' "$target" >&2
-      exit 1
-    fi
-  done
-}
-
-assert_no_symlink_path "$E2E_ARTIFACTS"
-assert_no_symlink_path "$E2E_RUNTIME_DIR"
-
 # Isolate browser session for the whole suite/script run.
 export AGENT_BROWSER_SESSION="$E2E_SESSION"
 
-mkdir -p "$E2E_ARTIFACTS" "$E2E_RAW_DIR" "$E2E_FIXTURES_DIR"
-chmod 700 "$E2E_ARTIFACTS" "$E2E_RUNTIME_DIR" "$E2E_RAW_DIR" "$E2E_FIXTURES_DIR"
+mkdir -p "$E2E_FIXTURES_DIR"
+chmod 700 "$E2E_RUNTIME_DIR" "$E2E_FIXTURES_DIR"
 
 ab() {
   # agent-browser can hang on a wedged native host; bound every call.
@@ -105,92 +81,16 @@ require_auth_env() {
   fi
 }
 
-secure_unlink() {
-  local path="$1"
-  [[ -f "$path" && ! -L "$path" ]] || return 0
-  if command -v shred >/dev/null 2>&1; then
-    shred -u -- "$path"
-  else
-    unlink -- "$path"
-  fi
-}
-
 cleanup_e2e_runtime() {
   [[ "$E2E_OWNS_RUNTIME" == "1" ]] || return 0
   case "$E2E_RUNTIME_DIR" in
-    /tmp/zevium-e2e-runtime.*)
-      if command -v shred >/dev/null 2>&1; then
-        find "$E2E_RUNTIME_DIR" -type f -exec shred -u -- {} + 2>/dev/null || true
-      else
-        find "$E2E_RUNTIME_DIR" -type f -delete 2>/dev/null || true
-      fi
-      find "$E2E_RUNTIME_DIR" -depth -type d -empty -delete 2>/dev/null || true
-      ;;
-    *)
-      printf '[e2e] refusing cleanup outside guarded runtime path: %s\n' "$E2E_RUNTIME_DIR" >&2
-      ;;
+    /tmp/zevium-e2e-runtime.*) rm -rf -- "$E2E_RUNTIME_DIR" ;;
+    *) printf '[e2e] refusing cleanup outside runtime path: %s\n' "$E2E_RUNTIME_DIR" >&2 ;;
   esac
 }
 
-sanitize_artifact() {
-  local raw="$1" output="$2" mode="${3:-text}"
-  if node "$E2E_ROOT/artifact-sanitizer.mjs" "$raw" "$output" "$mode"; then
-    secure_unlink "$raw"
-    return 0
-  fi
-  secure_unlink "$raw"
-  return 1
-}
-
-redact_dom_for_artifact() {
-  ab eval "
-(() => {
-  try { sessionStorage.removeItem('zevium:playground-api-key'); } catch (_) {}
-  try { localStorage.removeItem('zevium:playground-api-key'); } catch (_) {}
-  const sensitive = /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}|(?:sk_|rk_|whsec_|zv_|ak_|cs_|pi_|re_|user_|org_|sess_)[A-Za-z0-9_-]{6,}|Bearer\\s+[A-Za-z0-9._~+/-]{8,}|(?:\\d[ -]*?){13,19})/gi;
-  for (const input of document.querySelectorAll('input, textarea')) {
-    input.value = '[redacted]';
-    input.setAttribute('value', '[redacted]');
-  }
-  for (const editable of document.querySelectorAll('[contenteditable]')) editable.textContent = '[redacted]';
-  for (const image of document.querySelectorAll('img')) image.style.visibility = 'hidden';
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  while (walker.nextNode()) walker.currentNode.nodeValue = (walker.currentNode.nodeValue || '').replace(sensitive, '[redacted]');
-  return true;
-})()
-" >/dev/null 2>&1
-}
-
 fail() {
-  local msg="${1:-assertion failed}"
-  local ts slug raw_shot raw_url raw_snapshot
-  ts="$(date +%Y%m%dT%H%M%S)-$(date +%N)"
-  slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
-  raw_shot="$E2E_RAW_DIR/${ts}-${slug}.raw.png"
-  raw_url="$E2E_RAW_DIR/${ts}-${slug}.url.raw.txt"
-  raw_snapshot="$E2E_RAW_DIR/${ts}-${slug}.snapshot.raw.txt"
-  if redact_dom_for_artifact; then
-    # Pixel evidence has no trustworthy generic sanitizer. Keep any capture in
-    # private runtime storage and destroy it; publish only verified text.
-    if ab screenshot "$raw_shot" >/dev/null 2>&1; then
-      secure_unlink "$raw_shot"
-    fi
-    if ab get url >"$raw_url" 2>/dev/null; then
-      sanitize_artifact "$raw_url" "$E2E_ARTIFACTS/${ts}-${slug}.url.txt" \
-        || secure_unlink "$raw_url"
-    fi
-    if ab snapshot >"$raw_snapshot" 2>/dev/null; then
-      sanitize_artifact "$raw_snapshot" "$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" \
-        || secure_unlink "$raw_snapshot"
-    fi
-  else
-    secure_unlink "$raw_shot"
-    secure_unlink "$raw_url"
-    secure_unlink "$raw_snapshot"
-    printf '[e2e] evidence capture aborted: DOM redaction failed\n' >&2
-  fi
-  printf '[e2e] FAIL: %s\n' "$msg" >&2
-  printf '[e2e] verified text evidence directory: %s\n' "$E2E_ARTIFACTS" >&2
+  printf '[e2e] FAIL at %s: %s\n' "$E2E_STEP" "${1:-assertion failed}" >&2
   exit 1
 }
 
@@ -373,43 +273,6 @@ ensure_org_active() {
   [[ "$active" == *"true"* && "$diag" == *"org:"* ]] || fail "could not activate fixture organization (last=$result role=$diag)"
 }
 
-record_browser_contract() {
-  local lane="$1" context="$2" auth_mode="$3" raw
-  raw="$(ab eval "
-JSON.stringify({
-  viewport: {
-    width: window.innerWidth,
-    height: window.innerHeight,
-    devicePixelRatio: window.devicePixelRatio
-  },
-  colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-  auth: (() => {
-    const clerk = window.Clerk;
-    const organizationId = clerk?.organization?.id ?? null;
-    const membership = clerk?.user?.organizationMemberships?.find?.(
-      (entry) => entry.organization?.id === organizationId,
-    );
-    return {
-      userId: clerk?.user?.id ?? null,
-      organizationId,
-      role: clerk?.organization?.membership?.role ?? membership?.role ?? null
-    };
-  })()
-})
-" 2>/dev/null)" || fail "could not observe browser evidence contract"
-  printf '%s' "$raw" | node "$E2E_ROOT/evidence-manifest.mjs" \
-    contract "$E2E_MANIFEST_STATE" \
-    "--lane=$lane" \
-    "--context=$context" \
-    "--auth-mode=$auth_mode" \
-    "--width=$E2E_VIEWPORT_WIDTH" \
-    "--height=$E2E_VIEWPORT_HEIGHT" \
-    "--color=$E2E_COLOR_SCHEME" \
-    "--motion=$E2E_REDUCED_MOTION" \
-    || fail "browser evidence contract did not match declared context"
-}
-
 verify_target_commit() {
   local lane="$1" html observed
   [[ "$E2E_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
@@ -428,28 +291,6 @@ process.stdin.on("end", () => {
 ')"
   [[ "$observed" == "$E2E_EXPECTED_COMMIT" ]] \
     || fail "target build mismatch for $lane (expected=$E2E_EXPECTED_COMMIT observed=${observed:-missing})"
-  node "$E2E_ROOT/evidence-manifest.mjs" target "$E2E_MANIFEST_STATE" \
-    "--lane=$lane" \
-    "--base-url=$E2E_BASE_URL" \
-    "--expected=$E2E_EXPECTED_COMMIT" \
-    "--observed=$observed" \
-    || fail "could not record target build identity"
-}
-
-record_manifest_result() {
-  local lane="$1" status="$2" duration="$3" proof="$4"
-  node "$E2E_ROOT/evidence-manifest.mjs" result "$E2E_MANIFEST_STATE" \
-    "--lane=$lane" "--status=$status" "--duration=$duration" "--proof=$proof"
-}
-
-build_evidence_manifest() {
-  local output="$1"
-  node "$E2E_ROOT/evidence-manifest.mjs" build "$E2E_MANIFEST_STATE" \
-    "--output=$output" \
-    "--repo=$(cd "$E2E_ROOT/.." && pwd)" \
-    "--base-url=$E2E_BASE_URL" \
-    "--expected-commit=$E2E_EXPECTED_COMMIT" \
-    "--run-id=$E2E_RUN_ID"
 }
 
 # Scroll target into view then click. agent-browser click is silent no-op

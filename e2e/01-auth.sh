@@ -33,7 +33,6 @@ ab wait 1500 >/dev/null
 url="$(ab get url)"
 assert_contains "$url" "sign-in" "/app must bounce anonymous users to sign-in (url=$url)"
 assert_anonymous_identity
-record_browser_contract "auth" "protected-route-anonymous" "anonymous"
 
 step "sign_in with seed credentials"
 use_browser_session "${E2E_SESSION_PREFIX:-zevium-e2e}-auth-signed-in"
@@ -49,6 +48,5 @@ assert_not_contains "$snap" "No active organization" "seed organization must be 
 assert_contains "$snap" "Projects" "projects heading missing"
 assert_contains "$snap" "New project" "admin project action missing"
 ensure_org_active
-record_browser_contract "auth" "projects-signed-in" "signed-in"
 
 log "01-auth PASS"

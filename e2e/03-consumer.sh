@@ -41,7 +41,6 @@ snap="$(page_text)"
 assert_contains "$snap" "Catalogue" "catalogue heading missing"
 assert_contains "$snap" "Compare API prices and try free mocks before making a live call." "catalogue blurb missing"
 assert_anonymous_identity
-record_browser_contract "consumer" "anonymous-catalogue" "anonymous"
 
 assert_contains "$snap" "$PROJECT_NAME" "catalogue missing published project '$PROJECT_NAME'"
 log "found project listing: $PROJECT_NAME"
@@ -147,7 +146,6 @@ if [[ "$E2E_REQUIRE_PAID_CONTRACT" == "1" ]]; then
     ab wait 500 >/dev/null 2>&1 || true
   done
   [[ -n "$attribution_seen" ]] || fail "paid call never appeared in activity attribution"
-  record_browser_contract "paid-consumer" "metered-call-attribution" "signed-in"
 fi
 
 log "03-consumer PASS paid_contract=$E2E_REQUIRE_PAID_CONTRACT"

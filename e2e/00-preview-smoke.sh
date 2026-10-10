@@ -30,7 +30,6 @@ assert_contains "$snap" "Catalogue" "catalogue heading missing"
 assert_contains "$snap" "Public APIs with per-call credits" "catalogue copy missing"
 assert_not_contains "$snap" "Something went wrong" "catalogue query failed"
 assert_anonymous_identity
-record_browser_contract "preview" "preview-catalogue" "anonymous"
 
 step "preview gateway health"
 health="$(curl -fsS "${GATEWAY_URL%/}/health")"

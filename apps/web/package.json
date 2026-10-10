@@ -6,12 +6,11 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "build": "node ../../scripts/quality/tracked-tree.mjs -- node scripts/build.mjs",
+    "build": "node scripts/build.mjs",
     "cf-typegen": "wrangler types",
     "deploy": "pnpm build && wrangler deploy",
     "dev": "vite dev --port 3000",
     "generate-routes": "tsr generate",
-    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src scripts/build-env.mjs scripts/build-env.test.mjs scripts/build.mjs scripts/test-csrf-runtime.mjs vite.config.ts vitest.config.ts",
     "preview": "vite preview",
     "test": "vitest run --allowOnly=false",
     "test:csrf-runtime": "node scripts/test-csrf-runtime.mjs",
@@ -66,7 +65,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.1.1",
-    "typescript": "^6.0.2",
+    "typescript": "^5.9.0",
     "vite": "^8.3.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.146.0"

@@ -1,5 +1,4 @@
 /node_modules/
-/apps/deploy-broker/node_modules/
 /apps/gateway/node_modules/
 /apps/web/node_modules/
 /convex/node_modules/
@@ -44,15 +43,14 @@
 
 # convex
 /.turbo/
-/apps/deploy-broker/.turbo/
 /apps/gateway/.turbo/
 /apps/web/.turbo/
 /packages/shared/.turbo/
 
 # browser e2e
 /e2e/artifacts/
-/.project/e2e-key.env
 # Local Cloudflare Worker secrets, including web server bindings.
 /.dev.vars
 /apps/gateway/.dev.vars
 /apps/web/.dev.vars
+/convex/.turbo/
