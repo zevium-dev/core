@@ -1,6 +1,6 @@
 # Machine payments (x402)
 
-> Status: built behind configuration (#109); real sandbox settlement blocked by owner setup · Updated: 2026-10-10
+> Status: built behind configuration (#109); #396/#417 recovery parity fixed; real sandbox settlement blocked by owner setup · Updated: 2026-10-10
 > Code: `apps/gateway/src/machine-payments.ts`, `machine-facilitator.ts`, `wallet-session.ts`, `wallet.ts`, `convex/machinePayments.ts`, `convex/lib/funding.ts`, `packages/shared/src/machine-payments.ts`
 > Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [agent-surface](agent-surface.md), [dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md)
 
@@ -18,6 +18,8 @@ Each top-up expires one calendar year after funding. Spending uses the oldest un
 4. Empty wallets receive another payable 402. Another payment from the same payer restores access to all remaining unexpired funds. A repeated payment cannot fund twice and does not issue another session.
 
 ## Tech
+
+- **Recovery parity (#396, #417)**: x402 offers retain the shared safe 402 envelope on direct HTTP and MCP, with recovery links derived from `APP_ORIGIN`. Invalid payment proofs use that same configured origin and safe recovery text. The direct/MCP origin matrix lives in `apps/gateway/test/payment-recovery.test.ts`; anonymous wallet admission still never fetches Convex. See [agent surface](agent-surface.md#tech).
 
 - x402 sessions share the SQLite request bucket by stable `x402:<network>:<lowercase payer>` identity (60 burst, one token/second); renewing a session or funding again does not reset it. Exhaustion returns `429` with `Retry-After`, without Clerk/Convex admission calls. Signed admission proofs bind to that wallet identity and immutable route; delayed usage can settle after deprecation while preserving exact funding lots and token charges. Gateway and Convex machine-payment tests cover payer isolation, session renewal, eviction, proof identity rejection and delayed settlement.
 

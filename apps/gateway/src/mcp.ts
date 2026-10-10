@@ -232,6 +232,10 @@ async function paymentToolError(response: Response) {
       reason: envelope.reason,
       message: envelope.detail,
       detail: envelope.detail,
+      recovery: envelope.recovery,
+      retryAfterSeconds: response.headers.has("Retry-After")
+        ? Number(response.headers.get("Retry-After"))
+        : undefined,
       actions: envelope.actions,
       available: envelope.available,
       requiredCredits: envelope.cost,
@@ -437,9 +441,14 @@ async function handleCallApi(
   }
   if (key && !key.startsWith("ak_") && !key.startsWith("zev_")) {
     return paymentToolError(
-      paymentRequiredResponse(crypto.randomUUID(), "Invalid API key", {
-        reason: "invalid_api_key",
-      }),
+      paymentRequiredResponse(
+        crypto.randomUUID(),
+        "Invalid API key",
+        {
+          reason: "invalid_api_key",
+        },
+        deps.pipelineEnv.APP_ORIGIN,
+      ),
     );
   }
 

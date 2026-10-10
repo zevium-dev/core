@@ -1,7 +1,7 @@
 # API keys
 
-> Status: partial (UI issuance verified in round-two dogfood; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-10
-> Code: `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
+> Status: partial (#396 cap recovery fixed; UI issuance verified in round-two dogfood; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-10
+> Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
 > Related: [gateway](gateway.md), [wallet-billing](wallet-billing.md), [accounts-orgs](accounts-orgs.md), [machine-payments](machine-payments.md), [registry-v2](../architecture/registry-v2.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 A consumer's API key is the credential every metered call carries. Keys belong to a member, draw from the org wallet, and carry per-key spend limits; rotation keeps the old key alive for a grace period so integrations never break.
@@ -24,6 +24,8 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 - Programmatic key-management API for SaaS consumers (P1)
 
 ## Tech
+
+- **Monthly-cap recovery (#396)**: gateway and MCP now share the safe cap explanation and explicit admin-increase/next-UTC-month instructions, plus `actions.manageKey` at the configured web origin (#417). Wallet top-up alone does not raise a key cap; cap envelopes omit that action. Existing `402 key_cap_exceeded` remains compatible. Contract tests: `apps/gateway/test/payment-recovery.test.ts`.
 
 **Round-two dogfood — 2026-10-10:** normal UI issuance and copy-once reveal worked in separate publisher/consumer orgs; publisher revocation subsequently returned `invalid_api_key` at the gateway. Two rotations initially returned `403 key_untracked` and recovered within the UI’s documented one-minute control-refresh window. #419 was closed as not planned after confirming that notice. Grace-period predecessors and inherited monthly cap worked. No two-identity ownership/RBAC claim. [Evidence](../findings/dogfood-2026-10-10-round-2.md).
 

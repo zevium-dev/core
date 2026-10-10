@@ -1,7 +1,7 @@
 # Gateway (metered call path)
 
-> Status: built; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0) · Updated: 2026-10-10
-> Code: `apps/gateway/src/index.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/admit.ts`, `packages/shared/src/admission-proof.ts`, `convex/specs.ts`, `convex/wallets.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/finalize.ts`, `apps/gateway/src/cache.ts`, `apps/gateway/src/convex-http.ts`, `apps/gateway/src/headers.ts`, `apps/gateway/src/idempotency.ts`, `apps/gateway/src/cors.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/errors.ts`, `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/spec-source.ts`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/usage.ts`
+> Status: built; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0) · Updated: 2026-10-10
+> Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/gateway/src/index.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/admit.ts`, `packages/shared/src/admission-proof.ts`, `convex/specs.ts`, `convex/wallets.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/finalize.ts`, `apps/gateway/src/cache.ts`, `apps/gateway/src/convex-http.ts`, `apps/gateway/src/headers.ts`, `apps/gateway/src/idempotency.ts`, `apps/gateway/src/cors.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/errors.ts`, `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/spec-source.ts`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/usage.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 The gateway is the single metered call path: one URL per published API, authenticated by an API key or wallet session, credit-gated against the caller's wallet, forwarding to the publisher's upstream and streaming the response back. Human code and agent tooling both go through it, so there is no unmetered side door. It is the product's hot path and the only data-plane component.
@@ -38,6 +38,8 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. When the machine rail is configured, the envelope also carries x402 V2 top-up requirements. Verified payment returns a payer-bound session. (FLOW 3.4; owned by [machine-payments](machine-payments.md))
 
 ## Tech
+
+- **Payment recovery (#396, #417)**: all admission 402 branches use `payment-required.ts`, including monthly caps. Direct HTTP and MCP retain the same safe explanation, reason-specific recovery, and configured web actions. Environment wiring and response contract: [agent surface](agent-surface.md#tech). Empty-wallet recovery (#421): [wallet billing](wallet-billing.md#credit-gate-design-the-hot-path). Regression table: `apps/gateway/test/payment-recovery.test.ts`.
 
 - x402 wallet sessions use the same request gate and admission proofs, scoped to the stable payer wallet; see [machine-payments](machine-payments.md).
 

@@ -65,6 +65,7 @@ export async function payForSession(
       crypto.randomUUID(),
       "Invalid payment proof",
       { reason: "invalid_payment" },
+      env.APP_ORIGIN,
     );
   try {
     // Check issuance configuration before moving funds.
@@ -114,6 +115,7 @@ export async function payForSession(
         crypto.randomUUID(),
         "Payment proof was rejected",
         { reason: "invalid_payment" },
+        env.APP_ORIGIN,
       );
     return Response.json(
       {
