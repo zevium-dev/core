@@ -1,6 +1,6 @@
 # Wallet & billing
 
-> Status: partial (P0 #5 + P1 #8 built; P1 #12 spend controls planned; real-money journey unproven) · Updated: 2026-10-10
+> Status: partial (#363 list/presentation fixes complete) (P0 #5 + P1 #8 built; P1 #12 spend controls planned; real-money journey unproven) · Updated: 2026-10-10
 > Code: `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -52,6 +52,8 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Insufficient balance on `/gateway` returns `402` with machine-readable create-key / top-up / docs actions — see [gateway](gateway.md) and [machine-payments](machine-payments.md)
 
 ## Tech
+
+- **Realtime activity (#363)**: `usePaginatedQuery(api.usage.listForOrg)` owns all loaded rows and cursors; filter arguments reset within render, with one frozen time window per filter set. No copied page state or append-only dedupe cache. Backend page-size bounds preserve Convex end/split cursors so page boundaries can rebalance without gaps or duplicates. Typed query results replace redundant row-shape parsing; backend authorization, active capability checks, and cycle projection checks remain. An optional expected-role snapshot only narrows server visibility and resets native pagination on role changes, preventing previously loaded admin rows from surviving a downgrade. One responsive stock Table serves desktop/mobile activity. Billing/activity use locale-stable UTC and money/credit formatting from `lib/format.ts`; HTTP responses share `components/status-badge.tsx`.
 
 ### Why Stripe Checkout + Connect (Checkout / USD / ledger authority)
 

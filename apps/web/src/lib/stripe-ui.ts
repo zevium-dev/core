@@ -266,50 +266,6 @@ export function earningStatusVariant(status: EarningStatus): BadgeVariant {
   }
 }
 
-export type EarningTotals = {
-  pending: number;
-  available: number;
-  transferred: number;
-  paid: number;
-  reversed: number;
-};
-
-export function earningTotalsByStatus(
-  earnings: readonly { status: EarningStatus; netCredits: number }[],
-): EarningTotals {
-  const totals: EarningTotals = {
-    pending: 0,
-    available: 0,
-    transferred: 0,
-    paid: 0,
-    reversed: 0,
-  };
-
-  for (const earning of earnings) {
-    switch (earning.status) {
-      case "pending_risk":
-      case "allocated_to_transfer":
-      case "failed":
-        totals.pending += earning.netCredits;
-        break;
-      case "available":
-        totals.available += earning.netCredits;
-        break;
-      case "transferred":
-        totals.transferred += earning.netCredits;
-        break;
-      case "paid":
-        totals.paid += earning.netCredits;
-        break;
-      case "reversed":
-        totals.reversed += earning.netCredits;
-        break;
-    }
-  }
-
-  return totals;
-}
-
 export type MoneyMovementStatus =
   "pending" | "processing" | "succeeded" | "failed" | "reversed" | "paid";
 

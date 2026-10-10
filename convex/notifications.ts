@@ -5,6 +5,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -37,6 +38,25 @@ export type NotificationsPage = {
   unreadCountCapped: boolean;
 };
 
+async function unreadCounts(ctx: QueryCtx, org: Doc<"organizations">) {
+  const legacyUnread =
+    org.unreadNotificationCount === undefined
+      ? await ctx.db
+          .query("notifications")
+          .withIndex("by_org_read", (q) =>
+            q.eq("clerkOrgId", org.clerkOrgId).eq("readAt", undefined),
+          )
+          .take(MARK_ALL_PAGE_SIZE)
+      : null;
+
+  return {
+    unreadCount: org.unreadNotificationCount ?? legacyUnread?.length ?? 0,
+    unreadCountCapped:
+      org.unreadNotificationCountCapped === true ||
+      legacyUnread?.length === MARK_ALL_PAGE_SIZE,
+  };
+}
+
 /**
  * Paginated notifications for the caller's org, newest first.
  * Includes an exact unread count up to the UI's 99+ display threshold.
@@ -67,17 +87,8 @@ export const listForOrg = query({
         maximumBytesRead: 256 * 1024,
       });
 
-    const legacyUnread =
-      org.unreadNotificationCount === undefined
-        ? await ctx.db
-            .query("notifications")
-            .withIndex("by_org_read", (q) =>
-              q.eq("clerkOrgId", org.clerkOrgId).eq("readAt", undefined),
-            )
-            .take(MARK_ALL_PAGE_SIZE)
-        : null;
-
     return {
+      ...result,
       page: result.page.map((n) => ({
         _id: n._id,
         kind: n.kind,
@@ -91,11 +102,17 @@ export const listForOrg = query({
       })),
       isDone: result.isDone,
       continueCursor: result.continueCursor,
-      unreadCount: org.unreadNotificationCount ?? legacyUnread?.length ?? 0,
-      unreadCountCapped:
-        org.unreadNotificationCountCapped === true ||
-        legacyUnread?.length === MARK_ALL_PAGE_SIZE,
+      ...(await unreadCounts(ctx, org)),
     };
+  },
+});
+
+/** The bell count covers the whole org, independently of loaded pages. */
+export const unreadForOrg = query({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args) => {
+    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    return unreadCounts(ctx, org);
   },
 });
 

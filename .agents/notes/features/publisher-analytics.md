@@ -26,6 +26,8 @@ Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)"
 
 ## Tech
 
+- **Shared presentation (#363)**: daily and endpoint tables use stock shadcn Table; day labels use shared UTC `lib/format.ts`. Visibility mutations rely on Convex subscriptions without manual cache invalidation.
+
 ### Domain
 
 - `usageEvents` (per-call: project, endpoint, org, credits, latency, status) + rollup tables via cron (publisher analytics p95/p99 come from here)

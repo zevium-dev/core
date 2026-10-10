@@ -15,10 +15,8 @@ function latency(value: number | null): string {
 
 export function QualityBadges({
   quality,
-  compact = false,
 }: {
   quality: QualitySnapshotContract | null;
-  compact?: boolean;
 }) {
   const badges =
     quality === null
@@ -27,10 +25,14 @@ export function QualityBadges({
           "Reachability: insufficient data (0/3)",
         ]
       : [
-          quality.insufficientApiData
+          quality.insufficientApiData ||
+          typeof quality.apiSuccessRatePercent !== "number" ||
+          !Number.isFinite(quality.apiSuccessRatePercent)
             ? `API quality: insufficient data (${quality.apiSampleSize}/${quality.apiMinimumSampleSize})`
             : `API success ${quality.apiSuccessRatePercent?.toFixed(1)}% · ${latency(quality.apiLatencyP50Ms)}`,
-          quality.insufficientReachabilityData
+          quality.insufficientReachabilityData ||
+          typeof quality.reachabilityPercent !== "number" ||
+          !Number.isFinite(quality.reachabilityPercent)
             ? `Reachability: insufficient data (${quality.reachabilitySampleSize}/${quality.reachabilityMinimumSampleSize})`
             : `Reachability ${quality.reachabilityPercent?.toFixed(1)}% · ${latency(quality.reachabilityLatencyP50Ms)}`,
         ];
@@ -53,7 +55,6 @@ export function QualityBadges({
     </div>
   );
 
-  if (compact) return content;
   return (
     <Card>
       <CardHeader>

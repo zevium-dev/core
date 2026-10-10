@@ -1,3 +1,12 @@
+import { formatDate, formatMoney, formatNumber } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
@@ -53,13 +62,6 @@ type ConnectedPayout = {
 type EarningsSearch = {
   onboarding?: "refresh" | "return";
 };
-
-const EARNINGS_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
 
 export const Route = createFileRoute("/app/earnings")({
   validateSearch: (search: Record<string, unknown>): EarningsSearch => {
@@ -163,7 +165,7 @@ function EarningsContent() {
     earnings.available <= 0
       ? "Nothing to transfer"
       : !earnings.canTransfer
-        ? `${earnings.minimumPayoutCredits.toLocaleString()} credit minimum`
+        ? `${formatNumber(earnings.minimumPayoutCredits)} credit minimum`
         : "Transfer available earnings";
 
   return (
@@ -281,9 +283,7 @@ function EarningsContent() {
         </Card>
         {earnings.available > 0 && !earnings.canTransfer ? (
           <p className="text-sm text-muted-foreground">
-            {(
-              earnings.minimumPayoutCredits - earnings.available
-            ).toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+            {formatNumber(earnings.minimumPayoutCredits - earnings.available)}{" "}
             more credits needed to reach the $10 transfer minimum. Every
             fractional credit stays in your balance.
           </p>
@@ -291,22 +291,20 @@ function EarningsContent() {
         {earnings.available < 0 ? (
           <p className="text-sm text-destructive">
             Refund or dispute reversals exceed current available earnings by{" "}
-            {Math.abs(earnings.available).toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })}{" "}
-            credits. Future earnings clear this balance before another transfer.
+            {formatNumber(Math.abs(earnings.available))} credits. Future
+            earnings clear this balance before another transfer.
           </p>
         ) : null}
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.failed.toLocaleString("en-US")} credits need transfer
-            review. Check transfer history for the reason and next step.
+            {formatNumber(earnings.failed)} credits need transfer review. Check
+            transfer history for the reason and next step.
           </p>
         ) : null}
         {earnings.reversed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.reversed.toLocaleString("en-US")} credits were reversed.
-            Review ledger for affected earnings.
+            {formatNumber(earnings.reversed)} credits were reversed. Review
+            ledger for affected earnings.
           </p>
         ) : null}
       </section>
@@ -385,73 +383,73 @@ function EarningsLedgerCard({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th scope="col" className="px-2 py-2 font-medium">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="border-b text-left text-muted-foreground">
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
                     Status
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 font-medium text-right"
+                  >
                     Gross
-                  </th>
-                  <th
+                  </TableHead>
+                  <TableHead
                     scope="col"
                     className="hidden px-2 py-2 text-right font-medium sm:table-cell"
                   >
                     Fee
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 font-medium text-right"
+                  >
                     Net
-                  </th>
-                  <th
+                  </TableHead>
+                  <TableHead
                     scope="col"
                     className="hidden px-2 py-2 text-right font-medium md:table-cell"
                   >
                     Reversed
-                  </th>
-                  <th
+                  </TableHead>
+                  <TableHead
                     scope="col"
                     className="hidden px-2 py-2 font-medium md:table-cell"
                   >
                     Available
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((earning) => (
-                  <tr key={earning.id} className="border-b last:border-0">
-                    <td className="px-2 py-2.5">
+                  <TableRow key={earning.id} className="border-b last:border-0">
+                    <TableCell className="px-2 py-2.5">
                       <Badge variant={earningStatusVariant(earning.status)}>
                         {earningStatusLabel(earning.status)}
                       </Badge>
-                    </td>
-                    <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.grossCredits.toLocaleString("en-US")}
-                    </td>
-                    <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                      {earning.platformFeeCredits.toLocaleString("en-US", {
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.netCredits.toLocaleString("en-US", {
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground md:table-cell">
-                      {earning.clawedBackCredits.toLocaleString("en-US", {
-                        maximumFractionDigits: 2,
-                      })}
-                    </td>
-                    <td className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5 text-right tabular-nums">
+                      {formatNumber(earning.grossCredits)}
+                    </TableCell>
+                    <TableCell className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
+                      {formatNumber(earning.platformFeeCredits)}
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5 text-right tabular-nums">
+                      {formatNumber(earning.netCredits)}
+                    </TableCell>
+                    <TableCell className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground md:table-cell">
+                      {formatNumber(earning.clawedBackCredits)}
+                    </TableCell>
+                    <TableCell className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
                       {earning.status === "reversed"
                         ? "—"
-                        : EARNINGS_DATE_FORMATTER.format(earning.availableAt)}
-                    </td>
-                  </tr>
+                        : formatDate(earning.availableAt)}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </CardContent>
@@ -492,55 +490,61 @@ function TransferHistoryCard({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th scope="col" className="px-2 py-2 font-medium">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="border-b text-left text-muted-foreground">
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
                     Status
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 font-medium text-right"
+                  >
                     Amount
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  </TableHead>
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
                     Created
-                  </th>
-                  <th
+                  </TableHead>
+                  <TableHead
                     scope="col"
                     className="hidden px-2 py-2 font-medium md:table-cell"
                   >
                     Details
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {transfers.map((transfer) => {
                   const failure = moneyMovementFailure(
                     transfer.status,
                     transfer.failureReason,
                   );
                   return (
-                    <tr key={transfer.id} className="border-b last:border-0">
-                      <td className="px-2 py-2.5">
+                    <TableRow
+                      key={transfer.id}
+                      className="border-b last:border-0"
+                    >
+                      <TableCell className="px-2 py-2.5">
                         <Badge
                           variant={moneyMovementStatusVariant(transfer.status)}
                         >
                           {moneyMovementStatusLabel(transfer.status)}
                         </Badge>
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
                         {formatMoney(transfer.amount, transfer.currency)}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {EARNINGS_DATE_FORMATTER.format(transfer.createdAt)}
-                      </td>
-                      <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {formatDate(transfer.createdAt)}
+                      </TableCell>
+                      <TableCell className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
                         {failure ?? transfer.stripeTransferId ?? "—"}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </CardContent>
@@ -568,57 +572,63 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th scope="col" className="px-2 py-2 font-medium">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="border-b text-left text-muted-foreground">
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
                     Status
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 font-medium text-right"
+                  >
                     Amount
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  </TableHead>
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
                     Arrival
-                  </th>
-                  <th
+                  </TableHead>
+                  <TableHead
                     scope="col"
                     className="hidden px-2 py-2 font-medium sm:table-cell"
                   >
                     Details
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {payouts.map((payout) => {
                   const failure = moneyMovementFailure(
                     payout.status,
                     payout.failureCode,
                   );
                   return (
-                    <tr key={payout.id} className="border-b last:border-0">
-                      <td className="px-2 py-2.5">
+                    <TableRow
+                      key={payout.id}
+                      className="border-b last:border-0"
+                    >
+                      <TableCell className="px-2 py-2.5">
                         <Badge
                           variant={moneyMovementStatusVariant(payout.status)}
                         >
                           {moneyMovementStatusLabel(payout.status)}
                         </Badge>
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
                         {formatMoney(payout.amount, payout.currency)}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {payout.arrivalDate
-                          ? EARNINGS_DATE_FORMATTER.format(payout.arrivalDate)
+                          ? formatDate(payout.arrivalDate)
                           : "—"}
-                      </td>
-                      <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground sm:table-cell">
+                      </TableCell>
+                      <TableCell className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground sm:table-cell">
                         {failure ?? "—"}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </CardContent>
@@ -641,13 +651,6 @@ function HistoryEmpty({
       </EmptyHeader>
     </Empty>
   );
-}
-
-function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(amount / 100);
 }
 
 function EarningsPageSkeleton() {

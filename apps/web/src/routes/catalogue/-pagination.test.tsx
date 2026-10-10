@@ -1,22 +1,18 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
+import { ConvexProvider, ConvexReactClient } from "convex/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({
-  failNext: false,
-  emptyFirst: false,
-  request: vi.fn(),
-}));
-vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (options: unknown) => options,
+vi.mock("@tanstack/react-router", async (original) => ({
+  ...(await original<typeof import("@tanstack/react-router")>()),
   Link: ({
     children,
     to,
@@ -24,16 +20,12 @@ vi.mock("@tanstack/react-router", () => ({
   }: {
     children: ReactNode;
     to: string;
-    params?: { publisherHandle: string; projectSlug: string };
+    params: { publisherHandle: string; projectSlug: string };
   }) => (
     <a
-      href={
-        params
-          ? to
-              .replace("$publisherHandle", params.publisherHandle)
-              .replace("$projectSlug", params.projectSlug)
-          : to
-      }
+      href={to
+        .replace("$publisherHandle", params.publisherHandle)
+        .replace("$projectSlug", params.projectSlug)}
     >
       {children}
     </a>
@@ -43,121 +35,145 @@ vi.mock("#/components/motion/fade-in", () => ({
   FadeIn: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 vi.mock("@convex-dev/react-query", () => ({
-  convexQuery: (_reference: unknown, args: { cursor?: string }) => ({
-    queryKey: ["catalogue-test", args],
-    queryFn: async () => {
-      fixture.request(args);
-      if (args.cursor && fixture.failNext)
-        throw new Error("Network unavailable");
-      const numbers = args.cursor
-        ? [24, 25, 26]
-        : fixture.emptyFirst
-          ? []
-          : Array.from({ length: 24 }, (_, index) => index + 1);
-      return {
-        items: numbers.map((number) => ({
-          name: `API ${number}`,
-          slug: `api-${number}`,
-          publisherHandle: "publisher",
-          orgName: "Publisher",
-          tags: [],
-          publishedAt: 1,
-          pricing: null,
-          quality: null,
-        })),
-        nextCursor: args.cursor ? null : "page-2",
-        total: 26,
-        facets: {
-          tags: [
-            { name: "weather", count: 1 },
-            { name: "retired", count: 0 },
-          ],
-          freeTierCount: 0,
-        },
-      };
-    },
+  convexQuery: (_reference: unknown, args: unknown) => ({
+    queryKey: ["catalogue", args],
+    queryFn: async () => [
+      { name: "weather", count: 1 },
+      { name: "retired", count: 0 },
+    ],
   }),
 }));
 
 import { CatalogueList } from "#/components/catalogue-browser";
 import { CatalogueShell } from "#/components/catalogue-shell";
 
-beforeEach(() => {
-  fixture.failNext = false;
-  fixture.emptyFirst = false;
-  fixture.request.mockClear();
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
 });
-afterEach(cleanup);
 
-function renderCatalogue(inApp = false) {
-  const client = new QueryClient({
+function fixture({ emptyFirst = false } = {}) {
+  const client = new ConvexReactClient("https://test.convex.cloud", {
+    disabled: true,
+  });
+  const listeners = new Set<() => void>();
+  const card = (id: number, name = `API ${id}`) => ({
+    name,
+    slug: `api-${id}`,
+    publisherHandle: "publisher",
+    orgName: "Publisher",
+    tags: [],
+    publishedAt: 1,
+    pricing: null,
+    quality: null,
+  });
+  let first = {
+    page: emptyFirst ? [] : [card(1), card(2)],
+    isDone: false,
+    continueCursor: "page-2",
+  };
+  let second = { page: [card(3)], isDone: true, continueCursor: "end" };
+  const filtered = {
+    page: [card(4)],
+    isDone: true,
+    continueCursor: "filtered-end",
+  };
+  const requests: Array<{ search?: string; cursor: unknown }> = [];
+  vi.spyOn(client, "watchQuery").mockImplementation((_query, args) => {
+    const input = args as {
+      search?: string;
+      paginationOpts: { cursor: string | null };
+    };
+    requests.push({
+      search: input.search,
+      cursor: input.paginationOpts.cursor,
+    });
+    return {
+      onUpdate(callback) {
+        listeners.add(callback);
+        return () => {
+          listeners.delete(callback);
+        };
+      },
+      localQueryResult: () =>
+        input.search ? filtered : input.paginationOpts.cursor ? second : first,
+      localQueryLogs: () => undefined,
+      journal: () => undefined,
+    };
+  });
+  const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  const list = (
-    <CatalogueList
-      search=""
-      activeTag={null}
-      onTagChange={vi.fn()}
-      sort="newest"
-      freeOnly={false}
-      maxCost={null}
-    />
+  const tree = (search: string) => (
+    <QueryClientProvider client={queryClient}>
+      <ConvexProvider client={client}>
+        <CatalogueShell inApp>
+          <CatalogueList
+            search={search}
+            activeTag={null}
+            onTagChange={vi.fn()}
+            sort="newest"
+            freeOnly={false}
+            maxCost={null}
+          />
+        </CatalogueShell>
+      </ConvexProvider>
+    </QueryClientProvider>
   );
-  render(
-    <QueryClientProvider client={client}>
-      {inApp ? <CatalogueShell inApp>{list}</CatalogueShell> : list}
-    </QueryClientProvider>,
-  );
+  const view = render(tree(""));
+  return {
+    requests,
+    filter: (search: string) => view.rerender(tree(search)),
+    update: () =>
+      act(() => {
+        first = { ...first, page: [card(5), card(1, "Updated API 1")] };
+        second = { ...second, page: [card(2), card(3, "Updated API 3")] };
+        for (const listener of listeners) listener();
+      }),
+  };
 }
 
-it("reaches APIs beyond the first 24 and keeps global tag facets accessible", async () => {
-  renderCatalogue();
-  await screen.findByText("24 APIs shown");
-  expect(screen.getByLabelText("Filter by weather")).toBeTruthy();
+it("keeps every loaded page live, including edits, insertions and moved boundaries", async () => {
+  const state = fixture();
+  await screen.findByText("2 APIs shown");
+  expect(await screen.findByLabelText("Filter by weather")).toBeTruthy();
   expect(screen.queryByLabelText("Filter by retired")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Load more APIs" }));
-  await screen.findByText("API 26");
-  expect(screen.getByText("API 1")).toBeTruthy();
-  expect(screen.getAllByText("API 24")).toHaveLength(1);
-  expect(screen.getByText("26 APIs shown")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Load more APIs" })).toBeNull();
-  expect(fixture.request).toHaveBeenCalledWith(
-    expect.objectContaining({ cursor: "page-2" }),
+  await screen.findByText("3 APIs shown");
+  expect(screen.getByText("API 3").closest("a")?.getAttribute("href")).toBe(
+    "/app/catalogue/publisher/api-3",
   );
+  state.update();
+  expect(screen.getByText("Updated API 1")).toBeTruthy();
+  expect(screen.getByText("Updated API 3")).toBeTruthy();
+  expect(screen.getAllByText("API 2")).toHaveLength(1);
+  expect(screen.getByText("API 5")).toBeTruthy();
+  expect(screen.getByText("4 APIs shown")).toBeTruthy();
 });
 
-it("keeps API cards inside the app namespace, including later pages", async () => {
-  renderCatalogue(true);
-  const firstCard = await screen.findByText("API 1");
-  expect(firstCard.closest("a")?.getAttribute("href")).toBe(
-    "/app/catalogue/publisher/api-1",
+it("resets filters in the same render without issuing a stale-cursor query", async () => {
+  const state = fixture();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more APIs" }),
   );
-  fireEvent.click(screen.getByText("Load more APIs"));
-  const laterCard = await screen.findByText("API 26");
-  expect(laterCard.closest("a")?.getAttribute("href")).toBe(
-    "/app/catalogue/publisher/api-26",
-  );
-  expect(laterCard.closest("main")).toBeNull();
+  await screen.findByText("API 3");
+  state.filter("weather");
+  expect(screen.queryByText("API 1")).toBeNull();
+  expect(screen.getByText("API 4")).toBeTruthy();
+  expect(
+    state.requests
+      .filter((request) => request.search === "weather")
+      .every((request) => request.cursor === null),
+  ).toBe(true);
+  state.filter("");
+  expect(screen.queryByText("API 3")).toBeNull();
+  expect(screen.getByText("2 APIs shown")).toBeTruthy();
 });
 
-it("retains existing cards when another page fails and retries that page", async () => {
-  fixture.failNext = true;
-  renderCatalogue();
-  await screen.findByText("24 APIs shown");
-  fireEvent.click(screen.getByRole("button", { name: "Load more APIs" }));
-  await screen.findByRole("button", { name: "Retry more APIs" });
-  expect(screen.getByText("API 1")).toBeTruthy();
-  fixture.failNext = false;
-  fireEvent.click(screen.getByRole("button", { name: "Retry more APIs" }));
-  await screen.findByText("API 26");
-  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-});
-
-it("continues through an empty filtered page instead of claiming no matches", async () => {
-  fixture.emptyFirst = true;
-  renderCatalogue();
-  await screen.findByRole("button", { name: "Load more APIs" });
-  expect(screen.queryByText("No public APIs yet")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Load more APIs" }));
-  await screen.findByText("API 25");
+it("continues through an empty filtered page", async () => {
+  fixture({ emptyFirst: true });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more APIs" }),
+  );
+  expect(await screen.findByText("API 3")).toBeTruthy();
 });
