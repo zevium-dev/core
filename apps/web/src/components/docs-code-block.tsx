@@ -7,6 +7,7 @@ type DocsCodeBlockProps = {
   code: string;
   lang?: string;
   className?: string;
+  copyLabel?: string;
 };
 
 /**
@@ -14,7 +15,12 @@ type DocsCodeBlockProps = {
  * `not-prose` escapes @tailwindcss/typography so the <pre> keeps its own
  * semantic-token styling. All colors are semantic tokens (.agents/notes/design/design-system.md).
  */
-export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
+export function DocsCodeBlock({
+  code,
+  lang,
+  className,
+  copyLabel = "Copy code",
+}: DocsCodeBlockProps) {
   return (
     <div
       className={cn(
@@ -26,7 +32,7 @@ export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
         <span className="font-mono text-[11px] uppercase tracking-wide text-foreground">
           {lang ?? "code"}
         </span>
-        <CopyButton text={code} variant="ghost" aria-label="Copy code" />
+        <CopyButton text={code} variant="ghost" aria-label={copyLabel} />
       </div>
       <pre
         tabIndex={0}
