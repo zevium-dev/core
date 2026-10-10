@@ -1,3 +1,4 @@
+import { formatDateTime } from "#/lib/format";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Flag, History, MessageSquareText } from "lucide-react";
@@ -52,11 +53,6 @@ const MODES: Array<{ value: ReviewQueueMode; label: string }> = [
   { value: "reported", label: "Reported" },
   { value: "history", label: "History" },
 ];
-const MODERATION_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
 
 export function AdminReviewsQueue({
   mode,
@@ -233,7 +229,7 @@ export function AdminReviewsQueue({
                             className="text-xs text-muted-foreground"
                             dateTime={new Date(row.action.at).toISOString()}
                           >
-                            {MODERATION_DATE_FORMAT.format(row.action.at)} UTC
+                            {formatDateTime(row.action.at)}
                           </time>
                         </div>
                       ) : item.latestAction ? (

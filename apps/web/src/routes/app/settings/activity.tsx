@@ -1,9 +1,21 @@
+import { ListBoundary } from "#/components/list-boundary";
+import { StatusBadge } from "#/components/status-badge";
+import { formatNumber, formatTimestamp } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useConvexAuth } from "convex/react";
-import { Activity, Search } from "lucide-react";
+import { useConvexAuth, usePaginatedQuery } from "convex/react";
+import { Activity } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { OrgCapabilityNotice } from "#/components/org-capability-notice";
@@ -47,7 +59,6 @@ import {
   ACTIVITY_TIME_RANGES,
   activitySinceMs,
   authorizedAttributionSearch,
-  mergePublicUsagePages,
   type ActivityTimeRange,
 } from "#/lib/activity-filters";
 import { truncateKeyId } from "#/lib/billing-cycle";
@@ -57,7 +68,6 @@ import {
   capabilityProjectionsMatch,
   hasServerCapability,
   parseOrgCapabilityProjection,
-  type OrgCapabilityProjection,
 } from "#/lib/org-capabilities";
 
 type ActivitySearch = {
@@ -115,130 +125,9 @@ export const Route = createFileRoute("/app/settings/activity")({
   }),
 });
 
-type UsageListItem = {
-  eventId: string | null;
-  projectRef: string | null;
-  projectName: string | null;
-  projectSlug: string | null;
-  endpoint: string;
-  method: string;
-  credits: number;
-  status: number;
-  latencyMs: number;
-
-  keyId: string;
-  memberId?: string | null;
-  memberName?: string | null;
-  at: number;
-  requestId: string | null;
-  releaseChallenge: string | null;
-};
-
-type UsagePageData = {
-  access: OrgCapabilityProjection;
-  page: UsageListItem[];
-  isDone: boolean;
-  continueCursor: string | null;
-};
-
-type ActivityCycleData = {
-  access: OrgCapabilityProjection;
-  byProject: Array<{
-    projectRef: string | null;
-    name: string;
-    slug: string;
-  }>;
-};
-
-type UsageListArgs = {
-  orgSlug: string;
-  paginationOpts: { numItems: number; cursor: string | null };
-  projectRef?: string;
-  keyId?: string;
-  memberId?: string;
-  endpoint?: string;
-  method?: string;
-  since?: number;
-};
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === "string";
-}
-
-function isUsageListItem(value: unknown): value is UsageListItem {
-  if (typeof value !== "object" || value === null) return false;
-  const item = value as Record<string, unknown>;
-  return (
-    isNullableString(item.eventId) &&
-    isNullableString(item.projectRef) &&
-    isNullableString(item.projectName) &&
-    isNullableString(item.projectSlug) &&
-    typeof item.endpoint === "string" &&
-    typeof item.method === "string" &&
-    typeof item.credits === "number" &&
-    Number.isFinite(item.credits) &&
-    typeof item.status === "number" &&
-    Number.isFinite(item.status) &&
-    typeof item.latencyMs === "number" &&
-    Number.isFinite(item.latencyMs) &&
-    typeof item.keyId === "string" &&
-    (item.memberId === undefined || isNullableString(item.memberId)) &&
-    (item.memberName === undefined || isNullableString(item.memberName)) &&
-    typeof item.at === "number" &&
-    Number.isFinite(item.at)
-  );
-}
-
-function parseUsagePage(value: unknown): UsagePageData | null {
-  if (typeof value !== "object" || value === null) return null;
-  const page = value as Record<string, unknown>;
-  if (
-    parseOrgCapabilityProjection(page.access) === null ||
-    !Array.isArray(page.page) ||
-    !page.page.every(isUsageListItem) ||
-    typeof page.isDone !== "boolean" ||
-    !isNullableString(page.continueCursor)
-  ) {
-    return null;
-  }
-  return value as UsagePageData;
-}
-
-function parseActivityCycle(value: unknown): ActivityCycleData | null {
-  if (typeof value !== "object" || value === null) return null;
-  const cycle = value as Record<string, unknown>;
-  if (
-    parseOrgCapabilityProjection(cycle.access) === null ||
-    !Array.isArray(cycle.byProject) ||
-    !cycle.byProject.every((project) => {
-      if (typeof project !== "object" || project === null) return false;
-      const candidate = project as Record<string, unknown>;
-      return (
-        isNullableString(candidate.projectRef) &&
-        typeof candidate.name === "string" &&
-        typeof candidate.slug === "string"
-      );
-    })
-  ) {
-    return null;
-  }
-  return value as ActivityCycleData;
-}
-
-const ACTIVITY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  second: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
-
-function formatActivityDate(timestamp: number): string {
-  return ACTIVITY_DATE_FORMATTER.format(timestamp);
-}
+type UsageListItem = FunctionReturnType<
+  typeof api.usage.listForOrg
+>["page"][number];
 
 function ActivityPage() {
   const { organization, isLoaded } = useOrganization();
@@ -267,7 +156,11 @@ function ActivityPage() {
     return <ActivitySkeleton />;
   }
 
-  return <ActivityContent orgSlug={orgSlug} />;
+  return (
+    <ListBoundary label="activity" resetKey={orgSlug}>
+      <ActivityContent key={orgSlug} orgSlug={orgSlug} />
+    </ListBoundary>
+  );
 }
 
 function ActivityHeader() {
@@ -286,15 +179,28 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const search = Route.useSearch();
   const timeRange = search.range ?? "7d";
   const projectRef = search.project ?? "all";
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [rows, setRows] = useState<UsageListItem[]>([]);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-  const [projectionRejected, setProjectionRejected] = useState(false);
   const inspectorTriggerRef = useRef<HTMLElement | null>(null);
 
   // Freeze "now" per filter change so page fetches share the same window.
-  const [windowNow, setWindowNow] = useState(() => Date.now());
+  const windowKey = JSON.stringify([
+    orgSlug,
+    timeRange,
+    projectRef,
+    search.key,
+    search.member,
+    search.endpoint,
+    search.method,
+  ]);
+  const [window, setWindow] = useState(() => ({
+    key: windowKey,
+    now: Date.now(),
+  }));
+  // Adjust during render: never issue a new-filter query with an old time window.
+  let windowNow = window.now;
+  if (window.key !== windowKey) {
+    windowNow = Date.now();
+    setWindow({ key: windowKey, now: windowNow });
+  }
 
   const accessQuery = useQuery(
     convexQuery(api.organizations.activeCapabilities, {}),
@@ -319,13 +225,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   );
 
   const listArgs = useMemo(() => {
-    const args: UsageListArgs = {
-      orgSlug,
-      paginationOpts: {
-        numItems: ACTIVITY_PAGE_SIZE,
-        cursor,
-      },
-    };
+    const args: Omit<
+      FunctionArgs<typeof api.usage.listForOrg>,
+      "paginationOpts"
+    > = { orgSlug };
     if (projectRef !== "all") {
       args.projectRef = projectRef;
     }
@@ -337,25 +240,20 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       args.since = since;
     }
     return args;
-  }, [orgSlug, cursor, projectRef, attributionSearch, since]);
+  }, [orgSlug, projectRef, attributionSearch, since]);
 
-  const usageQuery = useQuery({
-    ...convexQuery(api.usage.listForOrg, listArgs),
-    enabled: capabilities !== null,
-  });
-
-  const usagePage = useMemo(
-    () => parseUsagePage(usageQuery.data),
-    [usageQuery.data],
+  const {
+    results: rows,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.usage.listForOrg,
+    capabilities === null
+      ? "skip"
+      : { ...listArgs, expectedRole: capabilities.role },
+    { initialNumItems: ACTIVITY_PAGE_SIZE },
   );
-  const cycle = useMemo(
-    () => parseActivityCycle(cycleQuery.data),
-    [cycleQuery.data],
-  );
-  const usageProjectionMatches = capabilityProjectionsMatch(
-    capabilities,
-    parseOrgCapabilityProjection(usagePage?.access),
-  );
+  const cycle = cycleQuery.data;
   const cycleProjectionMatches = capabilityProjectionsMatch(
     capabilities,
     parseOrgCapabilityProjection(cycle?.access),
@@ -392,51 +290,6 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     search.range,
   ]);
 
-  // Reset accumulated pages when filters change.
-  useEffect(() => {
-    setCursor(null);
-    setRows([]);
-    setIsDone(false);
-    setContinueCursor(null);
-    setProjectionRejected(false);
-    setWindowNow(Date.now());
-  }, [
-    timeRange,
-    projectRef,
-    orgSlug,
-    search.key,
-    attributionSearch.member,
-    search.endpoint,
-    search.method,
-    canViewOrgUsage,
-    capabilities?.role,
-  ]);
-
-  // Merge each successful page into the running list.
-  useEffect(() => {
-    if (usageQuery.data === undefined || usageQuery.isPending) {
-      return;
-    }
-    if (usagePage === null || !usageProjectionMatches) {
-      setRows([]);
-      setIsDone(true);
-      setContinueCursor(null);
-      setProjectionRejected(true);
-      return;
-    }
-    setProjectionRejected(false);
-    const replace = cursor === null;
-    setRows((prev) => mergePublicUsagePages(prev, usagePage.page, replace));
-    setIsDone(usagePage.isDone);
-    setContinueCursor(usagePage.continueCursor);
-  }, [
-    cursor,
-    usagePage,
-    usageProjectionMatches,
-    usageQuery.data,
-    usageQuery.isPending,
-  ]);
-
   const projects = cycleProjectionMatches
     ? (cycle?.byProject ?? []).filter(
         (project): project is typeof project & { projectRef: string } =>
@@ -444,17 +297,11 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       )
     : [];
   const firstPagePending =
-    (accessQuery.isPending ||
-      (capabilities !== null &&
-        (cycleQuery.isPending || usageQuery.isPending))) &&
-    cursor === null;
-  const loadMorePending = usageQuery.isPending && cursor !== null;
-  const canLoadMore =
-    !isDone &&
-    continueCursor !== null &&
-    !usageQuery.isPending &&
-    !usageQuery.isError &&
-    !projectionRejected;
+    accessQuery.isPending ||
+    (capabilities !== null &&
+      (cycleQuery.isPending || status === "LoadingFirstPage"));
+  const loadMorePending = status === "LoadingMore";
+  const canLoadMore = status === "CanLoadMore";
   const selectedFromRows = search.event
     ? (rows.find((event) => event.eventId === search.event) ?? null)
     : null;
@@ -468,13 +315,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       search.event !== undefined &&
       selectedFromRows === null,
   });
-  const eventProjectionRejected =
-    eventQuery.data !== undefined &&
-    eventQuery.data !== null &&
-    !isUsageListItem(eventQuery.data);
-  const queriedEvent = isUsageListItem(eventQuery.data)
-    ? eventQuery.data
-    : null;
+  const queriedEvent = eventQuery.data ?? null;
   const selectedEvent = selectedFromRows ?? queriedEvent;
   const serverProjectionRejected =
     (!accessQuery.isPending && !accessQuery.isError && capabilities === null) ||
@@ -483,14 +324,9 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     (capabilities !== null &&
       !cycleQuery.isPending &&
       !cycleQuery.isError &&
-      cycleQuery.data === undefined) ||
-    projectionRejected ||
-    eventProjectionRejected;
+      cycleQuery.data === undefined);
   const activityFailed =
-    accessQuery.isError ||
-    cycleQuery.isError ||
-    usageQuery.isError ||
-    serverProjectionRejected;
+    accessQuery.isError || cycleQuery.isError || serverProjectionRejected;
   const hasAttributionFilter = Boolean(
     attributionSearch.key ||
     attributionSearch.member ||
@@ -659,9 +495,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   {serverProjectionRejected
                     ? "We couldn’t confirm your organization access. Refresh and retry."
                     : humanError(
-                        accessQuery.error ??
-                          cycleQuery.error ??
-                          usageQuery.error,
+                        accessQuery.error ?? cycleQuery.error,
                         "Activity is temporarily unavailable.",
                       )}
                 </EmptyDescription>
@@ -673,7 +507,6 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   onClick={() => {
                     void accessQuery.refetch();
                     void cycleQuery.refetch();
-                    void usageQuery.refetch();
                   }}
                 >
                   Retry
@@ -690,9 +523,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (continueCursor !== null) setCursor(continueCursor);
-                    }}
+                    onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
                   >
                     Search next page
                   </Button>
@@ -701,141 +532,80 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              <div className="divide-y md:hidden">
-                {rows.map((event, index) => (
-                  <div
-                    key={event.eventId ?? `${event.at}:${index}`}
-                    className="space-y-3 py-4 first:pt-0"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="font-medium">
-                          {event.projectName ??
-                            event.projectSlug ??
-                            "Unknown API"}
-                        </p>
-                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                          {event.method.toUpperCase()} {event.endpoint}
-                        </p>
-                      </div>
-                      <StatusBadge status={event.status} />
-                    </div>
-                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                      <div>
-                        <dt className="text-muted-foreground">Time</dt>
-                        <dd>{formatActivityDate(event.at)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Cost</dt>
-                        <dd className="tabular-nums">
-                          {event.credits.toLocaleString("en-US")} credits
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Latency</dt>
-                        <dd className="tabular-nums">{event.latencyMs} ms</dd>
-                      </div>
-                      {canViewOrgUsage ? (
-                        <div>
-                          <dt className="text-muted-foreground">Member</dt>
-                          <dd>{event.memberName ?? "Unattributed member"}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      disabled={event.eventId === null}
-                      title={
-                        event.eventId === null
-                          ? "Details are unavailable for this older call."
-                          : undefined
-                      }
-                      onClick={(clickEvent) => {
-                        if (event.eventId !== null) {
-                          inspectEvent(event.eventId, clickEvent.currentTarget);
-                        }
-                      }}
-                    >
-                      <Search />
-                      Inspect call
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th scope="col" className="px-2 py-2 font-medium">
+              <div className="overflow-x-auto">
+                <Table className="w-full text-sm">
+                  <TableHeader>
+                    <TableRow className="border-b text-left text-muted-foreground">
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Time
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Project
-                      </th>
+                      </TableHead>
                       {canViewOrgUsage ? (
-                        <th scope="col" className="px-2 py-2 font-medium">
+                        <TableHead
+                          scope="col"
+                          className="px-2 py-2 font-medium"
+                        >
                           Member
-                        </th>
+                        </TableHead>
                       ) : null}
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Endpoint
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Credits
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Status
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
                         Latency
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 text-right font-medium"
                       >
                         <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {rows.map((event, index) => (
-                      <tr
+                      <TableRow
                         key={event.eventId ?? `${event.at}:${index}`}
                         className="border-b last:border-0"
                       >
-                        <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                          {formatActivityDate(event.at)}
-                        </td>
-                        <td className="px-2 py-2.5">
+                        <TableCell className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
+                          {formatTimestamp(event.at)}
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5">
                           {event.projectName ?? event.projectSlug ?? "—"}
-                        </td>
+                        </TableCell>
                         {canViewOrgUsage ? (
-                          <td className="px-2 py-2.5">
+                          <TableCell className="px-2 py-2.5">
                             {event.memberName ?? "Unattributed member"}
-                          </td>
+                          </TableCell>
                         ) : null}
-                        <td className="px-2 py-2.5 font-mono text-xs">
+                        <TableCell className="px-2 py-2.5 font-mono text-xs">
                           <span className="text-muted-foreground">
                             {event.method.toUpperCase()}
                           </span>{" "}
                           {event.endpoint}
-                        </td>
-                        <td className="px-2 py-2.5 tabular-nums">
-                          {event.credits.toLocaleString("en-US")}
-                        </td>
-                        <td className="px-2 py-2.5">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 tabular-nums">
+                          {formatNumber(event.credits)}
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5">
                           <StatusBadge status={event.status} />
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                           {event.latencyMs}ms
-                        </td>
-                        <td className="px-2 py-2.5 text-right">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 text-right">
                           <Button
                             type="button"
                             variant="ghost"
@@ -858,11 +628,11 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                           >
                             Inspect
                           </Button>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               {canLoadMore || loadMorePending ? (
                 <div className="flex justify-center">
@@ -870,35 +640,9 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     variant="outline"
                     size="sm"
                     disabled={loadMorePending || !canLoadMore}
-                    onClick={() => {
-                      if (continueCursor !== null) {
-                        setCursor(continueCursor);
-                      }
-                    }}
+                    onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
                   >
                     {loadMorePending ? "Loading…" : "Load more"}
-                  </Button>
-                </div>
-              ) : null}
-              {usageQuery.isError && rows.length > 0 ? (
-                <div
-                  className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">
-                    More activity could not be loaded. Existing rows are still
-                    available.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      void accessQuery.refetch();
-                      void usageQuery.refetch();
-                    }}
-                  >
-                    Retry page
                   </Button>
                 </div>
               ) : null}
@@ -993,11 +737,11 @@ function ActivityInspector({
                 {event.method}
               </Badge>
               <Badge variant="secondary" className="tabular-nums">
-                {event.credits.toLocaleString("en-US")} credits
+                {formatNumber(event.credits)} credits
               </Badge>
             </div>
             <dl className="divide-y rounded-lg border text-sm">
-              <InspectorRow label="Time" value={formatActivityDate(event.at)} />
+              <InspectorRow label="Time" value={formatTimestamp(event.at)} />
               <InspectorRow
                 label="API"
                 value={event.projectName ?? event.projectSlug ?? "Unavailable"}
@@ -1005,7 +749,7 @@ function ActivityInspector({
               <InspectorRow label="Endpoint" value={event.endpoint} mono />
               <InspectorRow
                 label="Latency"
-                value={`${event.latencyMs.toLocaleString("en-US")} ms`}
+                value={`${formatNumber(event.latencyMs)} ms`}
               />
               <InspectorRow
                 label="Key"
@@ -1088,16 +832,6 @@ function EmptyActivity({ filtered }: { filtered: boolean }) {
       </EmptyContent>
     </Empty>
   );
-}
-
-function StatusBadge({ status }: { status: number }) {
-  if (status >= 200 && status < 400) {
-    return <Badge variant="secondary">{status}</Badge>;
-  }
-  if (status >= 400 && status < 500) {
-    return <Badge variant="outline">{status}</Badge>;
-  }
-  return <Badge variant="destructive">{status}</Badge>;
 }
 
 function ActivityTableSkeleton() {

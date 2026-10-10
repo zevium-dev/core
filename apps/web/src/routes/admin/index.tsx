@@ -1,3 +1,13 @@
+import { StatusBadge } from "#/components/status-badge";
+import { formatDateTime, formatNumber } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -27,16 +37,6 @@ import type {
   PlatformStats,
   AdminUsageView,
 } from "../../../../../convex/admin";
-
-const ADMIN_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
 
 export const Route = createFileRoute("/admin/")({
   component: AdminOverviewPage,
@@ -143,7 +143,7 @@ function OverviewContent({
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             {stats.usageCapped
-              ? `Capped at ${stats.usageCap.toLocaleString("en-US")} (scan limit)`
+              ? `Capped at ${formatNumber(stats.usageCap)} (scan limit)`
               : "Indexed by event time"}
           </CardContent>
         </Card>
@@ -186,63 +186,66 @@ function OverviewContent({
             </Empty>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th scope="col" className="px-2 py-2 font-medium">
+              <Table className="w-full text-sm">
+                <TableHeader>
+                  <TableRow className="border-b text-left text-muted-foreground">
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       When
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Project
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Endpoint
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Status
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Credits
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Latency
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {usage.map((event) => (
-                    <tr key={event._id} className="border-b last:border-0">
-                      <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                        {ADMIN_DATE_FORMATTER.format(event.at)}
-                      </td>
-                      <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
+                    <TableRow
+                      key={event._id}
+                      className="border-b last:border-0"
+                    >
+                      <TableCell className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
+                        {formatDateTime(event.at)}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
                         {event.projectId}
-                      </td>
-                      <td className="px-2 py-2.5 font-mono text-xs">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 font-mono text-xs">
                         <span className="text-muted-foreground">
                           {event.method}
                         </span>{" "}
                         {event.endpoint}
-                      </td>
-                      <td className="px-2 py-2.5">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5">
                         <StatusBadge status={event.status} />
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
-                        {event.credits.toLocaleString("en-US")}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
+                        {formatNumber(event.credits)}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                         {event.latencyMs}ms
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
@@ -258,16 +261,6 @@ function sumCredits(events: readonly AdminUsageView[]): number {
     total += e.credits;
   }
   return total;
-}
-
-function StatusBadge({ status }: { status: number }) {
-  if (status >= 200 && status < 400) {
-    return <Badge variant="secondary">{status}</Badge>;
-  }
-  if (status >= 400 && status < 500) {
-    return <Badge variant="outline">{status}</Badge>;
-  }
-  return <Badge variant="destructive">{status}</Badge>;
 }
 
 function OverviewSkeleton() {

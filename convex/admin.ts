@@ -297,6 +297,8 @@ export const setProjectVisibility = mutation({
       }
     }
 
+    if (project.visibility === args.visibility) return project;
+
     await ctx.db.patch(project._id, { visibility: args.visibility });
     await enqueuePublishedProjectProjection(ctx, project._id);
 

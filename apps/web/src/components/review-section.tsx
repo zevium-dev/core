@@ -1,3 +1,4 @@
+import { formatDate } from "#/lib/format";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePaginatedQuery } from "convex/react";
@@ -38,12 +39,6 @@ import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 
 const REVIEW_PAGE_SIZE = 10;
-const REVIEW_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
 
 function Stars({ rating }: { rating: number }) {
   return (
@@ -154,8 +149,8 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                 Verified consumer reviews
               </CardTitle>
               <CardDescription>
-                Each organization that has completed a settled gateway call can
-                publish one review. Reviews appear publicly as “Verified
+                Each organization that has completed a successful gateway call
+                can publish one review. Reviews appear publicly as “Verified
                 consumer.”
               </CardDescription>
             </div>
@@ -320,7 +315,7 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                         dateTime={new Date(review.createdAt).toISOString()}
                         className="text-xs text-muted-foreground"
                       >
-                        {REVIEW_DATE_FORMAT.format(review.createdAt)}
+                        {formatDate(review.createdAt)}
                       </time>
                     </div>
                     {review.body ? (

@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   __setTestGrantsFetcher,
@@ -372,52 +372,134 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
     expect(fetchCount).toBe(primedFetches);
   });
 
-  it("refreshes a known key after its control checkpoint becomes stale", async () => {
+  it("serves cached controls and finalizes calls while refresh is blocked on network", async () => {
     const stub = walletStub("key-stale-known");
     await seed(stub, {
-      grants: [{ refId: "g1", amount: 1_000 }],
-      keySettings: [{ keyId: "k1", keyFamilyId: "family-1", disabled: false }],
+      balance: 1_000,
+      keySettings: [{ keyId: "k1", disabled: false, monthlyCapCredits: 10 }],
     });
-
-    let fetchCount = 0;
-    __setTestGrantsFetcher(async () => {
-      fetchCount += 1;
-      return {
-        wallet: { clerkOrgId: ORG, balance: 1_000, sequence: 1 },
-        keySettings: [{ keyId: "k1", keyFamilyId: "family-1", disabled: true }],
-      };
+    await runInDurableObject(stub, async (wallet) => {
+      await wallet.reserve("held", 5, { keyId: "k1", clerkOrgId: ORG });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started!: () => void;
+      const fetching = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let fetchCount = 0;
+      __setTestGrantsFetcher(async () => {
+        fetchCount += 1;
+        started();
+        await gate;
+        return {
+          wallet: { clerkOrgId: ORG, balance: 1_000, sequence: 1 },
+          keySettings: [{ keyId: "k1", disabled: true }],
+        };
+      });
+      const nowMs = Date.now() + 61_000;
+      const admission = wallet.reserve("stale", 5, {
+        keyId: "k1",
+        clerkOrgId: ORG,
+        nowMs,
+      });
+      try {
+        await fetching;
+        await expect(admission).resolves.toMatchObject({ status: "reserved" });
+        await expect(
+          wallet.reserve("over-cap", 1, {
+            keyId: "k1",
+            clerkOrgId: ORG,
+            nowMs,
+          }),
+        ).resolves.toMatchObject({ reason: "key_cap_exceeded" });
+        await expect(
+          wallet.authorizeKey("k1", ORG, nowMs),
+        ).resolves.toMatchObject({
+          status: "allowed",
+        });
+        await expect(wallet.settle("held")).resolves.toMatchObject({
+          status: "settled",
+        });
+        await expect(wallet.refund("stale")).resolves.toMatchObject({
+          status: "refunded",
+        });
+        expect(fetchCount).toBe(1);
+      } finally {
+        release();
+        await wallet.syncGrants(ORG, nowMs);
+      }
+      await expect(
+        wallet.authorizeKey("k1", ORG, nowMs),
+      ).resolves.toMatchObject({
+        reason: "key_disabled",
+      });
+      // Refresh checkpoint subtracts the settlement created during network wait.
+      expect((await wallet.getState()).balance).toBe(995);
     });
-
-    const res = await stub.reserve("r1", 5, {
-      keyId: "k1",
-      clerkOrgId: ORG,
-      nowMs: Date.now() + 61_000,
-    });
-
-    expect(res).toEqual({ status: "rejected", reason: "key_disabled" });
-    expect(fetchCount).toBe(1);
   });
 
-  it("fails closed when stale positive key state cannot be refreshed", async () => {
+  it("retains last-known controls through refresh failure and eviction", async () => {
     const stub = walletStub("key-stale-refresh-failure");
     await seed(stub, {
-      grants: [{ refId: "g1", amount: 1_000 }],
-      keySettings: [{ keyId: "k1", keyFamilyId: "family-1", disabled: false }],
+      balance: 1_000,
+      keySettings: [{ keyId: "k1", disabled: false }],
     });
+    __setTestGrantsFetcher(async () => {
+      throw new Error("Convex unavailable");
+    });
+    const nowMs = Date.now() + 61_000;
+    await expect(
+      stub.reserve("r1", 5, { keyId: "k1", clerkOrgId: ORG, nowMs }),
+    ).resolves.toMatchObject({ status: "reserved" });
+    await stub.syncGrants(ORG, nowMs);
+    await evictDurableObject(stub);
+    await expect(
+      stub.authorizeKey("k1", ORG, nowMs + 1),
+    ).resolves.toMatchObject({ status: "allowed" });
+    await expect(
+      stub.authorizeKey("missing", ORG, nowMs + 1),
+    ).resolves.toMatchObject({ reason: "key_untracked" });
+  });
+
+  it("returns unavailable without a snapshot and recovers after a short retry window", async () => {
+    const stub = walletStub("key-cold-refresh-failure");
+    const nowMs = Date.now();
     let fetchCount = 0;
     __setTestGrantsFetcher(async () => {
       fetchCount += 1;
       return null;
     });
-
     await expect(
-      stub.reserve("r1", 5, {
+      stub.reserve("cold", 1, { keyId: "k1", clerkOrgId: ORG, nowMs }),
+    ).resolves.toMatchObject({ reason: "wallet_unavailable" });
+    await expect(
+      stub.authorizeKey("k1", ORG, nowMs + 1),
+    ).resolves.toMatchObject({ reason: "wallet_unavailable" });
+    await expect(
+      stub.consumeFreeTier(1, {
         keyId: "k1",
         clerkOrgId: ORG,
-        nowMs: Date.now() + 61_000,
+        projectId: "p",
+        method: "GET",
+        pathTemplate: "/",
+        nowMs: nowMs + 1,
       }),
-    ).resolves.toEqual({ status: "rejected", reason: "key_untracked" });
+    ).resolves.toMatchObject({ reason: "wallet_unavailable" });
     expect(fetchCount).toBe(1);
+    await evictDurableObject(stub);
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: ORG, balance: 10, sequence: 0 },
+      keySettings: [{ keyId: "k1", disabled: false }],
+    }));
+    await expect(
+      stub.reserve("recovered", 1, {
+        keyId: "k1",
+        clerkOrgId: ORG,
+        nowMs: nowMs + 5_001,
+      }),
+    ).resolves.toMatchObject({ status: "reserved" });
   });
 
   it("concurrent unknown-key reserves share a single fetch (single-flight)", async () => {

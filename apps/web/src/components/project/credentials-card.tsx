@@ -128,7 +128,11 @@ export function UpstreamCredentialsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle
+          role="heading"
+          aria-level={2}
+          className="flex items-center gap-2"
+        >
           <KeyRound className="size-4 text-muted-foreground" />
           Upstream credentials
         </CardTitle>

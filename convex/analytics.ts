@@ -1,3 +1,5 @@
+import { assertPublisherEarningReady } from "./lib/publisherLedger";
+import { atomsToCredits } from "./accounting";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -316,9 +318,11 @@ export const projectAnalytics = query({
 
     const truncated =
       scanned.length >= PROJECT_SCAN_CAP || earnings.length >= PROJECT_SCAN_CAP;
-    const netCredits = earnings.reduce(
-      (total, earning) => total + earning.netCredits,
-      0,
+    const netCredits = atomsToCredits(
+      earnings.reduce((total, earning) => {
+        assertPublisherEarningReady(earning);
+        return total + earning.publisherNetAtoms;
+      }, 0),
     );
 
     type Acc = {

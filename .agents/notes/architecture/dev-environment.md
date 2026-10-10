@@ -5,6 +5,16 @@
 
 Facts an agent needs before running anything locally. Hard-won; keep them. If a fact stops being true, fix it here in the same change.
 
+## Dogfood setup findings — 2026-10-10
+
+Baseline `eaa7eff`; see [full findings and workaround limits](../findings/dogfood-2026-10-10.md).
+
+- **P1 #384 (fixed):** the baseline seed failed module resolution and imported a deleted shared export. The current `tsx` command and working procedure are documented below.
+- **P0 #385:** normal Convex startup typecheck fails on missing `keySettings.by_owner`; skipping typecheck only permits diagnosis, not working key issuance.
+- **P1 #387 (fixed):** the baseline CSP blocked local Convex WebSockets and left the workspace loading. Dev builds now permit the configured loopback socket; production policy stays restricted.
+- `CONVEX_AGENT_MODE=anonymous` successfully provisioned an isolated backend. Repoint root/web/gateway local env files and set required backend env vars on that backend; do not push functions to shared dev during concurrent agent work. Auth, gateway and Stripe sandbox worked after the explicit workarounds in the findings.
+- The existing seed test user's documented password did not work during this run; email test OTP did. Do not reset a shared test password merely to finish dogfood.
+
 ## Commands
 
 ```bash

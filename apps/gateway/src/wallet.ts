@@ -12,16 +12,16 @@
  *   (atomic). Settlement id is stable: `settle:${reservationId}`.
  * - refund: remove from inFlight only (credit returns to available).
  * - grant: if new grantId, balance += amount, record grantId (idempotent).
- * - queue: pending rows live in transactional 100-row storage partitions.
+ * - queue: each pending settlement is a SQLite row; flush batches have at most 100 rows.
  * - flush/ack: the test ledger can read all stable ids. Production sends one
- *   bounded partition, rotates retryable outcomes, bisects row-scoped batch
+ *   bounded batch, rotates retryable outcomes, bisects row-scoped batch
  *   failures, and terminally dead-letters only permanent singleton poison.
  *   Lost acknowledgements replay the same ids; the ledger dedupes them.
  * - free tier: positive wallet balance is required; calls skip reserve/settle,
  *   use per-consumer-operation per-UTC-day counters, and enqueue usage at 0 credits.
  * - alarm (~5s): when pending non-empty, batch → wallets:recordUsage → ack.
  *
- * Crash-safety: multi-key updates go through storage.transaction. State is
+ * Crash-safety: multi-table updates go through storage.transactionSync. State is
  * loaded in the constructor under blockConcurrencyWhile so concurrent
  * requests never see a half-loaded wallet.
  */
@@ -36,13 +36,12 @@ import {
   type WalletCheckpoint,
 } from "./usage";
 import {
-  inspectSettlementQueue,
-  readSettlementQueue,
   SETTLEMENT_QUEUE_PARTITION_SIZE,
   submitWithPoisonBisection,
-  writeSettlementQueue,
   type SettlementQueueLayout,
 } from "./settlement-queue";
+
+import { WalletRows } from "./wallet-storage";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -187,6 +186,7 @@ export type KeyAuthorizationResult =
       reason:
         | "key_disabled"
         | "key_untracked"
+        | "wallet_unavailable"
         | "insufficient_credits"
         | "organization_archived";
       available?: number;
@@ -255,30 +255,14 @@ export type ReserveOptions = {
   nowMs?: number;
 };
 
-// Storage keys
-const K_BALANCE = "balance";
-const K_SEQUENCE = "authoritativeSequence";
-const K_IN_FLIGHT = "inFlight";
-const K_APPLIED_GRANTS = "appliedGrantIds";
-const K_PENDING = "pendingSettlements";
-const K_TERMINAL = "terminalReservations";
-const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
-const K_KEY_SETTINGS = "keySettings";
-const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
-
-const K_ORG_ARCHIVED = "organizationArchived";
 const K_SETTLED_PREFIX = "settled:";
-const K_DEAD_LETTER_PREFIX = "dead-letter:";
-const K_SYNC_GRANTS_AT = "syncGrantsAt";
-const K_DEAD_LETTERS = "deadLetterSettlements";
-const K_LAST_COMPACTION_AT = "lastCompactionAt";
 const SYNC_GRANTS_WINDOW_MS = 60_000;
 
 const FLUSH_ALARM_MS = 5_000;
 /** Reservation lease: execution paths settle/refund in seconds; 10m is generous. */
 export const RESERVATION_TTL_MS = 10 * 60_000;
-/** Terminal idempotency window; older records are pruned on write. */
+/** 24h RPC dedupe window; pending refs remain pinned until ledger reconciliation. */
 export const TERMINAL_RETENTION_MS = 24 * 60 * 60_000;
 /** Applied-grant dedupe set cap; Convex ledger dedupes beyond this window. */
 export const MAX_APPLIED_GRANTS = 2048;
@@ -390,13 +374,20 @@ function parseKeySettings(raw: unknown): KeySetting[] {
 // WalletDO
 // ---------------------------------------------------------------------------
 
-export class WalletDO extends DurableObject<Cloudflare.Env> {
+export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   #balance = 0;
   #sequence = -1;
   #inFlight: Record<string, InFlightEntry> = {};
   #appliedGrantIds: Set<string> = new Set();
   #pendingSettlements: PendingSettlement[] = [];
-  #terminal: Record<string, TerminalRecord> = {};
+  #terminalWrites = new Map<string, TerminalRecord>();
+  #pruneAt: number | undefined;
+  #syncRetryAt = 0;
+  #reservations: WalletRows<InFlightEntry>;
+  #pending: WalletRows<PendingSettlement>;
+  #grants: WalletRows<string>;
+  #settings: WalletRows<KeySetting>;
+  #dead: WalletRows<DeadLetterSettlement>;
   #deadLetters: DeadLetterSettlement[] = [];
   #lastCompactionAt = 0;
   #keySettings: Map<string, KeySetting> = new Map();
@@ -409,83 +400,98 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
+    const sql = ctx.storage.sql;
+    this.#reservations = new WalletRows(sql, "reservations");
+    this.#pending = new WalletRows(sql, "pending_settlements");
+    this.#grants = new WalletRows(sql, "applied_grants");
+    this.#settings = new WalletRows(sql, "key_settings");
+    this.#dead = new WalletRows(sql, "dead_letters");
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS wallet_checkpoint (
+        id INTEGER PRIMARY KEY CHECK (id = 1), balance INTEGER NOT NULL DEFAULT 0,
+        sequence INTEGER NOT NULL DEFAULT -1, flush_seq INTEGER NOT NULL DEFAULT 0,
+        settings_at INTEGER NOT NULL DEFAULT 0, sync_retry_at INTEGER NOT NULL DEFAULT 0,
+        compacted_at INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT OR IGNORE INTO wallet_checkpoint (id) VALUES (1);
+      CREATE TABLE IF NOT EXISTS terminal_refs (
+        id TEXT PRIMARY KEY, status TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS terminal_refs_at ON terminal_refs(at);
+      CREATE TABLE IF NOT EXISTS counters (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, period TEXT NOT NULL, amount INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS counters_period ON counters(kind, period);
+      CREATE TABLE IF NOT EXISTS settlement_dead_letters (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL, at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS settlement_dead_letters_at ON settlement_dead_letters(at);
+    `);
     // Block concurrent requests until state is fully loaded from storage.
     this.ctx.blockConcurrencyWhile(async () => {
       await this.#load();
     });
   }
   async #load(): Promise<void> {
-    const stored = await this.ctx.storage.get<
-      | number
-      | string
-      | Record<string, InFlightEntry>
-      | string[]
-      | PendingSettlement[]
-      | Record<string, TerminalStatus | TerminalRecord>
-      | Record<string, KeySetting>
-      | DeadLetterSettlement[]
-      | boolean
-    >([
-      K_BALANCE,
-      K_SEQUENCE,
-      K_IN_FLIGHT,
-      K_APPLIED_GRANTS,
-      K_PENDING,
-      K_TERMINAL,
-      K_FLUSH_SEQ,
-      K_KEY_SETTINGS,
-      K_KEY_SETTINGS_AT,
+    const row = this.ctx.storage.sql
+      .exec<{
+        balance: number;
+        sequence: number;
+        flush_seq: number;
+        settings_at: number;
+        sync_retry_at: number;
+        compacted_at: number;
+        archived: number;
+      }>("SELECT * FROM wallet_checkpoint WHERE id = 1")
+      .one();
+    this.#balance = row.balance;
+    this.#sequence = row.sequence;
+    this.#flushSeq = row.flush_seq;
+    this.#keySettingsSyncedAt = row.settings_at;
+    this.#syncRetryAt = row.sync_retry_at;
+    this.#lastCompactionAt = row.compacted_at;
+    this.#orgArchived = row.archived === 1;
+    this.#inFlight = Object.fromEntries(this.#reservations.load());
+    this.#pendingSettlements = this.#pending.load().map(([, value]) => value);
+    this.#appliedGrantIds = new Set(this.#grants.load().map(([id]) => id));
+    this.#keySettings = new Map(this.#settings.load());
+    this.#deadLetters = this.#dead.load().map(([, value]) => value);
+    this.#terminalWrites.clear();
+    this.#pruneAt = undefined;
+  }
 
-      K_DEAD_LETTERS,
-      K_LAST_COMPACTION_AT,
-      K_ORG_ARCHIVED,
-    ]);
-
-    this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
-    this.#sequence = (stored.get(K_SEQUENCE) as number | undefined) ?? -1;
-    this.#inFlight =
-      (stored.get(K_IN_FLIGHT) as Record<string, InFlightEntry> | undefined) ??
-      {};
-    const grants = (stored.get(K_APPLIED_GRANTS) as string[] | undefined) ?? [];
-    this.#appliedGrantIds = new Set(grants);
-    const partitionedQueue = await readSettlementQueue<PendingSettlement>(
-      this.ctx.storage,
+  #terminalRecord(id: string): TerminalRecord | undefined {
+    return (
+      this.#terminalWrites.get(id) ??
+      this.ctx.storage.sql
+        .exec<TerminalRecord>(
+          "SELECT status, at FROM terminal_refs WHERE id = ?",
+          id,
+        )
+        .toArray()[0]
     );
-    const legacyQueue = stored.get(K_PENDING) as
-      PendingSettlement[] | undefined;
-    this.#pendingSettlements = partitionedQueue ?? legacyQueue ?? [];
-    if (partitionedQueue === null && legacyQueue !== undefined) {
-      await this.ctx.storage.transaction(async (txn) => {
-        await writeSettlementQueue(txn, legacyQueue);
-        await txn.delete(K_PENDING);
-      });
-    } else if (partitionedQueue !== null && legacyQueue !== undefined) {
-      await this.ctx.storage.delete(K_PENDING);
-    }
-    const rawTerminal =
-      (stored.get(K_TERMINAL) as
-        Record<string, TerminalStatus | TerminalRecord> | undefined) ?? {};
-    // Legacy rows stored a bare status string; normalize to timed records.
-    this.#terminal = Object.fromEntries(
-      Object.entries(rawTerminal).map(([id, value]) => [
-        id,
-        typeof value === "string" ? { status: value, at: 0 } : value,
-      ]),
-    );
-    this.#flushSeq = (stored.get(K_FLUSH_SEQ) as number | undefined) ?? 0;
-    const settingsMap =
-      (stored.get(K_KEY_SETTINGS) as Record<string, KeySetting> | undefined) ??
-      {};
-    this.#keySettings = new Map(Object.entries(settingsMap));
-    this.#keySettingsSyncedAt =
-      (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
+  }
 
-    this.#deadLetters =
-      (stored.get(K_DEAD_LETTERS) as DeadLetterSettlement[] | undefined) ?? [];
-    this.#lastCompactionAt =
-      (stored.get(K_LAST_COMPACTION_AT) as number | undefined) ?? 0;
-    this.#orgArchived =
-      (stored.get(K_ORG_ARCHIVED) as boolean | undefined) ?? false;
+  #counter(id: string): number {
+    return (
+      this.ctx.storage.sql
+        .exec<{ amount: number }>(
+          "SELECT amount FROM counters WHERE id = ?",
+          id,
+        )
+        .toArray()[0]?.amount ?? 0
+    );
+  }
+
+  #setCounter(id: string, amount: number): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO counters (id, kind, period, amount) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET amount = excluded.amount`,
+      id,
+      id.startsWith(K_FREE_PREFIX) ? "free" : "settled",
+      id.slice(id.lastIndexOf(":") + 1),
+      amount,
+    );
   }
 
   #available(): number {
@@ -502,20 +508,16 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     for (const [id, entry] of Object.entries(this.#inFlight)) {
       if (now - entry.createdAt >= RESERVATION_TTL_MS) {
         delete this.#inFlight[id];
-        this.#terminal[id] = { status: "refunded", at: now };
+        this.#terminalWrites.set(id, { status: "refunded", at: now });
         changed = true;
       }
     }
     return changed;
   }
 
-  /** Bound terminal map: drop records past the idempotency retention window. */
+  /** Defer indexed retention cleanup into the next atomic state transition. */
   #pruneTerminal(now: number): void {
-    for (const [id, record] of Object.entries(this.#terminal)) {
-      if (record.at !== 0 && now - record.at >= TERMINAL_RETENTION_MS) {
-        delete this.#terminal[id];
-      }
-    }
+    this.#pruneAt = now;
   }
 
   #snapshot(): WalletState {
@@ -563,12 +565,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       inFlight: Record<string, InFlightEntry>;
       appliedGrantIds: string[];
       pendingSettlements: PendingSettlement[];
-      terminal: Record<string, TerminalRecord>;
       flushSeq: number;
       deadLetters: DeadLetterSettlement[];
       lastCompactionAt: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
+      syncRetryAt: number;
 
       organizationArchived: boolean;
       settledCounter: { storageKey: string; amount: number };
@@ -580,54 +582,83 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         throw new Error("Wallet state exceeds safe integer range");
       }
     }
-    await this.ctx.storage.transaction(async (txn) => {
-      if (keys.balance !== undefined) await txn.put(K_BALANCE, keys.balance);
-      if (keys.sequence !== undefined) await txn.put(K_SEQUENCE, keys.sequence);
-      if (keys.inFlight !== undefined)
-        await txn.put(K_IN_FLIGHT, keys.inFlight);
-      if (keys.appliedGrantIds !== undefined)
-        await txn.put(K_APPLIED_GRANTS, keys.appliedGrantIds);
-      if (keys.pendingSettlements !== undefined) {
-        await writeSettlementQueue(txn, keys.pendingSettlements);
-        await txn.delete(K_PENDING);
-      }
-      if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
-      if (keys.flushSeq !== undefined)
-        await txn.put(K_FLUSH_SEQ, keys.flushSeq);
-      if (keys.deadLetters !== undefined)
-        await txn.put(K_DEAD_LETTERS, keys.deadLetters);
+    this.ctx.storage.transactionSync(() => {
+      const sql = this.ctx.storage.sql;
       if (keys.lastCompactionAt !== undefined)
-        await txn.put(K_LAST_COMPACTION_AT, keys.lastCompactionAt);
-      if (keys.keySettings !== undefined)
-        await txn.put(K_KEY_SETTINGS, keys.keySettings);
-      if (keys.keySettingsSyncedAt !== undefined)
-        await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
-
-      if (keys.organizationArchived !== undefined)
-        await txn.put(K_ORG_ARCHIVED, keys.organizationArchived);
-      if (keys.settledCounter !== undefined) {
-        const current =
-          (await txn.get<number>(keys.settledCounter.storageKey)) ?? 0;
+        this.#compactCounters(keys.lastCompactionAt);
+      sql.exec(
+        `UPDATE wallet_checkpoint SET balance = ?, sequence = ?, flush_seq = ?,
+        settings_at = ?, sync_retry_at = ?, compacted_at = ?, archived = ? WHERE id = 1`,
+        this.#balance,
+        this.#sequence,
+        this.#flushSeq,
+        this.#keySettingsSyncedAt,
+        this.#syncRetryAt,
+        this.#lastCompactionAt,
+        Number(this.#orgArchived),
+      );
+      if (keys.inFlight)
+        this.#reservations.write(Object.entries(keys.inFlight));
+      if (keys.appliedGrantIds)
+        this.#grants.write(keys.appliedGrantIds.map((id) => [id, id]));
+      if (keys.pendingSettlements)
+        this.#pending.write(
+          keys.pendingSettlements.map((row) => [row.settlementId, row]),
+        );
+      if (keys.keySettings)
+        this.#settings.write(Object.entries(keys.keySettings));
+      if (keys.deadLetters)
+        this.#dead.write(
+          keys.deadLetters.map((row) => [row.settlementId, row]),
+        );
+      for (const [id, record] of this.#terminalWrites) {
+        sql.exec(
+          "INSERT OR REPLACE INTO terminal_refs (id, status, at) VALUES (?, ?, ?)",
+          id,
+          record.status,
+          record.at,
+        );
+      }
+      if (keys.settledCounter) {
+        const current = this.#counter(keys.settledCounter.storageKey);
         const next = current + keys.settledCounter.amount;
         if (!Number.isSafeInteger(current) || !Number.isSafeInteger(next)) {
           throw new Error("Settled usage counter exceeds safe integer range");
         }
-        await txn.put(keys.settledCounter.storageKey, next);
+        this.#setCounter(keys.settledCounter.storageKey, next);
       }
-      for (const deadLetter of keys.settlementDeadLetters ?? []) {
-        await txn.put(
-          `${K_DEAD_LETTER_PREFIX}${deadLetter.settlement.settlementId}`,
-          deadLetter,
+      for (const row of keys.settlementDeadLetters ?? []) {
+        sql.exec(
+          "INSERT OR REPLACE INTO settlement_dead_letters (id, data, at) VALUES (?, ?, ?)",
+          row.settlement.settlementId,
+          JSON.stringify(row),
+          row.rejectedAt,
+        );
+      }
+      if (this.#pruneAt !== undefined) {
+        // Unacknowledged refs never expire: lost-ack replay must still dedupe.
+        sql.exec(
+          `DELETE FROM terminal_refs WHERE at <= ? AND NOT EXISTS (
+          SELECT 1 FROM pending_settlements WHERE id = 'settle:' || terminal_refs.id
+        )`,
+          this.#pruneAt - TERMINAL_RETENTION_MS,
+        );
+        sql.exec(
+          "DELETE FROM settlement_dead_letters WHERE at <= ?",
+          this.#pruneAt - TERMINAL_RETENTION_MS,
         );
       }
     });
+    this.#terminalWrites.clear();
+    this.#pruneAt = undefined;
   }
 
   async #scheduleFlushAlarm(): Promise<void> {
     if (this.#pendingSettlements.length === 0) return;
     const existing = await this.ctx.storage.getAlarm();
-    if (existing !== null && existing !== undefined) return;
-    await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
+    const next = Date.now() + FLUSH_ALARM_MS;
+    if (existing !== null && existing !== undefined && existing <= next) return;
+    await this.ctx.storage.setAlarm(next);
   }
 
   /**
@@ -635,10 +666,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
    * is pending, otherwise a crashed executor pins credits until next traffic.
    */
   async #scheduleMaintenanceAlarm(): Promise<void> {
-    if (Object.keys(this.#inFlight).length === 0) return;
+    if (Object.keys(this.#inFlight).length === 0 && !this.#hasRetainedRows())
+      return;
     const existing = await this.ctx.storage.getAlarm();
-    if (existing !== null && existing !== undefined) return;
-    await this.ctx.storage.setAlarm(Date.now() + MAINTENANCE_ALARM_MS);
+    const next = Date.now() + MAINTENANCE_ALARM_MS;
+    if (existing !== null && existing !== undefined && existing <= next) return;
+    await this.ctx.storage.setAlarm(next);
   }
 
   /**
@@ -647,8 +680,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
    * DO storage does not grow with lifetime traffic. Cap enforcement only
    * reads the current month; free-tier reads only the current day.
    */
-  async #compactCounters(now: number): Promise<boolean> {
-    if (now - this.#lastCompactionAt < COMPACTION_INTERVAL_MS) return false;
+  #compactCounters(now: number): void {
+    if (now - this.#lastCompactionAt < COMPACTION_INTERVAL_MS) return;
     this.#lastCompactionAt = now;
 
     const day = new Date(now);
@@ -656,29 +689,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     const priorMonth = utcMonthKey(
       Date.UTC(day.getUTCFullYear(), day.getUTCMonth() - 1, 1),
     );
-    const keysToDelete: string[] = [];
-
-    const freeEntries = await this.ctx.storage.list({
-      prefix: K_FREE_PREFIX,
-    });
-    for (const key of freeEntries.keys()) {
-      const daySuffix = key.slice(key.lastIndexOf(":") + 1);
-      if (daySuffix < yesterday) keysToDelete.push(key);
-    }
-
-    const settledEntries = await this.ctx.storage.list({
-      prefix: K_SETTLED_PREFIX,
-    });
-    for (const key of settledEntries.keys()) {
-      const month = key.slice(key.lastIndexOf(":") + 1);
-      if (month < priorMonth) keysToDelete.push(key);
-    }
-
-    if (keysToDelete.length > 0) {
-      await this.ctx.storage.delete(keysToDelete);
-    }
-    await this.#persist({ lastCompactionAt: this.#lastCompactionAt });
-    return true;
+    this.ctx.storage.sql.exec(
+      "DELETE FROM counters WHERE (kind = 'free' AND period < ?) OR (kind = 'settled' AND period < ?)",
+      yesterday,
+      priorMonth,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -747,7 +762,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         this.#pruneTerminal(now);
         await this.#persist({
           inFlight: { ...this.#inFlight },
-          terminal: { ...this.#terminal },
         });
       }
       if (this.#orgArchived) {
@@ -774,7 +788,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         };
       }
 
-      const terminal = this.#terminal[reservationId];
+      const terminal = this.#terminalRecord(reservationId);
       if (terminal) {
         return {
           status: "conflict",
@@ -782,11 +796,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         };
       }
 
+      if (opts.keyId && setting === undefined) {
+        return { status: "rejected", reason: "wallet_unavailable" };
+      }
       // Per-key enforcement: disabled, expired grace, and all active holds.
       const currentSetting = opts.keyId
         ? setting === undefined
           ? null
-          : (this.#keySettings.get(opts.keyId) ?? setting)
+          : (this.#keySettings.get(opts.keyId) ?? null)
         : null;
       if (opts.keyId && currentSetting === null) {
         return { status: "rejected", reason: "key_untracked" };
@@ -794,10 +811,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       const keyId = opts.keyId ?? "unscoped";
       const period = utcMonthKey(now);
-      const used =
-        (await this.ctx.storage.get<number>(
-          settledStorageKey(keyId, period),
-        )) ?? 0;
+      const used = this.#counter(settledStorageKey(keyId, period));
       const reserved = sumInFlightForKey(this.#inFlight, keyId);
       if (opts.keyId && currentSetting) {
         if (this.#isKeyDisabled(currentSetting, now)) {
@@ -805,10 +819,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         }
         if (currentSetting.monthlyCapCredits !== undefined) {
           const familyId = currentSetting.keyFamilyId ?? currentSetting.keyId;
-          const familyUsed =
-            (await this.ctx.storage.get<number>(
-              settledStorageKey(familyId, period),
-            )) ?? 0;
+          const familyUsed = this.#counter(settledStorageKey(familyId, period));
           const familyReserved = sumInFlightForKey(this.#inFlight, familyId);
           const projected = familyUsed + familyReserved + cost;
           if (!Number.isSafeInteger(projected)) {
@@ -858,7 +869,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     if (!reservationId) return { status: "unknown" };
 
     return this.#mutate(async () => {
-      const terminal = this.#terminal[reservationId];
+      const terminal = this.#terminalRecord(reservationId);
       if (terminal?.status === "settled") {
         return {
           status: "already_settled",
@@ -904,7 +915,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         throw new Error("Wallet balance overflow");
       }
       this.#balance = nextBalance;
-      this.#terminal[reservationId] = { status: "settled", at: settledAt };
+      this.#terminalWrites.set(reservationId, {
+        status: "settled",
+        at: settledAt,
+      });
       const pending: PendingSettlement = {
         settlementId,
         reservationId,
@@ -919,7 +933,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         balance: this.#balance,
         inFlight: { ...this.#inFlight },
         pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-        terminal: { ...this.#terminal },
 
         ...((authoritativeUsage !== undefined
           ? (authoritativeUsage.keyFamilyId ?? authoritativeUsage.keyId)
@@ -954,7 +967,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     if (!reservationId) return { status: "unknown" };
 
     return this.#mutate(async () => {
-      const terminal = this.#terminal[reservationId];
+      const terminal = this.#terminalRecord(reservationId);
       if (terminal?.status === "refunded") {
         return { status: "already_refunded" };
       }
@@ -975,7 +988,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       const refundedAt = Date.now();
       delete this.#inFlight[reservationId];
-      this.#terminal[reservationId] = { status: "refunded", at: refundedAt };
+      this.#terminalWrites.set(reservationId, {
+        status: "refunded",
+        at: refundedAt,
+      });
       this.#pruneTerminal(refundedAt);
       if (usage) {
         this.#pendingSettlements.push({
@@ -989,7 +1005,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       await this.#persist({
         inFlight: { ...this.#inFlight },
-        terminal: { ...this.#terminal },
+
         pendingSettlements: this.#pendingSettlements.map((entry) => ({
           ...entry,
         })),
@@ -1030,10 +1046,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (this.#orgArchived) {
         return { status: "rejected", reason: "organization_archived" };
       }
+      if (setting === undefined) {
+        return { status: "rejected", reason: "wallet_unavailable" };
+      }
       const currentSetting =
         setting === undefined
           ? null
-          : (this.#keySettings.get(opts.keyId) ?? setting);
+          : (this.#keySettings.get(opts.keyId) ?? null);
       if (currentSetting === null) {
         return { status: "rejected", reason: "key_untracked" };
       }
@@ -1055,7 +1074,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         opts.pathTemplate,
         day,
       );
-      const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
+      const used = this.#counter(storageKey);
       if (used >= limit) {
         return { status: "exhausted", used, limit };
       }
@@ -1064,7 +1083,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (!Number.isSafeInteger(next)) {
         return { status: "rejected", reason: "free-tier counter overflow" };
       }
-      await this.ctx.storage.put(storageKey, next);
+      this.#setCounter(storageKey, next);
+      await this.#scheduleMaintenanceAlarm();
       const keyBudget = await this.#keyBudgetSnapshot(
         opts.keyId,
         currentSetting,
@@ -1092,10 +1112,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (this.#orgArchived) {
         return { status: "rejected", reason: "organization_archived" };
       }
+      if (setting === undefined) {
+        return { status: "rejected", reason: "wallet_unavailable" };
+      }
       const currentSetting =
-        setting === undefined
-          ? null
-          : (this.#keySettings.get(keyId) ?? setting);
+        setting === undefined ? null : (this.#keySettings.get(keyId) ?? null);
       if (currentSetting === null) {
         return { status: "rejected", reason: "key_untracked" };
       }
@@ -1137,8 +1158,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         opts.pathTemplate,
         utcDayKey(opts.nowMs ?? Date.now()),
       );
-      const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
-      if (used > 0) await this.ctx.storage.put(storageKey, used - 1);
+      const used = this.#counter(storageKey);
+      if (used > 0) this.#setCounter(storageKey, used - 1);
     });
   }
 
@@ -1156,7 +1177,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
     return this.#mutate(async () => {
       const settlementId = settlementIdFor(reservationId);
-      const terminal = this.#terminal[reservationId];
+      const terminal = this.#terminalRecord(reservationId);
       if (terminal?.status === "free" || terminal?.status === "settled") {
         return { status: "duplicate", settlementId };
       }
@@ -1168,7 +1189,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       const settledAt = Date.now();
-      this.#terminal[reservationId] = { status: "free", at: settledAt };
+      this.#terminalWrites.set(reservationId, {
+        status: "free",
+        at: settledAt,
+      });
       this.#pruneTerminal(settledAt);
       this.#pendingSettlements.push({
         settlementId,
@@ -1180,7 +1204,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       await this.#persist({
         pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-        terminal: { ...this.#terminal },
       });
       await this.#scheduleFlushAlarm();
 
@@ -1535,18 +1558,28 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   async getSettlementQueueLayout(): Promise<SettlementQueueLayout> {
-    return await inspectSettlementQueue(this.ctx.storage);
+    // Retain the RPC diagnostics shape; partitions are now logical flush batches.
+    const size = this.#pendingSettlements.length;
+    const partitionCount = Math.ceil(size / USAGE_FLUSH_BATCH_SIZE);
+    return {
+      size,
+      partitionCount,
+      partitionSizes: Array.from({ length: partitionCount }, (_, index) =>
+        Math.min(USAGE_FLUSH_BATCH_SIZE, size - index * USAGE_FLUSH_BATCH_SIZE),
+      ),
+    };
   }
 
   async getSettlementDeadLetter(
     settlementId: string,
   ): Promise<SettlementDeadLetter | null> {
-    if (!settlementId || typeof settlementId !== "string") return null;
-    return (
-      (await this.ctx.storage.get<SettlementDeadLetter>(
-        `${K_DEAD_LETTER_PREFIX}${settlementId}`,
-      )) ?? null
-    );
+    const row = this.ctx.storage.sql
+      .exec<{ data: string }>(
+        "SELECT data FROM settlement_dead_letters WHERE id = ?",
+        settlementId,
+      )
+      .toArray()[0];
+    return row ? (JSON.parse(row.data) as SettlementDeadLetter) : null;
   }
 
   async getFreeTierUsed(opts: {
@@ -1556,17 +1589,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     pathTemplate: string;
     nowMs?: number;
   }): Promise<number> {
-    const day = utcDayKey(opts.nowMs ?? Date.now());
-    return (
-      (await this.ctx.storage.get<number>(
-        freeStorageKey(
-          opts.clerkOrgId,
-          opts.projectId,
-          opts.method,
-          opts.pathTemplate,
-          day,
-        ),
-      )) ?? 0
+    return this.#counter(
+      freeStorageKey(
+        opts.clerkOrgId,
+        opts.projectId,
+        opts.method,
+        opts.pathTemplate,
+        utcDayKey(opts.nowMs ?? Date.now()),
+      ),
     );
   }
 
@@ -1579,21 +1609,46 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     clerkOrgId: string,
     nowMs: number = Date.now(),
   ): Promise<SyncGrantsResult> {
-    return this.#mutate(async () => {
-      const last = (await this.ctx.storage.get<number>(K_SYNC_GRANTS_AT)) ?? 0;
-      if (nowMs - last < SYNC_GRANTS_WINDOW_MS) {
-        return {
-          status: "rate_limited",
-          retryAfterSeconds: Math.ceil(
-            (SYNC_GRANTS_WINDOW_MS - (nowMs - last)) / 1000,
-          ),
-        };
-      }
-      // Claim the window before the network call so a flood of retries is gated.
-      await this.ctx.storage.put(K_SYNC_GRANTS_AT, nowMs);
+    if (this.#syncInFlight) return this.#syncInFlight;
+    this.#syncInFlight = this.#refreshGrants(clerkOrgId, nowMs).finally(() => {
+      this.#syncInFlight = null;
+    });
+    return this.#syncInFlight;
+  }
 
-      const synced = await this.#fetchGrantsFromConvex(clerkOrgId);
+  async #refreshGrants(
+    clerkOrgId: string,
+    nowMs: number,
+  ): Promise<SyncGrantsResult> {
+    const retryAfter = await this.#mutate(async () => {
+      if (nowMs < this.#syncRetryAt) return this.#syncRetryAt - nowMs;
+      this.#syncRetryAt = nowMs + SYNC_GRANTS_WINDOW_MS;
+      await this.#persist({ syncRetryAt: this.#syncRetryAt });
+      return 0;
+    });
+    if (retryAfter > 0) {
+      return {
+        status: "rate_limited",
+        retryAfterSeconds: Math.ceil(retryAfter / 1000),
+      };
+    }
+
+    // No wallet lock across network I/O: cached admissions and finalization proceed.
+    let synced: {
+      wallet: WalletCheckpoint;
+      keySettings: KeySetting[];
+      archived: boolean;
+    } | null;
+    try {
+      synced = await this.#fetchGrantsFromConvex(clerkOrgId);
+    } catch {
+      synced = null;
+    }
+    return this.#mutate(async () => {
       if (synced === null) {
+        // Cold wallets can recover promptly; failures never invalidate cached controls.
+        this.#syncRetryAt = nowMs + FLUSH_ALARM_MS;
+        await this.#persist({ syncRetryAt: this.#syncRetryAt });
         return {
           status: "sync_failed",
           error: "could not fetch wallet checkpoint",
@@ -1601,53 +1656,35 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           sequence: this.#sequence,
         };
       }
-
-      // Full replace: Convex returns the complete key configuration.
       this.#keySettings = new Map(
         synced.keySettings.map((setting) => [setting.keyId, setting]),
       );
       this.#keySettingsSyncedAt = nowMs;
-      // Archive is terminal. Never reopen from an older/non-terminal response.
       this.#orgArchived ||= synced.archived;
       this.#acceptCheckpoint(synced.wallet);
-
       await this.#persist({
         balance: this.#balance,
         sequence: this.#sequence,
         keySettings: Object.fromEntries(this.#keySettings),
-        keySettingsSyncedAt: this.#keySettingsSyncedAt,
-
+        keySettingsSyncedAt: nowMs,
         organizationArchived: this.#orgArchived,
       });
-
-      return {
-        status: "ok",
-        balance: this.#balance,
-        sequence: this.#sequence,
-      };
+      return { status: "ok", balance: this.#balance, sequence: this.#sequence };
     });
   }
 
-  /**
-   * Resolve key settings off the request hot path. Stale-but-present cache
-   * entries serve immediately while a single-flight refresh runs in the
-   * background (stale-while-revalidate, bounded by SYNC_GRANTS_WINDOW_MS).
-   * Only first contact (never synced) blocks, so a cold DO cannot enforce
-   * caps against settings it has never seen.
-   */
+  /** Only cold wallets await control state; stale snapshots refresh in the background. */
   async #resolveKeySetting(
     keyId: string,
     clerkOrgId: string | undefined,
     nowMs: number,
   ): Promise<KeySetting | null | undefined> {
     if (!clerkOrgId) return undefined;
-    if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
-      await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
-      // Once positive control state expires, a failed refresh cannot preserve
-      // spending authority indefinitely. Missing row then fails closed.
-      if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
-        return undefined;
-      }
+    if (this.#keySettingsSyncedAt === 0) {
+      await this.syncGrants(clerkOrgId, nowMs);
+      if (this.#keySettingsSyncedAt === 0) return undefined;
+    } else if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
+      this.ctx.waitUntil(this.syncGrants(clerkOrgId, nowMs));
     }
     return this.#keySettings.get(keyId) ?? null;
   }
@@ -1659,9 +1696,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     reservationCredits: number,
   ): Promise<KeyBudgetSnapshot> {
     const period = utcMonthKey(nowMs);
-    const usedBefore =
-      (await this.ctx.storage.get<number>(settledStorageKey(keyId, period))) ??
-      0;
+    const usedBefore = this.#counter(settledStorageKey(keyId, period));
     return {
       keyId,
       keyFamilyId: setting?.keyFamilyId ?? keyId,
@@ -1707,18 +1742,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return true;
   }
 
-  /** Coalesce concurrent syncGrants calls into a single fetch. */
-  #syncGrantsSingleFlight(
-    clerkOrgId: string,
-    nowMs: number,
-  ): Promise<SyncGrantsResult> {
-    if (this.#syncInFlight) return this.#syncInFlight;
-    this.#syncInFlight = this.syncGrants(clerkOrgId, nowMs).finally(() => {
-      this.#syncInFlight = null;
-    });
-    return this.#syncInFlight;
-  }
-
   /**
    * Fetch the authoritative wallet checkpoint from Convex /wallet-grants.
    * Returns null on any failure (misconfig, non-2xx, bad JSON) so callers
@@ -1752,6 +1775,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
     try {
       const res = await fetch(target, {
+        signal: AbortSignal.timeout(5_000),
         headers: { "x-internal-secret": secret },
       });
       if (!res.ok) return null;
@@ -1795,15 +1819,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async alarm(): Promise<void> {
     const now = Date.now();
     await this.#mutate(async () => {
-      const expired = this.#expireStaleReservations(now);
+      this.#expireStaleReservations(now);
       this.#pruneTerminal(now);
-      const compacted = await this.#compactCounters(now);
-      if (expired || compacted) {
-        await this.#persist({
-          inFlight: { ...this.#inFlight },
-          terminal: { ...this.#terminal },
-        });
-      }
+      await this.#persist({
+        inFlight: { ...this.#inFlight },
+        lastCompactionAt: now,
+      });
     });
 
     if (this.#pendingSettlements.length > 0) {
@@ -1819,7 +1840,21 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
     } else if (Object.keys(this.#inFlight).length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + MAINTENANCE_ALARM_MS);
+    } else if (this.#hasRetainedRows()) {
+      await this.ctx.storage.setAlarm(Date.now() + COMPACTION_INTERVAL_MS);
     }
+  }
+
+  #hasRetainedRows(): boolean {
+    return (
+      this.ctx.storage.sql
+        .exec(
+          `SELECT 1 FROM terminal_refs
+      UNION ALL SELECT 1 FROM counters
+      UNION ALL SELECT 1 FROM settlement_dead_letters LIMIT 1`,
+        )
+        .toArray().length > 0
+    );
   }
 }
 
@@ -1861,3 +1896,5 @@ export function __setTestGrantsFetcher(fn: TestGrantsFetcher | null): void {
 function getTestGrantsFetcher(): TestGrantsFetcher | null {
   return testGrantsFetcher;
 }
+
+export type WalletDO = WalletSqliteDO;

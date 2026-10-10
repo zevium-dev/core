@@ -1,7 +1,7 @@
 # Listing lifecycle
 
-> Status: partial (P1 #15 deprecation/retirement built; P2 #19 version pinning + spec-diff changelog not built) · Updated: 2026-10-10
-> Code: `convex/projects.ts` (`scheduleRetirement`, `cancelRetirement`, `remove`, `retire`, `retireSunsetProjects`, `notifyRetirementConsumersPage`), `convex/specs.ts` (`publish`, `deprecateVersion`, `undeprecateVersion`), `convex/quality.ts` (`setSubscription`), `convex/lib/publicRoutes.ts`, `convex/deprecation.test.ts`, `convex/project-retirement.test.ts`, `convex/project-lifecycle.test.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mock.ts`, `apps/web/src/components/project/visibility-card.tsx`, `apps/web/src/components/project/danger-zone.tsx`, `apps/web/src/components/spec-editor/rail-versions.tsx`, `apps/web/src/components/spec-editor/version-lifecycle-dialogs.tsx`
+> Status: partial (P1 #15 deprecation/retirement + #393 visibility webhooks built; P2 #19 version pinning + spec-diff changelog not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts` (`update`, `scheduleRetirement`, `cancelRetirement`, `remove`, `retire`, `retireSunsetProjects`, `notifyRetirementConsumersPage`), `convex/specs.ts` (`publish`, `deprecateVersion`, `undeprecateVersion`), `convex/quality.ts` (`setSubscription`), `convex/lib/publicRoutes.ts`, `convex/project-visibility-webhooks.test.ts`, `convex/deprecation.test.ts`, `convex/project-retirement.test.ts`, `convex/project-lifecycle.test.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mock.ts`, `apps/web/src/components/project/visibility-card.tsx`, `apps/web/src/components/project/danger-zone.tsx`, `apps/web/src/components/spec-editor/rail-versions.tsx`, `apps/web/src/components/spec-editor/version-lifecycle-dialogs.tsx`
 > Related: [publishing-specs](publishing-specs.md), [quality-signals](quality-signals.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [catalogue-search](catalogue-search.md), [registry-v2](../architecture/registry-v2.md), [roadmap](../product/roadmap.md)
 
 How a listing moves through publish, deprecate/unpublish and terminal archive without silently breaking consumers. A publisher cannot kill an API with active consumers: removal requires a notice window, response signaling and consumer notices; archived URLs stay reserved as tombstones.
@@ -31,6 +31,8 @@ Related surfaces:
 
 ## Tech
 
+- **Suspension preservation (#355)**: `projects.update` and `cancelRetirement` use targeted patches. Clearing a description or canceling retirement removes only the intended optional fields; quality suspension/recovery metadata, desired visibility, and `publicationGeneration` survive. Cancellation still increments `retirementRevision`, invalidating stale fanout jobs. Regression coverage: `project-authorization.test.ts` and `project-retirement.test.ts`.
+
 From [architecture overview](../architecture/overview.md):
 
 - **Registry lifecycle**: organization and public-route tombstones are authoritative over restored mutable rows. Every org lookup fails closed when `organizationTombstones` contains its Clerk id; every public/execution route lookup requires one exact active reservation binding org id, project id, publisher handle, project slug, and absent `retiredAt`. Org archive, route retirement, key revocation, and legacy-key rotation-required remain terminal stream states. Publisher removal requires a scheduled sunset; immediate retirement is an internal mutation callable only by deployment operators for maintenance. First publish permanently reserves `(publisher handle, project slug)`; project removal archives source/tombstone rows and never physically deletes immutable versions. Direct Convex catalogue/spec/search lookups fail closed immediately; Wallet DO receives a zero/disabled archived checkpoint. Receiver must join every route/key/catalogue read against org kill state, require catalogue's exact active route revision, deny unknown/rotation-required keys, and serve retired public URLs as `410` tombstones.
@@ -40,6 +42,7 @@ Receiver status (registry v2, not implemented): [registry-v2](../architecture/re
 
 Code facts (read from source 2026-10-10, not from TECH.md):
 
+- **Explicit visibility changes (#393)**: publisher `projects.update` and staff `admin.setProjectVisibility` emit only for an actual transition; payload and retry behavior live in [webhooks-notifications](webhooks-notifications.md). Publisher public→private remains rejected for published projects (retirement required); draft visibility changes and staff overrides retain their existing rules.
 - Two levels exist. **Version deprecation** (`specs.deprecateVersion`/`undeprecateVersion`, admin only): sets `deprecatedAt`, `sunsetAt` (≥7 days), message 1–1000 chars, `version_deprecated` notification; spec body unchanged; version sunset stays informational until project retirement; cannot restore after cutoff. **Project retirement** (`projects.scheduleRetirement`, public published projects only): `MIN_DEPRECATION_NOTICE_MS` = 7 days, message required, publisher `project_retirement` notification, paginated consumer fanout from `usageEvents` (`notifyRetirementConsumersPage` + late-settlement reconcile). Retirement freezes catalogue discovery while detail page and gateway stay available until sunset; `cancelRetirement` allowed only before sunset.
 - Cron `projects.retireSunsetProjects` retires due projects; retirement disables probes, blocks gateway, cleans runtime secrets, retains audit/evidence. `projects.remove` of a published project requires a scheduled sunset that has passed; result is `deletionState: "tombstoned"`.
 - Gateway sets `Deprecation`/`Link`/`Sunset` in `apps/gateway/src/pipeline.ts` and on `/mock` in `apps/gateway/src/mock.ts`. Link host hardcoded `https://zevium.dev/catalogue/...`.
@@ -51,6 +54,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - None recorded beyond TECH.md bullets above.
 
 ## Open questions
+
+- Resolved #355: clearing metadata or canceling retirement cannot clear quality enforcement or the publication generation fence.
 
 - FLOW says consumers notified by "banner + email"; code sends in-app notifications only (no email provider in tree). Fix FLOW or add email.
 - `410` tombstones for retired public URLs depend on the unimplemented registry receiver ([registry-v2](../architecture/registry-v2.md)); current direct Convex lookups fail closed instead.

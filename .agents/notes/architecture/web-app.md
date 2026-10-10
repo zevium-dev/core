@@ -26,3 +26,9 @@ Catalogue route adapters and the navigation-provider rules (public vs authentica
 
 - `@uiw/react-codemirror` defaults to its own LIGHT theme — pass `theme="none"` or CSS-var themes get overridden.
 - Spec editor parser/highlighter must share one `@lezer/common` instance — see [publishing-specs](../features/publishing-specs.md).
+
+## Shared presentation and errors
+
+- `lib/format.ts` owns money, integer/fractional credits, and UTC date formatting for catalogue, billing/activity, earnings, analytics, reviews, and admin. Stock `components/ui/table.tsx` comes from the shadcn CLI; `CopyButton`, HTTP `StatusBadge`, and `ListBoundary` are shared compositions.
+- `human-error.ts` maps only explicit authorization/finance codes to public copy; unknown Error messages and strings always use the caller's fallback, regardless of length. Mutation toasts never forward arbitrary provider/internal text.
+- Paginated lists use Convex's native hook; query failures stay in local list boundaries. The protected/public catalogue route adapters remain because unifying their provider/SSR topology is separate from list correctness.

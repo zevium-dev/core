@@ -1,11 +1,22 @@
+import { CopyButton } from "#/components/copy-button";
+import { formatDate } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useHydrated } from "@tanstack/react-router";
-import { Check, Copy, PackageX, Terminal, TriangleAlert } from "lucide-react";
+import { PackageX, Terminal, TriangleAlert } from "lucide-react";
 import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useState,
   type FormEvent,
@@ -76,12 +87,6 @@ import {
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
 const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
-const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
 
 function responseLanguage(body: string): "json" | "plain" {
   try {
@@ -157,15 +162,6 @@ function buildCurl(opts: {
   return parts.join(" \\\n");
 }
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function parameterInputId(endpointId: string, parameter: ApiParameter): string {
   return `try-${endpointId}-${parameter.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
@@ -214,15 +210,15 @@ function ApiDetailBody({
     }),
   );
 
+  const spec = data?.latestVersion?.spec;
   const endpoints = useMemo(() => {
-    if (data === null || data.latestVersion === null)
-      return [] as EndpointRow[];
+    if (spec === undefined) return [] as EndpointRow[];
     try {
-      return parsePublishedEndpoints(data.latestVersion.spec);
+      return parsePublishedEndpoints(spec);
     } catch {
       return [] as EndpointRow[];
     }
-  }, [data]);
+  }, [spec]);
 
   const priceRange = useMemo(() => {
     if (endpoints.length === 0) return null;
@@ -334,7 +330,7 @@ function ApiDetailBody({
             <p className="font-medium text-warning-foreground">
               Deprecated
               {data.latestVersion.sunsetAt !== undefined
-                ? ` — sunset ${DATE_FORMATTER.format(data.latestVersion.sunsetAt)}`
+                ? ` — sunset ${formatDate(data.latestVersion.sunsetAt)}`
                 : ""}
             </p>
             {data.latestVersion.deprecationMessage ? (
@@ -535,27 +531,27 @@ function ReferenceParameters({ parameters }: { parameters: ApiParameter[] }) {
     <div className="space-y-2">
       <h3 className="text-sm font-medium">Parameters</h3>
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-[34rem] text-left text-sm">
-          <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-            <tr>
-              <th scope="col" className="px-3 py-2 font-medium">
+        <Table className="w-full min-w-[34rem] text-left text-sm">
+          <TableHeader className="border-b bg-muted/40 text-xs text-muted-foreground">
+            <TableRow>
+              <TableHead scope="col" className="px-3 py-2 font-medium">
                 Name
-              </th>
-              <th scope="col" className="px-3 py-2 font-medium">
+              </TableHead>
+              <TableHead scope="col" className="px-3 py-2 font-medium">
                 In
-              </th>
-              <th scope="col" className="px-3 py-2 font-medium">
+              </TableHead>
+              <TableHead scope="col" className="px-3 py-2 font-medium">
                 Type
-              </th>
-              <th scope="col" className="px-3 py-2 font-medium">
+              </TableHead>
+              <TableHead scope="col" className="px-3 py-2 font-medium">
                 Description
-              </th>
-            </tr>
-          </thead>
-          <tbody>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {parameters.map((parameter) => (
-              <tr key={parameter.key} className="border-b last:border-0">
-                <th
+              <TableRow key={parameter.key} className="border-b last:border-0">
+                <TableHead
                   scope="row"
                   className="px-3 py-2 font-mono text-xs font-medium"
                 >
@@ -568,20 +564,20 @@ function ReferenceParameters({ parameters }: { parameters: ApiParameter[] }) {
                       *
                     </span>
                   ) : null}
-                </th>
-                <td className="px-3 py-2 text-muted-foreground">
+                </TableHead>
+                <TableCell className="px-3 py-2 text-muted-foreground">
                   {parameter.location}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">
+                </TableCell>
+                <TableCell className="px-3 py-2 font-mono text-xs">
                   {parameter.type}
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">
+                </TableCell>
+                <TableCell className="px-3 py-2 text-muted-foreground">
                   {parameter.description ?? "—"}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
@@ -677,6 +673,7 @@ export function TryItPanel({
   onEndpointChange: (endpointId: string) => void;
   onModeChange: (mode: PlaygroundMode) => void;
 }) {
+  const links = useCatalogueLinks();
   const hydrated = useHydrated();
   const endpoint =
     endpoints.find((e) => e.id === endpointId) ?? endpoints[0] ?? null;
@@ -692,9 +689,6 @@ export function TryItPanel({
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<PlayResult | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
-    "idle",
-  );
   const mock = mode === "mock";
 
   useEffect(() => {
@@ -706,7 +700,7 @@ export function TryItPanel({
     }
   }, []);
 
-  useEffect(() => {
+  const resetEndpoint = useEffectEvent(() => {
     if (!endpoint) return;
     setParameterValues((previous) => {
       const next: Record<string, string> = {};
@@ -718,7 +712,8 @@ export function TryItPanel({
     setBodyText(endpoint.requestBodyExample);
     setErrors({});
     setResult(null);
-  }, [endpoint]);
+  });
+  useEffect(() => resetEndpoint(), [endpoint?.id]);
 
   const onApiKeyChange = useCallback((value: string) => {
     setApiKey(value);
@@ -751,8 +746,8 @@ export function TryItPanel({
       mode,
       ...(endpoint ? { operation: endpoint.id } : {}),
     });
-    return `/catalogue/${encodeURIComponent(publisherHandle)}/${encodeURIComponent(projectSlug)}?${search.toString()}`;
-  }, [endpoint, mode, projectSlug, publisherHandle]);
+    return `${links.catalogue}/${encodeURIComponent(publisherHandle)}/${encodeURIComponent(projectSlug)}?${search.toString()}`;
+  }, [endpoint, mode, projectSlug, publisherHandle, links.catalogue]);
 
   const needsBody =
     endpoint !== null &&
@@ -867,8 +862,8 @@ export function TryItPanel({
     }
   }
 
-  function onCopyCurl() {
-    if (!endpoint) return;
+  function curlText() {
+    if (!endpoint) return "";
     const headers = parseExtraHeaders(headersText);
     for (const parameter of endpoint.parameters) {
       if (parameter.location !== "header") continue;
@@ -886,15 +881,11 @@ export function TryItPanel({
         headers["Content-Type"] = endpoint.requestContentType;
       }
     }
-    const curl = buildCurl({
+    return buildCurl({
       method: endpoint.method,
       url: requestUrl,
       headers,
       body,
-    });
-    void copyText(curl).then((copied) => {
-      setCopyState(copied ? "copied" : "error");
-      if (copied) window.setTimeout(() => setCopyState("idle"), 1500);
     });
   }
 
@@ -1077,7 +1068,7 @@ export function TryItPanel({
                     data-1p-ignore
                     data-lpignore="true"
                     spellCheck={false}
-                    placeholder="zv_…"
+                    placeholder="ak_…"
                     value={apiKey}
                     onChange={(e) => {
                       onApiKeyChange(e.target.value);
@@ -1212,28 +1203,18 @@ export function TryItPanel({
                     ? "Send mock · 0 credits"
                     : `Send live · ${liveCostLabel(endpoint)}`}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onCopyCurl()}
+              <CopyButton
+                text={curlText}
+                label="Copy curl"
                 disabled={!endpoint}
-              >
-                {copyState === "copied" ? (
-                  <Check className="size-4" />
-                ) : (
-                  <Copy className="size-4" />
-                )}
-                {copyState === "copied" ? "Copied curl" : "Copy curl"}
-              </Button>
+              />
               <span
                 className="text-xs text-muted-foreground"
                 aria-live="polite"
               >
-                {copyState === "error"
-                  ? "Copy failed. Select request values and copy manually."
-                  : mock
-                    ? "Generated curl uses the keyless mock endpoint."
-                    : "Generated curl uses a placeholder and never copies your secret."}
+                {mock
+                  ? "Generated curl uses the keyless mock endpoint."
+                  : "Generated curl uses a placeholder and never copies your secret."}
               </span>
             </div>
 
@@ -1325,31 +1306,6 @@ export function TryItPanel({
   );
 }
 
-function CopyAction({ text, label }: { text: string; label: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          void copyText(text).then((copied) => {
-            setState(copied ? "copied" : "error");
-            if (copied) window.setTimeout(() => setState("idle"), 1500);
-          });
-        }}
-      >
-        {state === "copied" ? <Check /> : <Copy />}
-        {state === "copied" ? "Copied" : label}
-      </Button>
-      <span className="text-xs text-muted-foreground" aria-live="polite">
-        {state === "error" ? "Copy failed. Select and copy manually." : ""}
-      </span>
-    </div>
-  );
-}
-
 function ConnectAgentPanel({
   publisherHandle,
   projectSlug,
@@ -1367,7 +1323,7 @@ function ConnectAgentPanel({
 // 1. Search catalogue with tool search_apis({ query })
 // 2. Load docs with get_api_docs({ org: "${publisherHandle}", project: "${projectSlug}" })
 // 3. Call an endpoint with call_api using your Zevium key and prepaid wallet
-// Gateway base: ${gatewayBaseUrl()}/${publisherHandle}/${projectSlug}`;
+// Gateway base: ${tryItBaseUrl(gatewayBaseUrl(), false)}/${publisherHandle}/${projectSlug}`;
 
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -1386,7 +1342,7 @@ function ConnectAgentPanel({
           <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
             <SyntaxCode code={snippet} lang="json" />
           </pre>
-          <CopyAction text={snippet} label="Copy config" />
+          <CopyButton text={snippet} label="Copy config" />
         </CardContent>
       </Card>
 
@@ -1401,7 +1357,7 @@ function ConnectAgentPanel({
           <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
             <SyntaxCode code={notes} lang="js" />
           </pre>
-          <CopyAction text={notes} label="Copy notes" />
+          <CopyButton text={notes} label="Copy notes" />
         </CardContent>
       </Card>
     </div>

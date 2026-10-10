@@ -552,3 +552,32 @@ describe("catalogue.listPublic", () => {
     expect(total).toBe(61);
   });
 });
+
+describe("catalogue reactive pagination contract", () => {
+  it("uses requested page boundaries and starts fresh when filters change", async () => {
+    const t = convexTest(schema, modules);
+    await seedCatalogue(t);
+    await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+      cursor: null,
+    });
+    const first = await t.query(api.catalogue.listPublicPaginated, {
+      sort: "name",
+      paginationOpts: { cursor: null, numItems: 1 },
+    });
+    expect(first.page).toHaveLength(1);
+    expect(first.isDone).toBe(false);
+    const second = await t.query(api.catalogue.listPublicPaginated, {
+      sort: "name",
+      paginationOpts: { cursor: first.continueCursor, numItems: 1 },
+    });
+    expect(second.page).toHaveLength(1);
+    expect(second.page[0]!.slug).not.toBe(first.page[0]!.slug);
+    const reset = await t.query(api.catalogue.listPublicPaginated, {
+      sort: "name",
+      hasFreeTier: true,
+      paginationOpts: { cursor: null, numItems: 24 },
+    });
+    expect(reset.page.map((row) => row.slug)).toEqual(["free-tier"]);
+    expect(reset.isDone).toBe(true);
+  });
+});

@@ -1,7 +1,7 @@
 # Quality signals
 
-> Status: partial (P0 #7 quality signals mostly built; P2 #18 security scan + status pages not built) · Updated: 2026-10-10
-> Code: `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`
+> Status: partial (P0 #7 quality signals mostly built; credential readiness mismatch #389 fixed; P2 #18 security scan + status pages not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts`, `convex/project-authorization.test.ts`, `convex/project-retirement.test.ts`, `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `convex/publishReadiness.test.ts`
 > Related: [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [catalogue-search](catalogue-search.md), [platform-admin](platform-admin.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [roadmap](../product/roadmap.md)
 
 Listing quality is measured and enforced. Catalogue listings carry evidence-based badges (real-call latency, real-call success rate, declared-health reachability, freshness), publication is gated by a reachable declared health endpoint, and repeated health failures suspend a listing until bounded recovery. Curation and quality gates matter more than raw catalogue size.
@@ -34,10 +34,13 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 ## Tech
 
+- **Quality state ownership (#355)**: metadata edits and retirement cancellation preserve `qualityStatus`, suspension time/reason, recovery passes, `desiredVisibility`, and `publicationGeneration`. Only the quality workflow restores a suspended listing. Regression coverage: `convex/project-authorization.test.ts` and `convex/project-retirement.test.ts`.
+
 No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-10):
 
 - **Health-check declaration**: exactly one parameter-free `GET`/`HEAD` operation marked `x-zevium-health-check: true`, absolute path, no `{}`/`?`/`#` (`extractHealthCheckTarget`); URL joined onto `servers[0].url`.
 - **Publish gate**: `publishReadinessAction.testConnection` (org admin only, `"use node"`) calls `probePublicHttps` without publisher credentials and outside metering/earnings. Only 2xx/3xx records a passing test (`recordPassingTest`) bound to saved-draft SHA-256; valid `READINESS_TTL_MS` = 15 min. `specs.publish` refuses without a current pass. Result statuses: `ready`, `reachable_unhealthy`, `blocked_target`, `timeout`, `unreachable`, `missing_health_check`.
+- **Credential binding (#389)**: `recordPassingTest`, `getCurrent`, and `specs.publish` share `credentialRevision` (`max(revision ?? updatedAt)`, 0 for no credentials) and `credentialSetFingerprint` (sorted identity, name, revision, timestamp). This keeps the editor and publish gate consistent for current and legacy rows; credential additions, rotations, and removals invalidate the pass even when the aggregate revision stays unchanged. Tests reproduce save draft → attach `X-Dogfood-Token` → passing credential-free health action → publish `0.0.1`, plus legacy rows and change/retest recovery.
 - **Probe safety** (`qualityProbeAction.ts`): HTTPS only, public IPv4/IPv6 only, DNS pin checked against remote address, `PROBE_TIMEOUT_MS` 8s, `MAX_PROBE_REDIRECTS` 2. Outcomes: `healthy`, `http_error`, `timeout`, `dns_error`, `tls_error`, `network_error`, `blocked_target`.
 - **Scheduled probes**: cron every 5 min → `quality.runDueProbes` leases up to `PROBE_BATCH_SIZE` 20 targets (`qualityProbeTargets`, lease 60s, `PROBE_INTERVAL_MS` 5 min); results idempotent by `executionId` in `qualityProbeResults`; stale version/generation results dropped.
 - **Snapshot** (`qualitySnapshots`, one per project, current published version only; each version starts fresh): reachability over last 24 probes, floor 3 samples (`reachabilityPercent` = any HTTP response); API success/latency p50 over last 100 `gatewayQualitySamples` (privacy-minimized real gateway outcomes written in `wallets.ts`), floor 20; freshness `stale` after 30 min since last measurement. Contract `QualitySnapshotContract` in shared; below floor returns `null` metrics + `insufficient*Data: true`.
@@ -50,6 +53,8 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - None recorded beyond PRODUCT.md rules above.
 
 ## Open questions
+
+- Resolved #355: `projects.update` and `cancelRetirement` no longer erase suspension through partial document replacement.
 
 - [roadmap](../product/roadmap.md) (former BACKLOG) "Public quality signals and automated listing gates" (probe reachability/uptime, expose latency/success/freshness, block publication on failed gates) is largely built in code; backlog stale. Remaining: per-API status surfaces.
 - FLOW says listing cards show quality badges; code renders `QualityBadges` only on detail page, though `listPublic` returns `quality`.

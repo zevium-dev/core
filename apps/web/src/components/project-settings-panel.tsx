@@ -26,7 +26,9 @@ export function ProjectSettingsPanel({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Admin access required</CardTitle>
+          <CardTitle role="heading" aria-level={2}>
+            Admin access required
+          </CardTitle>
           <CardDescription>
             Organization admins manage project metadata, visibility, upstream
             credentials, webhooks, and deletion. Ask an admin to make changes.

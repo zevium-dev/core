@@ -110,117 +110,122 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" variant="inset">
-      <SidebarHeader className="h-14 justify-center border-b p-3">
-        <Link
-          to="/app"
-          onClick={closeMobileNavigation}
-          aria-label="Zevium dashboard"
-          className="flex items-center gap-1 rounded-md px-1 outline-none transition-transform duration-[var(--dur-base)] ease-[var(--ease)] focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:-translate-x-1"
-        >
-          <BrandMark className="h-4 w-6 shrink-0" />
-          <span
-            aria-hidden="true"
-            className="truncate text-lg font-semibold tracking-tight group-data-[collapsible=icon]:hidden"
+      <nav
+        aria-label="App navigation"
+        className="flex h-full min-h-0 w-full flex-col"
+      >
+        <SidebarHeader className="h-14 justify-center border-b p-3">
+          <Link
+            to="/app"
+            onClick={closeMobileNavigation}
+            aria-label="Zevium dashboard"
+            className="flex items-center gap-1 rounded-md px-1 outline-none transition-transform duration-[var(--dur-base)] ease-[var(--ease)] focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:-translate-x-1"
           >
-            evium
-          </span>
-        </Link>
-      </SidebarHeader>
+            <BrandMark className="h-4 w-6 shrink-0" />
+            <span
+              aria-hidden="true"
+              className="truncate text-lg font-semibold tracking-tight group-data-[collapsible=icon]:hidden"
+            >
+              evium
+            </span>
+          </Link>
+        </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup className="pb-0">
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <ClientOnly fallback={<Skeleton className="h-8 w-full" />}>
-              <OrganizationSwitcher
-                organizationProfileMode="navigation"
-                organizationProfileUrl="/app/org"
-                appearance={{
-                  theme: clerkShadcnTheme,
-                  elements: {
-                    rootBox: "flex! w-full! min-w-0",
-                    organizationSwitcherTrigger: compact
-                      ? "size-8! justify-center! overflow-hidden p-0!"
-                      : "h-8! w-full! max-w-full min-w-0 justify-between overflow-hidden px-2!",
-                    organizationPreview: compact
-                      ? "w-full! justify-center! overflow-hidden"
-                      : "min-w-0 flex-1 overflow-hidden",
-                    organizationPreviewTextContainer: compact
-                      ? "hidden!"
-                      : "min-w-0",
-                    organizationPreviewMainIdentifier: compact
-                      ? "hidden!"
-                      : "block truncate",
-                    organizationSwitcherTriggerIcon: compact
-                      ? "hidden!"
-                      : "shrink-0",
-                  },
-                }}
-                afterSelectOrganizationUrl="/app"
-                afterCreateOrganizationUrl="/app"
-                hidePersonal={false}
-              />
-            </ClientOnly>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {navGroups.map((group) => (
-          <SidebarGroup key={group.label} className="py-0">
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+        <SidebarContent>
+          <SidebarGroup className="pb-0">
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={item === activeItem}
-                      tooltip={item.title}
-                    >
-                      <Link to={item.to} onClick={closeMobileNavigation}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
-      </SidebarContent>
-
-      <SidebarSeparator className="w-[calc(100%-1rem)]!" />
-      <SidebarFooter className="p-3">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
-              <ClientOnly
-                fallback={<Skeleton className="h-11 min-w-0 flex-1" />}
-              >
-                <UserButton
-                  userProfileProps={{ apiKeysProps: { hide: true } }}
-                  showName={!compact}
+              <ClientOnly fallback={<Skeleton className="h-8 w-full" />}>
+                <OrganizationSwitcher
+                  organizationProfileMode="navigation"
+                  organizationProfileUrl="/app/org"
                   appearance={{
                     theme: clerkShadcnTheme,
                     elements: {
-                      rootBox: "flex! min-w-0 flex-1",
-                      userButtonTrigger: "min-h-11! w-full! min-w-0",
-                      userButtonBox: compact
-                        ? "w-full! justify-center!"
-                        : "w-full! min-w-0 justify-start! gap-2!",
-                      userButtonOuterIdentifier:
-                        "order-2! min-w-0 flex-1 truncate text-left text-sm",
-                      avatarBox: "order-1! size-7 shrink-0",
+                      rootBox: "flex! w-full! min-w-0",
+                      organizationSwitcherTrigger: compact
+                        ? "size-8! justify-center! overflow-hidden p-0!"
+                        : "h-8! w-full! max-w-full min-w-0 justify-between overflow-hidden px-2!",
+                      organizationPreview: compact
+                        ? "w-full! justify-center! overflow-hidden"
+                        : "min-w-0 flex-1 overflow-hidden",
+                      organizationPreviewTextContainer: compact
+                        ? "hidden!"
+                        : "min-w-0",
+                      organizationPreviewMainIdentifier: compact
+                        ? "hidden!"
+                        : "block truncate",
+                      organizationSwitcherTriggerIcon: compact
+                        ? "hidden!"
+                        : "shrink-0",
                     },
                   }}
+                  afterSelectOrganizationUrl="/app"
+                  afterCreateOrganizationUrl="/app"
+                  hidePersonal={false}
                 />
               </ClientOnly>
-              {compact ? null : <ThemeToggle className="size-8 shrink-0" />}
-            </div>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
-      <SidebarRail />
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          {navGroups.map((group) => (
+            <SidebarGroup key={group.label} className="py-0">
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => (
+                    <SidebarMenuItem key={item.to}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={item === activeItem}
+                        tooltip={item.title}
+                      >
+                        <Link to={item.to} onClick={closeMobileNavigation}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </SidebarContent>
+
+        <SidebarSeparator className="w-[calc(100%-1rem)]!" />
+        <SidebarFooter className="p-3">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
+                <ClientOnly
+                  fallback={<Skeleton className="h-11 min-w-0 flex-1" />}
+                >
+                  <UserButton
+                    userProfileProps={{ apiKeysProps: { hide: true } }}
+                    showName={!compact}
+                    appearance={{
+                      theme: clerkShadcnTheme,
+                      elements: {
+                        rootBox: "flex! min-w-0 flex-1",
+                        userButtonTrigger: "min-h-11! w-full! min-w-0",
+                        userButtonBox: compact
+                          ? "w-full! justify-center!"
+                          : "w-full! min-w-0 justify-start! gap-2!",
+                        userButtonOuterIdentifier:
+                          "order-2! min-w-0 flex-1 truncate text-left text-sm",
+                        avatarBox: "order-1! size-7 shrink-0",
+                      },
+                    }}
+                  />
+                </ClientOnly>
+                {compact ? null : <ThemeToggle className="size-8 shrink-0" />}
+              </div>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </nav>
     </Sidebar>
   );
 }

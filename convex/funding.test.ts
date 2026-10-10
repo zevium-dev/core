@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -230,14 +230,54 @@ describe("universal wallet funding", () => {
     expect(result.lots).toHaveLength(1);
   });
 
-  it("consumes promotion before refundable payment and refunds payment without clawback", async () => {
+  it("settles a signup-funded free-tier call and unlocks reviews without a payment", async () => {
+    const t = convexTest(schema, modules);
+    const s = await seed(t, "signup_free");
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_consumer_signup_free",
+      name: "Consumer",
+      slug: "consumer-signup-free",
+      creatorClerkUserId: "user_signup_free",
+    });
+    const result = await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        {
+          ...usage(s, "settle:signup_free", 0),
+          pricingDecision: "free_tier",
+          listedCostCredits: 50,
+          freeTierLimit: 5,
+          freeTierUsedBefore: 0,
+        },
+      ],
+    });
+    expect(result.results[0]?.status).toBe("applied");
+    expect(result.wallet?.balance).toBe(10_000);
+    const consumer = t.withIdentity({
+      subject: "user_signup_free",
+      org_id: "org_consumer_signup_free",
+    });
+    expect(
+      await consumer.query(api.reviews.getViewerState, {
+        projectId: s.projectId,
+      }),
+    ).toMatchObject({ canReview: true });
+    await consumer.mutation(api.reviews.upsert, {
+      projectId: s.projectId,
+      rating: 5,
+    });
+    expect(
+      await t.run(async (ctx) => await ctx.db.query("payments").collect()),
+    ).toEqual([]);
+  });
+
+  it("consumes signup credit first and refunds only card-funded inventory", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "promo");
-    await t.mutation(internal.wallets.applyAdminAdjustment, {
-      organizationId: s.consumerId,
-      amount: 50,
-      refId: "promo:welcome",
-      promotion: true,
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_consumer_promo",
+      name: "Consumer",
+      slug: "consumer-promo",
+      creatorClerkUserId: "user_signup_promo",
     });
     const paymentId = await grantPayment(t, s, "promo_payment", 100);
     await t.mutation(internal.wallets.recordUsage, {
@@ -279,7 +319,7 @@ describe("universal wallet funding", () => {
         payment: await ctx.db.get(paymentId),
       };
     });
-    expect(result.wallet).toMatchObject({ balance: 0 });
+    expect(result.wallet).toMatchObject({ balance: 9_950 });
     expect(result.exposure).toMatchObject({
       walletCredits: 100,
       publisherCredits: 0,
@@ -579,7 +619,7 @@ describe("universal wallet funding", () => {
     expect(rows.earnings).toHaveLength(0);
   });
 
-  it("denies a stale reservation after refund without minting debt", async () => {
+  it("settles an admitted reservation after refund without minting debt", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "race");
     await grantPayment(t, s, "race_payment", 100);
@@ -601,12 +641,11 @@ describe("universal wallet funding", () => {
     expect(settled).toMatchObject({
       results: [
         {
-          status: "rejected",
-          retryable: false,
-          reason: "reservation checkpoint is stale after ledger debit",
+          refId: base.settleRefId,
+          status: "applied",
         },
       ],
-      wallet: { balance: 0, sequence: 2 },
+      wallet: { balance: 0, sequence: 4 },
     });
     const result = await t.run(async (ctx) => ({
       wallet: await ctx.db
@@ -615,15 +654,31 @@ describe("universal wallet funding", () => {
           q.eq("organizationId", s.consumerId),
         )
         .unique(),
-      debt: await ctx.db
-        .query("walletFundingAllocations")
-        .filter((q) => q.eq(q.field("kind"), "reservation_debt"))
-        .collect(),
+      allocations: await ctx.db.query("walletFundingAllocations").collect(),
+      coverage: await ctx.db
+        .query("walletFundingLots")
+        .withIndex("by_source_ref", (q) =>
+          q.eq("sourceRef", `settlement-shortfall:${base.settleRefId}`),
+        )
+        .unique(),
+      usage: await ctx.db.query("usageEvents").collect(),
       earnings: await ctx.db.query("publisherEarnings").collect(),
     }));
     expect(result.wallet).toMatchObject({ balance: 0, debtCredits: 0 });
-    expect(result.debt).toHaveLength(0);
-    expect(result.earnings).toHaveLength(0);
+    expect(result.allocations).toMatchObject([
+      { kind: "usage", grossCredits: 20 },
+    ]);
+    expect(result.coverage).toMatchObject({
+      refundable: false,
+      grantedCredits: 20,
+      availableCredits: 0,
+      allocatedCredits: 20,
+    });
+    expect(result.coverage?.paymentId).toBeUndefined();
+    expect(result.usage).toMatchObject([
+      { settleRefId: base.settleRefId, credits: 20 },
+    ]);
+    expect(result.earnings).toMatchObject([{ grossCredits: 20 }]);
   });
 
   it("restores failed refund inventory through an exact payment funding lot", async () => {

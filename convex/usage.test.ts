@@ -773,3 +773,41 @@ describe("billing.cycleBreakdown — scope hardening", () => {
     expect(breakdown.scanCap).toBe(10_000);
   });
 });
+
+it("role snapshots can only narrow paginated usage, never grant access", async () => {
+  const t = convexTest(schema, modules);
+  await seedWorld(t);
+  const member = asMember(t, "org_consumer");
+  const stale = await member.query(api.usage.listForOrg, {
+    orgSlug: "consumer-co",
+    expectedRole: "org:admin",
+    paginationOpts: { cursor: null, numItems: 25 },
+  });
+  expect(stale.page).toEqual([]);
+  const current = await member.query(api.usage.listForOrg, {
+    orgSlug: "consumer-co",
+    expectedRole: "org:member",
+    paginationOpts: { cursor: null, numItems: 25 },
+  });
+  expect(current.page.length).toBeGreaterThan(0);
+});
+
+it("preserves Convex end cursors when bounding page sizes", async () => {
+  const t = convexTest(schema, modules);
+  await seedWorld(t);
+  const member = asMember(t, "org_consumer");
+  const first = await member.query(api.usage.listForOrg, {
+    orgSlug: "consumer-co",
+    paginationOpts: { cursor: null, numItems: 1 },
+  });
+  const bounded = await member.query(api.usage.listForOrg, {
+    orgSlug: "consumer-co",
+    paginationOpts: {
+      cursor: null,
+      numItems: 50,
+      endCursor: first.continueCursor,
+    },
+  });
+  expect(bounded.page).toEqual(first.page);
+  expect(bounded.continueCursor).toBe(first.continueCursor);
+});

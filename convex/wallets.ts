@@ -1127,21 +1127,15 @@ export const recordUsage = internalMutation({
         continue;
       }
 
-      if (wallet.balance < event.credits) {
-        results.push({
-          refId: event.settleRefId,
-          status: "rejected",
-          reason: "reservation checkpoint is stale after ledger debit",
-          retryable: false,
-        });
-        continue;
-      }
+      // Admission belongs to the wallet DO. A later refund/adjustment or
+      // concurrent settlement must not erase usage that was already served.
+      const shortfall = Math.max(0, event.credits - wallet.balance);
 
       let fundingPlan: FundingPlan;
       try {
         fundingPlan = await preflightFundingAllocation(ctx, {
           wallet,
-          credits: event.credits,
+          credits: Math.min(event.credits, wallet.balance),
         });
       } catch (error) {
         if (!(error instanceof FundingInvariantError)) throw error;
@@ -1153,7 +1147,10 @@ export const recordUsage = internalMutation({
         });
         continue;
       }
-      const eventWriteUnits = fundingPlan.estimatedWriteUnits + 8;
+      // Reserve room for the shortfall ledger/source and its allocation,
+      // including bounded funding compaction, before making any money writes.
+      const eventWriteUnits =
+        fundingPlan.estimatedWriteUnits + 8 + (shortfall > 0 ? 16 : 0);
       if (
         projectedWriteUnits + eventWriteUnits >
         MAX_FUNDING_WRITE_UNITS_PER_BATCH
@@ -1169,6 +1166,32 @@ export const recordUsage = internalMutation({
       projectedWriteUnits += eventWriteUnits;
 
       const now = Date.now();
+      if (shortfall > 0) {
+        // Platform absorbs the admission race; never create consumer debt or
+        // silently discard the call. This source is non-refundable and is
+        // consumed in this transaction. Stable ref makes the loss auditable.
+        const sourceRef = `settlement-shortfall:${event.settleRefId}`;
+        const coverage = await appendWalletEntry(ctx, {
+          wallet,
+          kind: "admin_adjustment",
+          amount: shortfall,
+          refId: sourceRef,
+        });
+        wallet = coverage.wallet;
+        await recordPositiveFundingSource(ctx, {
+          wallet,
+          sourceKind: "admin_adjustment",
+          sourceRef,
+          amount: shortfall,
+          refundable: false,
+          createdAt: now,
+        });
+        // Funding failures here roll back coverage as well as settlement.
+        fundingPlan = await preflightFundingAllocation(ctx, {
+          wallet,
+          credits: event.credits,
+        });
+      }
       const keySetting = await ctx.db
         .query("keySettings")
         .withIndex("by_key", (q) => q.eq("keyId", event.keyId))

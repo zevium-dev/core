@@ -42,6 +42,16 @@ export default defineSchema({
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
 
+  /** Permanent anti-farming claims; independent of deletable user mirrors. */
+  signupCreditGrants: defineTable({
+    clerkOrgId: v.string(),
+    creatorClerkUserId: v.string(),
+    organizationId: v.id("organizations"),
+    grantedAt: v.number(),
+  })
+    .index("by_clerk_org", ["clerkOrgId"])
+    .index("by_creator", ["creatorClerkUserId"]),
+
   /** Durable delete-before-create guard for out-of-order Clerk webhooks. */
   organizationTombstones: defineTable({
     clerkOrgId: v.string(),
@@ -613,10 +623,11 @@ export default defineSchema({
       "projectId",
       "settleRefId",
     ])
-    .index("by_org_project_billing_settlement", [
+    .index("by_org_project_review_eligibility", [
       "organizationId",
       "projectId",
       "billingOutcome",
+      "qualityOutcome",
       "settleRefId",
     ])
     .index("by_org_endpoint_at", ["organizationId", "endpoint", "at"])
@@ -1683,7 +1694,14 @@ export default defineSchema({
     ])
     .index("by_stripe_payout", ["stripePayoutId"]),
 
-  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
+  // Catalogue semantic search (Gemini gemini-embedding-001, 768 dimensions)
+  searchQueryEmbeddings: defineTable({
+    cacheKey: v.string(),
+    embedding: v.optional(v.array(v.float64())),
+    leaseToken: v.string(),
+    expiresAt: v.number(),
+  }).index("by_cache_key", ["cacheKey"]),
+
   specEmbeddings: defineTable({
     projectId: v.id("projects"),
     /** Text that was embedded (name + description + tags + endpoint summaries). */

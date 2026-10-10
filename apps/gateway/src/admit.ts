@@ -215,6 +215,14 @@ export async function admit(
       (deps.now ?? Date.now)(),
     );
     if (authorization.status === "rejected") {
+      if (authorization.reason === "wallet_unavailable") {
+        return jsonError(
+          503,
+          "wallet_unavailable",
+          "Wallet temporarily unavailable",
+          requestId,
+        );
+      }
       if (authorization.reason === "insufficient_credits") {
         return paymentRequiredResponse(requestId, "Insufficient credits", {
           reason: "insufficient_credits",
@@ -249,6 +257,17 @@ export async function admit(
       ...freeTierScope,
       nowMs: (deps.now ?? Date.now)(),
     });
+    if (
+      freeResult.status === "rejected" &&
+      freeResult.reason === "wallet_unavailable"
+    ) {
+      return jsonError(
+        503,
+        "wallet_unavailable",
+        "Wallet temporarily unavailable",
+        requestId,
+      );
+    }
     if (freeResult.status === "consumed") {
       usedFree = true;
       freeTierUsedBefore = freeResult.usedBefore;
@@ -289,6 +308,17 @@ export async function admit(
       keyId: verified.keyId,
       clerkOrgId: verified.orgId,
     });
+    if (
+      reserve.status === "rejected" &&
+      reserve.reason === "wallet_unavailable"
+    ) {
+      return jsonError(
+        503,
+        "wallet_unavailable",
+        "Wallet temporarily unavailable",
+        requestId,
+      );
+    }
     if (reserve.status === "insufficient") {
       // Zero/insufficient balance blocks the call — same payment shape
       // as an unauthenticated request, plus the balance detail agents need.

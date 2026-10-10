@@ -1,7 +1,7 @@
 # Accounts & organizations
 
-> Status: partial · Updated: 2026-10-10
-> Code: `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`
+> Status: partial (signup credit #317 built) · Updated: 2026-10-10
+> Code: `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/signup-credit.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
 Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped: every user belongs to at least one org (a personal org is created at signup), the org owns the wallet, and org roles decide who may run lifecycle, money, and secret actions. Auth, orgs, invitations, and roles are bought from Clerk; Convex mirrors orgs/users for app data.
@@ -54,6 +54,13 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 
 ## Tech
 
+**Dogfood — 2026-10-10**
+
+- **P2 #397:** authenticated sidebar lacks a navigation landmark and settings skip heading levels. Separate publisher/consumer orgs were created successfully under one test identity; this does not validate cross-user RBAC.
+- Local isolated-backend loading blocker **#387** is owned by [dev-environment](../architecture/dev-environment.md).
+
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
 ### Why Clerk
 
 - Org-scoped billing is a product decision ([product overview](../product/overview.md)); Clerk ships prebuilt `<OrganizationSwitcher/>`, `<OrganizationProfile/>`, invitations, roles — weeks of UI we don't build
@@ -68,6 +75,8 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 - `organizations` (mirror of Clerk orgs via webhook; Clerk is auth truth, Convex holds app data keyed by Clerk org id)
 
 ### Implementation notes
+
+- **Signup credit (#317)**: trusted Clerk organization mirrors pass `created_by` into the atomic promotion grant. Browser `ensureOrganization` never treats the active member as creator; signed webhook delivery fills that gap even when the browser mirror arrives first. Grant and anti-farming behavior, including the missing verified-email signal, live in [wallet-billing](wallet-billing.md#implementation-notes).
 
 - **Org-role authorization**: Clerk's active-org JWT claims are authoritative. Members may read org/project state and collaborate on spec drafts. Exact `org:admin` is required server-side before project lifecycle/visibility/deletion, immutable publication/deprecation, webhook configuration/signing-secret reads, wallet top-ups, and Stripe Connect onboarding/transfers. Missing or unknown roles fail closed; cross-org resource mutations return the same not-found class as missing resources. Matching client gates hide unusable controls but never replace server authorization.
 - **Authentication loading**: sign-in/up routes mount Clerk directly so their loading skeletons do not wait behind the authenticated Convex principal boundary. CSP derives the exact Clerk Frontend API origin from the build's publishable key, allowing production custom domains as well as development instances and Clerk's documented abuse-protection hosts. Client navigation to home starts catalogue teaser fetching without blocking the page shell; SSR still awaits data for hydration.
@@ -84,6 +93,8 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 - Auth routes: `<SignIn/>` / `<SignUp/>` with `fallbackRedirectUrl` from a sanitized return path; `/app` dashboard renders onboarding checklist via `apps/web/src/lib/onboarding.ts`.
 
 ## Decisions
+
+- 2026-10-10 — BUILT (#317): $1 signup promotion with once-per-Clerk-creator fallback. [decision](../decisions/2026-10-10-signup-credit.md)
 
 - 2026-07-11 — Settings: Clerk UserProfile/OrganizationProfile embeds + custom app prefs; keys stay custom.
 - 2026-07-12 — Clerk chosen for auth + orgs + API keys, replacing Better Auth + its apikey plugin (stack decision, see [architecture overview](../architecture/overview.md)).

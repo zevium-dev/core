@@ -1,7 +1,7 @@
 # Publisher analytics
 
-> Status: partial (P0) · Updated: 2026-10-10
-> Code: `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`
+> Status: #398 fixed; partial (P0) · Updated: 2026-10-10
+> Code: `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/components/publisher-earnings-display.test.tsx`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md) (usage ingest pipe), [gateway](gateway.md), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
 Per-project dashboards for publishers: calls, revenue, tail latency, and error breakdown per endpoint, live-updating. Built from per-call usage events emitted by the gateway. Positioned to beat the dead incumbent's analytics. Usage events arrive through the usage ingest pipe owned by [wallet-billing](wallet-billing.md).
@@ -25,6 +25,14 @@ Per-project dashboards for publishers: calls, revenue, tail latency, and error b
 Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)".
 
 ## Tech
+
+- **Earnings precision (#398)**: analytics sums canonical `publisherNetAtoms` and converts once with `atomsToCredits`, matching statement and payout-ledger reads. Analytics, project earnings, and organization earnings use `formatPublisherCredits` (fixed two decimals); USD equivalents use the shared `formatCreditsAsUsd`. Two 7-credit calls display 13.30 net credits everywhere.
+
+- **Shared presentation (#363)**: daily and endpoint tables use stock shadcn Table; day labels use shared UTC `lib/format.ts`. Visibility mutations rely on Convex subscriptions without manual cache invalidation.
+  **Dogfood — 2026-10-10**
+
+- **P2 #398:** two 7-credit calls produced 13.30 publisher credits in the earnings ledger, but Analytics rounded that figure to 13. Calls, success rate and gross spend agreed; this finding concerns display precision, not a ledger discrepancy.
+  Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 ### Domain
 

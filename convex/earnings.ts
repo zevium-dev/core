@@ -74,7 +74,7 @@ export const forOrg = query({
         slug: string;
         calls: number;
         grossCredits: number;
-        netCredits: number;
+        netAtoms: number;
       }
     >();
     let monthCalls = 0;
@@ -85,13 +85,13 @@ export const forOrg = query({
 
     for (const earning of earnings) {
       assertPublisherEarningReady(earning);
-      const netCredits = atomsToCredits(earning.publisherNetAtoms);
+      const netAtoms = earning.publisherNetAtoms;
       allGross += earning.grossCredits;
-      allNet += netCredits;
+      allNet += netAtoms;
       if (earning.createdAt >= monthStart) {
         monthCalls += 1;
         monthGross += earning.grossCredits;
-        monthNet += netCredits;
+        monthNet += netAtoms;
       }
       if (earning.projectId === undefined) continue;
       if (
@@ -105,20 +105,23 @@ export const forOrg = query({
         slug: earning.projectSlug,
         calls: 0,
         grossCredits: 0,
-        netCredits: 0,
+        netAtoms: 0,
       };
       row.name = earning.projectName;
       row.slug = earning.projectSlug;
       row.calls += 1;
       row.grossCredits += earning.grossCredits;
-      row.netCredits += netCredits;
+      row.netAtoms += netAtoms;
       rows.set(earning.projectId, row);
     }
 
-    const byProject = [...rows.entries()].map(([projectId, row]) => ({
-      projectId,
-      ...row,
-    }));
+    const byProject = [...rows.entries()].map(
+      ([projectId, { netAtoms, ...row }]) => ({
+        projectId,
+        ...row,
+        netCredits: atomsToCredits(netAtoms),
+      }),
+    );
     byProject.sort(
       (left, right) =>
         left.name.localeCompare(right.name) ||
@@ -129,12 +132,12 @@ export const forOrg = query({
       month: {
         calls: monthCalls,
         grossCredits: monthGross,
-        netCredits: monthNet,
+        netCredits: atomsToCredits(monthNet),
       },
       allTime: {
         calls: earnings.length,
         grossCredits: allGross,
-        netCredits: allNet,
+        netCredits: atomsToCredits(allNet),
       },
     };
   },

@@ -420,7 +420,6 @@ export const update = mutation({
     let description = current.description;
     let visibility = current.visibility;
     let tags = current.tags;
-    let descriptionCleared = false;
 
     if (args.patch.name !== undefined) {
       const next = args.patch.name.trim();
@@ -436,14 +435,12 @@ export const update = mutation({
     if (args.patch.description !== undefined) {
       if (args.patch.description === null) {
         description = undefined;
-        descriptionCleared = true;
       } else {
         const next = args.patch.description.trim();
         if (next.length > 2000) {
           throw new Error("Description must be at most 2000 characters");
         }
         description = next === "" ? undefined : next;
-        descriptionCleared = next === "";
       }
     }
 
@@ -496,32 +493,14 @@ export const update = mutation({
       }
     }
 
-    if (descriptionCleared) {
-      // Optional field clear needs replace — patch cannot unset.
-      await ctx.db.replace(args.projectId, {
-        organizationId: current.organizationId,
-        name,
-        slug: current.slug,
-        description: undefined,
-        status: current.status,
-        visibility,
-        tags,
-        deprecationStartedAt: current.deprecationStartedAt,
-        sunsetAt: current.sunsetAt,
-        deprecationMessage: current.deprecationMessage,
-        retirementState: current.retirementState,
-        retirementRevision: current.retirementRevision,
-        retirementCutoffAt: current.retirementCutoffAt,
-        retiredAt: current.retiredAt,
-      });
-    } else {
-      await ctx.db.patch(args.projectId, {
-        name,
-        description,
-        visibility,
-        tags,
-      });
-    }
+    // Convex patch removes optional fields when their value is undefined.
+    // Preserve quality state and publication fences owned by other workflows.
+    await ctx.db.patch(args.projectId, {
+      name,
+      description,
+      visibility,
+      tags,
+    });
 
     const updated = await ctx.db.get(args.projectId);
     if (updated === null) {
@@ -530,6 +509,12 @@ export const update = mutation({
 
     await syncCatalogueListing(ctx, updated._id);
     await enqueuePublishedProjectProjection(ctx, args.projectId);
+    if (updated.visibility !== current.visibility) {
+      await fireWebhookEvent(ctx, updated._id, "project.visibility_changed", {
+        projectId: updated._id,
+        visibility: updated.visibility,
+      });
+    }
     return updated;
   },
 });
@@ -730,14 +715,11 @@ export const cancelRetirement = mutation({
       throw new Error("Project retirement revision exhausted");
     }
     const canceledSunsetAt = project.sunsetAt;
-    await ctx.db.replace(project._id, {
-      organizationId: project.organizationId,
-      name: project.name,
-      slug: project.slug,
-      description: project.description,
-      status: project.status,
-      visibility: project.visibility,
-      tags: project.tags,
+    await ctx.db.patch(project._id, {
+      deprecationStartedAt: undefined,
+      sunsetAt: undefined,
+      deprecationMessage: undefined,
+      retirementState: undefined,
       retirementRevision,
     });
     await upsertNotification(ctx, {

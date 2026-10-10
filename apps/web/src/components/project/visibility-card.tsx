@@ -109,7 +109,9 @@ export function VisibilityCard({ project }: { project: Doc<"projects"> }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Visibility</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Visibility
+        </CardTitle>
         <CardDescription>
           Public projects appear in the catalogue when published. Private
           projects stay hidden. Published projects require at least 7 days

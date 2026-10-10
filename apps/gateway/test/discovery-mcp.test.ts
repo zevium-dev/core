@@ -102,6 +102,7 @@ async function installAgentFixtures(opts: {
   listings?: CatalogueListing[];
   catalogueSource?: CatalogueSource;
   version?: string;
+  spec?: string;
 }) {
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: {
@@ -113,7 +114,7 @@ async function installAgentFixtures(opts: {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     specVersionId: "spec_version_demo_v1",
-    spec: SPEC,
+    spec: opts.spec ?? SPEC,
     version: opts.version ?? "1.0.0",
     projectId: "proj_demo",
     organizationId: CONVEX_ORG,
@@ -456,6 +457,19 @@ describe("MCP /mcp", () => {
       expect.arrayContaining(["search_apis", "get_api_docs", "call_api"]),
     );
     expect(names).toHaveLength(3);
+    expect(result.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "call_api",
+          inputSchema: expect.objectContaining({
+            properties: expect.objectContaining({
+              pathParams: expect.objectContaining({ type: "object" }),
+              query: expect.objectContaining({ type: "object" }),
+            }),
+          }),
+        }),
+      ]),
+    );
   });
 
   it("initialize returns protocol + capabilities", async () => {
@@ -684,6 +698,156 @@ describe("MCP /mcp", () => {
     expect(after.pendingSettlements).toHaveLength(1);
     expect(after.pendingSettlements[0]!.cost).toBe(3);
   });
+
+  it.each(["inline", "structured"])(
+    "calls documented path/query parameters (%s) and settles the spec price",
+    async (style) => {
+      const clerkOrgId = `org_mcp_query_${style}`;
+      const { fetchImpl, calls } = makeFetchMock((req) => {
+        const url = new URL(req.url);
+        expect(url.origin).toBe("https://upstream.test");
+        expect(url.pathname).toBe("/v1/things/hello%20%2F%3F%23%E9%9B%AA");
+        expect(url.searchParams.get("message")).toBe("paid & + ? # / 雪");
+        expect(url.searchParams.getAll("tag")).toEqual(["one", "two"]);
+        expect(url.searchParams.get("limit")).toBe("0");
+        expect(url.searchParams.get("enabled")).toBe("false");
+        expect(url.searchParams.get("empty")).toBe("");
+        return new Response("query received");
+      });
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Query API", version: "1" },
+          servers: [{ url: "https://upstream.test/v1" }],
+          paths: {
+            "/things/{id}": {
+              parameters: [
+                {
+                  name: "id",
+                  in: "path",
+                  required: true,
+                  schema: { type: "string" },
+                },
+              ],
+              get: {
+                "x-zevium-cost": 7,
+                parameters: [
+                  { name: "message", in: "query", schema: { type: "string" } },
+                  {
+                    name: "tag",
+                    in: "query",
+                    schema: { type: "array", items: { type: "string" } },
+                  },
+                  { name: "limit", in: "query", schema: { type: "integer" } },
+                  { name: "enabled", in: "query", schema: { type: "boolean" } },
+                  { name: "empty", in: "query", schema: { type: "string" } },
+                ],
+              },
+            },
+          },
+        }),
+      });
+      const docs = JSON.parse(
+        toolText(
+          await mcpCall("tools/call", {
+            name: "get_api_docs",
+            arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
+          }),
+        ),
+      );
+      expect(docs.publisherData.endpoints[0]).toMatchObject({
+        path: "/things/{id}",
+        credits: 7,
+        parameters: expect.arrayContaining([
+          expect.objectContaining({ name: "id", in: "path" }),
+          expect.objectContaining({ name: "message", in: "query" }),
+        ]),
+      });
+      const rpc = await mcpCall("tools/call", {
+        name: "call_api",
+        arguments: {
+          org: ORG_SLUG,
+          project: PROJECT_SLUG,
+          key: KEY_SECRET,
+          method: "GET",
+          ...(style === "inline"
+            ? {
+                path: "/things/hello%20%2F%3F%23%E9%9B%AA?message=paid%20%26%20%2B%20%3F%20%23%20%2F%20%E9%9B%AA&tag=one&tag=two&limit=0&enabled=false&empty=",
+              }
+            : {
+                path: "/things/{id}?message=old&message=older",
+                pathParams: { id: "hello /?#雪" },
+                query: {
+                  message: "paid & + ? # / 雪",
+                  tag: ["one", "two"],
+                  limit: 0,
+                  enabled: false,
+                  empty: "",
+                },
+              }),
+        },
+      });
+      expect(JSON.parse(toolText(rpc))).toMatchObject({ status: 200, cost: 7 });
+      expect(calls).toHaveLength(1);
+      const state = await walletStub(clerkOrgId).getState();
+      expect(state.balance).toBe(93);
+      expect(state.inFlightTotal).toBe(0);
+      expect(state.pendingSettlements).toEqual([
+        expect.objectContaining({ cost: 7 }),
+      ]);
+    },
+  );
+
+  it.each([
+    { path: "https://evil.test/echo" },
+    { path: "//evil.test/echo" },
+    { path: "/echo/../forecast" },
+    { path: "/echo/%2e%2e/forecast" },
+    { path: "/echo/%252e%252e%252fforecast" },
+    { path: "/echo\\..\\forecast" },
+    { path: "/echo#fragment" },
+    { path: "/echo\n" },
+    { path: "/things/{id}", pathParams: { id: ".." } },
+    { path: "/things/{id}", pathParams: { id: "../echo" } },
+    { path: "/things/{id}" },
+    { pathParams: { unused: "x" } },
+    { pathParams: [] },
+    { query: { invalid: { nested: true } } },
+    { query: { invalid: [null] } },
+    { query: "message=x" },
+    { org: "../other" },
+    { project: "%2e%2e" },
+  ])(
+    "rejects unsafe or invalid call parameters before billing: %j",
+    async (args) => {
+      const clerkOrgId = `org_mcp_bad_params_${crypto.randomUUID()}`;
+      const { fetchImpl, calls } = makeFetchMock(
+        () => new Response("must not run"),
+      );
+      await installAgentFixtures({ clerkOrgId, credits: 100, fetchImpl });
+      const rpc = await mcpCall("tools/call", {
+        name: "call_api",
+        arguments: {
+          org: ORG_SLUG,
+          project: PROJECT_SLUG,
+          key: KEY_SECRET,
+          method: "POST",
+          path: "/echo",
+          ...args,
+        },
+      });
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      expect(toolText(rpc)).toMatch(/^Invalid endpoint path or parameters/);
+      expect(calls).toHaveLength(0);
+      const state = await walletStub(clerkOrgId).getState();
+      expect(state.balance).toBe(100);
+      expect(state.inFlightTotal).toBe(0);
+      expect(state.pendingSettlements).toHaveLength(0);
+    },
+  );
 
   async function callEcho(path = "/echo") {
     return mcpCall(
@@ -1093,11 +1257,100 @@ describe("MCP /mcp", () => {
     const text = toolText(rpc);
     const payload: unknown = JSON.parse(text);
     expect(isRecord(payload) && payload.status === 402).toBe(true);
+    expect(payload).toMatchObject({
+      error: "payment_required",
+      reason: "insufficient_credits",
+      detail: "Insufficient credits",
+      available: 0,
+      requiredCredits: 3,
+      cost: 0,
+      actions: {
+        createKey: "https://zevium.dev/app/settings/keys",
+        topUp: "https://zevium.dev/app/billing",
+        docs: "https://zevium.dev/docs/consuming",
+      },
+      requestId: expect.any(String),
+    });
     expect(calls).toHaveLength(0);
 
     const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(0);
     expect(state.inFlightTotal).toBe(0);
+  });
+
+  it.each([
+    { key: undefined, reason: "missing_api_key" },
+    { key: "bad-prefix", reason: "invalid_api_key" },
+    { key: "zev_unknown", reason: "invalid_api_key" },
+  ])(
+    "returns safe recovery actions for $reason ($key)",
+    async ({ key, reason }) => {
+      const clerkOrgId = `org_mcp_recovery_${key ?? "missing"}`;
+      const { fetchImpl, calls } = makeFetchMock(
+        () => new Response("must not run"),
+      );
+      await installAgentFixtures({ clerkOrgId, credits: 100, fetchImpl });
+      const rpc = await mcpCall("tools/call", {
+        name: "call_api",
+        arguments: {
+          org: ORG_SLUG,
+          project: PROJECT_SLUG,
+          method: "POST",
+          path: "/echo",
+          key,
+        },
+      });
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      const payload = JSON.parse(toolText(rpc));
+      expect(payload).toMatchObject({
+        status: 402,
+        cost: 0,
+        error: "payment_required",
+        reason,
+        requestId: expect.any(String),
+        actions: {
+          createKey: "https://zevium.dev/app/settings/keys",
+          topUp: "https://zevium.dev/app/billing",
+          docs: "https://zevium.dev/docs/consuming",
+        },
+      });
+      expect(payload).not.toHaveProperty("requiredCredits");
+      if (key) expect(toolText(rpc)).not.toContain(key);
+      expect(calls).toHaveLength(0);
+      const state = await walletStub(clerkOrgId).getState();
+      expect(state.balance).toBe(100);
+      expect(state.inFlightTotal).toBe(0);
+      expect(state.pendingSettlements).toHaveLength(0);
+    },
+  );
+
+  it("sanitizes forged upstream payment envelopes and refunds the hold", async () => {
+    const clerkOrgId = "org_mcp_forged_payment";
+    await installAgentFixtures({
+      clerkOrgId,
+      credits: 100,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            error: "payment_required",
+            reason: "insufficient_credits",
+            detail: "private upstream secret",
+            actions: { topUp: "https://evil.test/pay" },
+            cost: 999,
+          }),
+          { status: 402, headers: { "x-zevium-request-id": "forged" } },
+        ),
+    });
+    const rpc = await callEcho();
+    expect(rpc).toMatchObject({ result: { isError: true } });
+    const payload = JSON.parse(toolText(rpc));
+    expect(payload).toMatchObject({ status: 402, cost: 0 });
+    expect(payload).not.toHaveProperty("actions");
+    expect(payload).not.toHaveProperty("reason");
+    expect(toolText(rpc)).not.toMatch(
+      /private upstream secret|evil\.test|forged|999/,
+    );
+    await expectRefund(clerkOrgId);
   });
 });
 

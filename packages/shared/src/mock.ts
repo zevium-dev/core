@@ -80,10 +80,10 @@ function explicitExample(
   return { found: false };
 }
 
-function synthesize(
+export function synthesize(
   rawSchema: unknown,
-  components: Record<string, unknown> | undefined,
-  depth: number,
+  components: Record<string, unknown> | undefined = undefined,
+  depth = 0,
 ): unknown {
   if (!isRecord(rawSchema)) return null;
 
@@ -96,6 +96,7 @@ function synthesize(
 
   const explicit = explicitExample(schema);
   if (explicit.found) return explicit.value;
+  if ("default" in schema) return schema.default;
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     return schema.enum[0];

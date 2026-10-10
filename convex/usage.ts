@@ -1,4 +1,4 @@
-import { paginationOptsValidator } from "convex/server";
+import { paginationOptsValidator, type PaginationOptions } from "convex/server";
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
@@ -24,15 +24,12 @@ export type UsageListItem = {
   at: number;
 };
 
-function boundedPagination(options: {
-  numItems: number;
-  cursor: string | null;
-}) {
+function boundedPagination(options: PaginationOptions) {
   const numItems = Number.isSafeInteger(options.numItems)
     ? Math.min(Math.max(options.numItems, 1), MAX_USAGE_PAGE_SIZE)
     : MAX_USAGE_PAGE_SIZE;
   return {
-    cursor: options.cursor,
+    ...options,
     numItems,
     maximumRowsRead: MAX_USAGE_PAGE_SIZE + 1,
     maximumBytesRead: 256 * 1024,
@@ -137,6 +134,8 @@ function emptyPage(
 export const listForOrg = query({
   args: {
     orgSlug: v.string(),
+    // Client snapshot only narrows visibility; server identity remains authoritative.
+    expectedRole: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
     projectRef: v.optional(v.string()),
     keyId: v.optional(v.string()),
@@ -151,6 +150,9 @@ export const listForOrg = query({
       ctx,
       args.orgSlug,
     );
+    if (args.expectedRole !== undefined && args.expectedRole !== access.role) {
+      return emptyPage(access);
+    }
     const canViewOrgUsage = access.capabilities.viewOrgUsage;
     if (
       (!canViewOrgUsage &&

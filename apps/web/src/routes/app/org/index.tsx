@@ -1,3 +1,4 @@
+import { CopyButton } from "#/components/copy-button";
 import {
   OrganizationList,
   OrganizationProfile,
@@ -166,23 +167,11 @@ function PublicHandleCard() {
     mutationFn: () => setPublicHandle({ handle: normalized }),
     onSuccess: () => {
       setConfirming(false);
-      void mine.refetch();
     },
     onError: (error: unknown) => {
       toast.error(humanError(error, "Could not update public handle"));
     },
   });
-
-  async function copyPublicUrl() {
-    try {
-      await navigator.clipboard.writeText(
-        `${window.location.origin}/catalogue/${current}`,
-      );
-      toast.success("Public catalogue URL copied");
-    } catch {
-      toast.error("Could not copy public catalogue URL");
-    }
-  }
 
   return (
     <Card>
@@ -241,14 +230,10 @@ function PublicHandleCard() {
             <code className="text-xs text-muted-foreground">
               /catalogue/{current}
             </code>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void copyPublicUrl()}
-            >
-              Copy public URL
-            </Button>
+            <CopyButton
+              text={() => `${window.location.origin}/catalogue/${current}`}
+              label="Copy public URL"
+            />
             <span className="text-xs text-muted-foreground">
               Shared by gateway, mock, discovery, and MCP routes.
             </span>

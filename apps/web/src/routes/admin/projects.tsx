@@ -1,9 +1,20 @@
-import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { ListBoundary } from "#/components/list-boundary";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Eye, EyeOff, FileStack } from "lucide-react";
-import { useMutation as useConvexMutation } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  usePaginatedQuery,
+  useMutation as useConvexMutation,
+} from "convex/react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -32,7 +43,6 @@ import {
 } from "#/components/ui/empty";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
-import { mergeHandlePages } from "#/lib/activity-filters";
 import {
   ADMIN_STATUS_OPTIONS,
   ADMIN_VISIBILITY_OPTIONS,
@@ -51,7 +61,11 @@ const SELECT_CLASS =
   "flex h-9 min-w-[9rem] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 export const Route = createFileRoute("/admin/projects")({
-  component: AdminProjectsPage,
+  component: () => (
+    <ListBoundary label="projects">
+      <AdminProjectsPage />
+    </ListBoundary>
+  ),
   head: () => ({
     meta: [{ title: "Admin Projects · Zevium" }],
   }),
@@ -72,40 +86,19 @@ function AdminProjectsPage() {
     ProjectVisibilityFilter | undefined
   >(undefined);
 
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [rows, setRows] = useState<AdminProjectView[]>([]);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<KillSwitchTarget | null>(null);
-
-  const listArgs = useMemo(() => {
-    const args: {
-      paginationOpts: { numItems: number; cursor: string | null };
-      status?: ProjectStatusFilter;
-      visibility?: ProjectVisibilityFilter;
-    } = { paginationOpts: { numItems: PROJECT_PAGE_SIZE, cursor } };
-    if (statusFilter !== undefined) args.status = statusFilter;
-    if (visibilityFilter !== undefined) args.visibility = visibilityFilter;
-    return args;
-  }, [cursor, statusFilter, visibilityFilter]);
-
-  const projectsQuery = useQuery(convexQuery(api.admin.listProjects, listArgs));
-
-  // Reset accumulated pages when filters change.
-  useEffect(() => {
-    setCursor(null);
-    setRows([]);
-    setIsDone(false);
-    setContinueCursor(null);
-  }, [statusFilter, visibilityFilter]);
-
-  useEffect(() => {
-    if (!projectsQuery.data || projectsQuery.isPending) return;
-    const page = projectsQuery.data.page;
-    setRows((prev) => mergeHandlePages(prev, page, cursor === null));
-    setIsDone(projectsQuery.data.isDone);
-    setContinueCursor(projectsQuery.data.continueCursor);
-  }, [projectsQuery.data, projectsQuery.isPending, cursor]);
+  const {
+    results: rows,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.admin.listProjects,
+    {
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(visibilityFilter ? { visibility: visibilityFilter } : {}),
+    },
+    { initialNumItems: PROJECT_PAGE_SIZE },
+  );
 
   const convexSetVisibility = useConvexMutation(api.admin.setProjectVisibility);
   const toggleMutation = useMutation({
@@ -123,10 +116,9 @@ function AdminProjectsPage() {
     },
   });
 
-  const firstPagePending = projectsQuery.isPending && cursor === null;
-  const loadMorePending = projectsQuery.isPending && cursor !== null;
-  const canLoadMore =
-    !isDone && continueCursor !== null && !projectsQuery.isPending;
+  const firstPagePending = status === "LoadingFirstPage";
+  const loadMorePending = status === "LoadingMore";
+  const canLoadMore = status === "CanLoadMore";
 
   return (
     <div className="flex flex-col gap-6">
@@ -196,30 +188,30 @@ function AdminProjectsPage() {
           ) : (
             <div className="flex flex-col gap-4">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th scope="col" className="px-2 py-2 font-medium">
+                <Table className="w-full text-sm">
+                  <TableHeader>
+                    <TableRow className="border-b text-left text-muted-foreground">
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Name
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Org
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Status
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Visibility
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
                         Visibility action
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {rows.map((project) => (
                       <ProjectRow
                         key={project.handle}
@@ -231,8 +223,8 @@ function AdminProjectsPage() {
                         }
                       />
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               {canLoadMore || loadMorePending ? (
                 <div className="flex justify-center">
@@ -240,11 +232,7 @@ function AdminProjectsPage() {
                     variant="outline"
                     size="sm"
                     disabled={loadMorePending || !canLoadMore}
-                    onClick={() => {
-                      if (continueCursor !== null) {
-                        setCursor(continueCursor);
-                      }
-                    }}
+                    onClick={() => loadMore(PROJECT_PAGE_SIZE)}
                   >
                     {loadMorePending ? "Loading…" : "Load more"}
                   </Button>
@@ -288,24 +276,26 @@ function ProjectRow({
   const target: ProjectVisibilityFilter = isPublic ? "private" : "public";
 
   return (
-    <tr className="border-b last:border-0">
-      <td className="px-2 py-2.5 font-medium">{project.name}</td>
-      <td className="px-2 py-2.5 text-muted-foreground">{orgLabel}</td>
-      <td className="px-2 py-2.5">
+    <TableRow className="border-b last:border-0">
+      <TableCell className="px-2 py-2.5 font-medium">{project.name}</TableCell>
+      <TableCell className="px-2 py-2.5 text-muted-foreground">
+        {orgLabel}
+      </TableCell>
+      <TableCell className="px-2 py-2.5">
         {project.status === "published" ? (
           <Badge variant="secondary">published</Badge>
         ) : (
           <Badge variant="outline">draft</Badge>
         )}
-      </td>
-      <td className="px-2 py-2.5">
+      </TableCell>
+      <TableCell className="px-2 py-2.5">
         {isPublic ? (
           <Badge variant="secondary">public</Badge>
         ) : (
           <Badge variant="outline">private</Badge>
         )}
-      </td>
-      <td className="px-2 py-2.5 text-right">
+      </TableCell>
+      <TableCell className="px-2 py-2.5 text-right">
         <Button
           size="xs"
           variant={target === "private" ? "destructive" : "outline"}
@@ -324,8 +314,8 @@ function ProjectRow({
             </>
           )}
         </Button>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
