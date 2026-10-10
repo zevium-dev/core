@@ -14,7 +14,7 @@ import worker, {
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
-import { CollectingUsageSink, FakeConvexUsageSink } from "../src/usage";
+import { FakeConvexUsageSink } from "./fake-usage";
 import type { KeySetting, WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -99,7 +99,6 @@ async function installFixtures(opts: {
   organizationId?: string;
   fetchImpl: typeof fetch;
   credits?: number;
-  usage?: CollectingUsageSink;
   keyOrgId?: string;
   /** Grant credits to this org's wallet instead of clerkOrgId (cross-org tests). */
   creditOrgId?: string;
@@ -115,7 +114,6 @@ async function installFixtures(opts: {
   archived?: boolean;
   version?: string;
 }) {
-  const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: {
@@ -145,7 +143,6 @@ async function installFixtures(opts: {
     specSource: specs,
     publicSpecSource: specs,
     catalogueSource: new FixtureCatalogueSource(),
-    usageSink: usage,
     fetchImpl: opts.fetchImpl,
     idGenerator: () => `req_${crypto.randomUUID()}`,
   });
@@ -169,7 +166,7 @@ async function installFixtures(opts: {
     archived: opts.archived ?? false,
   }));
 
-  return { usage, keys, specs, organizationId };
+  return { keys, specs, organizationId };
 }
 
 async function gatewayFetch(
@@ -199,7 +196,7 @@ afterEach(() => {
 describe("gateway pipeline", () => {
   it("returns 503 when Clerk verification is unavailable instead of caching an invalid key", async () => {
     const clerkOrgId = "org_pipe_clerk_outage";
-    const { usage } = await installFixtures({ clerkOrgId, credits: 100 });
+    await installFixtures({ clerkOrgId, credits: 100 });
     class OutageVerifier extends FixtureKeyVerifier {
       override async verifyWithStatus() {
         return { status: "unavailable" as const };
@@ -221,7 +218,6 @@ describe("gateway pipeline", () => {
       specSource: specs,
       publicSpecSource: specs,
       catalogueSource: new FixtureCatalogueSource(),
-      usageSink: usage,
       idGenerator: () => `req_${crypto.randomUUID()}`,
     });
 
@@ -232,7 +228,6 @@ describe("gateway pipeline", () => {
     await expect(res.json()).resolves.toMatchObject({
       error: "verification_unavailable",
     });
-    expect(usage.events).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
 
@@ -243,7 +238,7 @@ describe("gateway pipeline", () => {
       '"x-zevium-cost":2',
       '"x-zevium-cost":1000001',
     );
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       fetchImpl,
       credits: 100,
@@ -256,7 +251,6 @@ describe("gateway pipeline", () => {
     expect(res.status).toBe(422);
     await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
     expect(calls).toHaveLength(0);
-    expect(usage.events).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
 
@@ -273,7 +267,7 @@ describe("gateway pipeline", () => {
     const res = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(422);
     expect(calls).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
@@ -285,7 +279,7 @@ describe("gateway pipeline", () => {
       ...JSON.parse(SPEC),
       servers: [{ url: "https://127.0.0.1" }],
     });
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       fetchImpl,
       credits: 100,
@@ -297,7 +291,6 @@ describe("gateway pipeline", () => {
     );
     expect(res.status).toBe(422);
     expect(calls).toHaveLength(0);
-    expect(usage.events).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
 
@@ -323,7 +316,7 @@ describe("gateway pipeline", () => {
       });
     });
 
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       fetchImpl,
       credits: 100,
@@ -378,11 +371,6 @@ describe("gateway pipeline", () => {
     expect(state.pendingSettlements[0]!.usage?.budgetPeriod).toMatch(
       /^\d{4}-\d{2}$/,
     );
-
-    expect(usage.events).toHaveLength(1);
-    expect(usage.events[0]!.outcome).toBe("settled");
-    expect(usage.events[0]!.cost).toBe(3);
-    expect(usage.events[0]!.status).toBe(200);
   });
 
   it("persists authenticated release challenge and strips it from upstream", async () => {
@@ -627,7 +615,7 @@ describe("gateway pipeline", () => {
       throw new Error("upstream should not be called");
     });
 
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       fetchImpl,
       credits: 0,
@@ -658,7 +646,6 @@ describe("gateway pipeline", () => {
       docs: "https://zevium.dev/docs/consuming",
     });
     expect(calls).toHaveLength(0);
-    expect(usage.events[0]!.outcome).toBe("blocked");
 
     const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(0);
@@ -844,7 +831,7 @@ describe("gateway pipeline", () => {
       () => new Response("free-ok", { status: 200 }),
     );
 
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       organizationId,
       fetchImpl,
@@ -883,13 +870,6 @@ describe("gateway pipeline", () => {
     expect(
       await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
     ).toBe(2);
-
-    expect(usage.events).toContainEqual(
-      expect.objectContaining({ outcome: "blocked", status: 402, cost: 0 }),
-    );
-    expect(
-      usage.events.filter((event) => event.outcome === "free"),
-    ).toHaveLength(2);
   });
 
   it("zero balance blocks zero-cost upstream", async () => {
@@ -991,7 +971,7 @@ describe("gateway pipeline", () => {
       const status = statuses.shift();
       return new Response("upstream failure", { status });
     });
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId,
       fetchImpl,
       credits: 1,
@@ -1010,10 +990,6 @@ describe("gateway pipeline", () => {
     expect(
       await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
     ).toBe(0);
-    expect(usage.events.map((event) => event.outcome)).toEqual([
-      "refunded",
-      "refunded",
-    ]);
     expect(
       (await walletStub(clerkOrgId).getState()).pendingSettlements,
     ).toEqual([
@@ -1327,7 +1303,7 @@ describe("gateway pipeline", () => {
       () => new Response("ok", { status: 200 }),
     );
 
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId: publisherOrg,
       keyOrgId: consumerOrg,
       visibility: "public",
@@ -1350,11 +1326,6 @@ describe("gateway pipeline", () => {
     const publisherState = await walletStub(publisherOrg).getState();
     expect(publisherState.balance).toBe(0);
     expect(publisherState.pendingSettlements).toHaveLength(0);
-
-    expect(usage.events).toHaveLength(1);
-    expect(usage.events[0]!.outcome).toBe("settled");
-    expect(usage.events[0]!.cost).toBe(2);
-    expect(usage.events[0]!.consumerClerkOrgId).toBe(consumerOrg);
   });
 
   it("marketplace: PRIVATE project, foreign key → 404 project_not_found, no wallet activity", async () => {
@@ -1364,7 +1335,7 @@ describe("gateway pipeline", () => {
       throw new Error("upstream should not be called");
     });
 
-    const { usage } = await installFixtures({
+    await installFixtures({
       clerkOrgId: publisherOrg,
       keyOrgId: foreignOrg,
       visibility: "private",
@@ -1385,7 +1356,6 @@ describe("gateway pipeline", () => {
     expect(res.status).not.toBe(401);
     expect(res.status).not.toBe(403);
     expect(calls).toHaveLength(0);
-    expect(usage.events).toHaveLength(0);
 
     const foreignState = await walletStub(foreignOrg).getState();
     expect(foreignState.balance).toBe(20); // untouched

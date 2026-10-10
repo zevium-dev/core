@@ -1,56 +1,9 @@
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
+
 /**
  * Usage event types + Convex batch flush client.
  * Wallet DO alarm drives flush → wallets:recordUsage → ack.
  */
-
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
-
-import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
-
-import { costBucket, latencyBucket } from "./telemetry";
-
-/** Hot-path event emitted by the pipeline (tests / optional logging). */
-export type UsageEvent = {
-  requestId: string;
-  /** Publisher's Convex org id — kept for compatibility. */
-  organizationId: string;
-  /** Consumer's Clerk org id — the org whose wallet actually pays. */
-  consumerClerkOrgId: string;
-  projectId: string;
-  specVersionId: string;
-  specVersion: string;
-  operationId: string;
-  keyId: string;
-  keyFamilyId?: string;
-  orgSlug: string;
-  projectSlug: string;
-  method: string;
-  pathTemplate: string;
-  listedCostCredits?: number;
-  freeTierLimit?: number;
-  freeTierUsedBefore?: number;
-  pricingDecision?: "listed_price" | "free_tier" | "zero_price";
-  monthlyCapCredits?: number;
-  budgetPeriod?: string;
-  budgetUsedBefore?: number;
-  budgetReservedBefore?: number;
-  budgetReservationCredits?: number;
-  cost: number;
-  status: number;
-  /** settled | ambiguous | refunded | blocked | free */
-  outcome: "settled" | "ambiguous" | "refunded" | "blocked" | "free";
-  /** Transport truth when no upstream HTTP response existed. */
-  qualityOutcome?: "network_error";
-  ambiguous?: boolean;
-  publisherIdempotencyKey?: string;
-  latencyMs: number;
-  reservationId: string;
-  /** Runner-generated one-time release correlation, when this is a probe. */
-  releaseChallenge?: string;
-  /** Immutable gateway git SHA serving this request. */
-  gatewayRelease?: string;
-};
 
 /** Shape stored on pending settlements and sent to wallets:recordUsage. */
 export type ConvexUsageRecord = {
@@ -149,114 +102,29 @@ export type RecordUsageResult = {
   wallet: WalletCheckpoint;
 };
 
-export interface UsageSink {
-  emit(event: UsageEvent): Promise<void> | void;
-}
-
-export class ConsoleUsageSink implements UsageSink {
-  emit(event: UsageEvent): void {
-    console.log(
-      JSON.stringify({
-        schema: 1,
-        type: "zevium.usage",
-        outcome: event.outcome,
-        statusClass: `${Math.floor(event.status / 100)}xx`,
-        latencyBucket: latencyBucket(event.latencyMs),
-        costBucket: costBucket(event.cost),
-      }),
-    );
-  }
-}
-
-/** Collecting sink for tests. */
-export class CollectingUsageSink implements UsageSink {
-  readonly events: UsageEvent[] = [];
-
-  emit(event: UsageEvent): void {
-    this.events.push(event);
-  }
-}
-
-export class NoopUsageSink implements UsageSink {
-  emit(): void {}
-}
-
-const recordUsageRef = makeFunctionReference<
-  "mutation",
-  { events: ConvexUsageRecord[] },
-  RecordUsageResult
->("wallets:recordUsage");
-
 export type ConvexUsageClientOptions = {
-  convexUrl: string;
-  /**
-   * Deploy/admin key so internalMutation wallets:recordUsage is callable.
-   * Authorization: Convex <key>
-   * Fallback only — prefer ingestUrl + internalSecret.
-   */
-  adminKey?: string;
-  /**
-   * POST target for shared-secret ingest (Convex httpAction /ingest-usage).
-   * When set with internalSecret, preferred over adminKey / public client.
-   */
   ingestUrl?: string;
-  /** Shared secret for x-internal-secret header on ingest path. */
   internalSecret?: string;
   fetchImpl?: typeof fetch;
-  /** Injected client (tests). */
-  client?: ConvexHttpClient;
-  /** Injected mutation (tests) — bypasses HTTP entirely. */
+  /** Test injection; production always uses the authenticated ingest endpoint. */
   mutationFn?: (
     name: string,
     args: { events: ConvexUsageRecord[] },
   ) => Promise<RecordUsageResult>;
 };
 
-/**
- * Thin client around wallets:recordUsage.
- * Used by the wallet DO alarm flush loop (not the request hot path).
- */
+/** Wallet alarm transport. No admin/public mutation fallback. */
 export class ConvexUsageClient {
-  readonly #client: ConvexHttpClient | null;
-  readonly #mutationFn:
-    | ((
-        name: string,
-        args: { events: ConvexUsageRecord[] },
-      ) => Promise<RecordUsageResult>)
-    | null;
-  readonly #convexUrl: string | null;
-  readonly #adminKey: string | undefined;
+  readonly #mutationFn: ConvexUsageClientOptions["mutationFn"];
   readonly #ingestUrl: string | undefined;
   readonly #internalSecret: string | undefined;
   readonly #fetch: typeof fetch;
-
   constructor(opts: ConvexUsageClientOptions) {
-    this.#mutationFn = opts.mutationFn ?? null;
-    this.#adminKey = opts.adminKey;
+    this.#mutationFn = opts.mutationFn;
     this.#ingestUrl = opts.ingestUrl;
     this.#internalSecret = opts.internalSecret;
-    // workerd fetch is not free-callable; wrap so stored ref keeps `this`.
     this.#fetch =
-      opts.fetchImpl ??
-      ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
-    if (opts.mutationFn) {
-      this.#client = null;
-      this.#convexUrl = null;
-    } else if (opts.client) {
-      this.#client = opts.client;
-      this.#convexUrl = opts.convexUrl.replace(/\/+$/, "");
-    } else if (opts.ingestUrl && opts.internalSecret) {
-      // Ingest path needs no ConvexHttpClient.
-      this.#client = null;
-      this.#convexUrl = opts.convexUrl.replace(/\/+$/, "");
-    } else {
-      this.#client = new ConvexHttpClient(opts.convexUrl, {
-        skipConvexDeploymentUrlCheck: true,
-        logger: false,
-        fetch: opts.fetchImpl,
-      });
-      this.#convexUrl = opts.convexUrl.replace(/\/+$/, "");
-    }
+      opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async recordUsage(events: ConvexUsageRecord[]): Promise<RecordUsageResult> {
@@ -307,33 +175,10 @@ export class ConvexUsageClient {
       }
     }
 
-    // Prefer shared-secret httpAction over deploy-key mutation.
-    if (this.#ingestUrl && this.#internalSecret) {
-      return await this.#recordViaIngest(events);
+    if (!this.#ingestUrl || !this.#internalSecret) {
+      throw new UsageIngestError("Usage ingest is not configured", false);
     }
-
-    // Prefer raw HTTP when admin key present — setAdminAuth is @internal
-    // and not on public ConvexHttpClient typings.
-    if (this.#adminKey && this.#convexUrl) {
-      return await this.#mutationWithAdmin(
-        "wallets:recordUsage",
-        { events },
-        this.#adminKey,
-      );
-    }
-
-    if (!this.#client) {
-      throw new UsageIngestError("ConvexUsageClient has no client", false);
-    }
-    let result: RecordUsageResult;
-    try {
-      result = await this.#client.mutation(recordUsageRef, { events });
-    } catch (error) {
-      throw new UsageIngestError("convex mutation transport failed", true, {
-        cause: error,
-      });
-    }
-    return this.#validateResult(parseRecordUsageResult(result), events);
+    return this.#recordViaIngest(events);
   }
 
   async #recordViaIngest(
@@ -376,65 +221,6 @@ export class ConvexUsageClient {
     return this.#validateResult(parseRecordUsageResult(json), events);
   }
 
-  async #mutationWithAdmin(
-    path: string,
-    args: { events: ConvexUsageRecord[] },
-    adminKey: string,
-  ): Promise<RecordUsageResult> {
-    const base = (this.#convexUrl ?? "").replace(/\/+$/, "");
-    let res: Response;
-    try {
-      res = await this.#fetch(`${base}/api/mutation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Convex ${adminKey}`,
-        },
-        body: JSON.stringify({
-          path,
-          format: "json",
-          args: [args],
-        }),
-      });
-    } catch (error) {
-      throw new UsageIngestError("convex mutation transport failed", true, {
-        cause: error,
-      });
-    }
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new UsageIngestError(
-        `convex mutation failed: ${res.status} ${text}`,
-        httpFailureIsRetryable(res.status),
-        {
-          bisectable:
-            res.status === 400 || res.status === 413 || res.status === 422,
-        },
-      );
-    }
-    let json: unknown;
-    try {
-      json = await res.json();
-    } catch {
-      throw new UsageIngestError("convex mutation returned non-json", false);
-    }
-    if (!json || typeof json !== "object") {
-      throw new UsageIngestError("convex mutation invalid response", false);
-    }
-    if ("status" in json && json.status === "error") {
-      const msg =
-        "errorMessage" in json && typeof json.errorMessage === "string"
-          ? json.errorMessage
-          : "convex mutation error";
-      throw new UsageIngestError(msg, false, { bisectable: true });
-    }
-    const value =
-      "status" in json && json.status === "success" && "value" in json
-        ? json.value
-        : json;
-    return this.#validateResult(parseRecordUsageResult(value), args.events);
-  }
-
   #validateResult(
     result: RecordUsageResult,
     events: ConvexUsageRecord[],
@@ -465,122 +251,6 @@ export class ConvexUsageClient {
     }
     return result;
   }
-}
-
-/**
- * Batched UsageSink that also exposes flushBatch for the DO / tests.
- * emit() only buffers; flushBatch() POSTs to Convex and clears acked ids.
- */
-export class ConvexUsageSink implements UsageSink {
-  readonly #client: ConvexUsageClient;
-  readonly #pending: ConvexUsageRecord[] = [];
-
-  constructor(opts: ConvexUsageClientOptions) {
-    this.#client = new ConvexUsageClient(opts);
-  }
-
-  /** Buffer a pipeline event as a Convex usage record (settled/free only). */
-  emit(event: UsageEvent): void {
-    if (event.outcome !== "settled" && event.outcome !== "free") return;
-    this.#pending.push(usageEventToRecord(event));
-  }
-
-  /** Direct enqueue from wallet DO pending rows. */
-  enqueue(records: ConvexUsageRecord[]): void {
-    for (const r of records) this.#pending.push(r);
-  }
-
-  get pending(): readonly ConvexUsageRecord[] {
-    return this.#pending;
-  }
-
-  /**
-   * Flush buffered events (or explicit batch) to Convex.
-   * Returns applied/skipped; caller acks settlement ids on success.
-   */
-  async flushBatch(
-    events?: ConvexUsageRecord[],
-  ): Promise<
-    | (RecordUsageResult & { settleRefIds: string[] })
-    | { results: SettlementOutcome[]; settleRefIds: string[] }
-  > {
-    const batch = events ?? this.#pending.splice(0, this.#pending.length);
-    if (batch.length === 0) {
-      return { results: [], settleRefIds: [] };
-    }
-    const result = await this.#client.recordUsage(batch);
-    return {
-      ...result,
-      settleRefIds: batch.map((e) => e.settleRefId),
-    };
-  }
-}
-
-export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
-  if (
-    event.specVersionId === undefined ||
-    event.specVersion === undefined ||
-    event.operationId === undefined ||
-    event.keyFamilyId === undefined ||
-    event.listedCostCredits === undefined ||
-    event.pricingDecision === undefined ||
-    event.budgetPeriod === undefined ||
-    event.budgetUsedBefore === undefined ||
-    event.budgetReservedBefore === undefined ||
-    event.budgetReservationCredits === undefined
-  ) {
-    throw new Error("settled usage lacks immutable pricing identity");
-  }
-  return {
-    organizationId: event.organizationId,
-    consumerClerkOrgId: event.consumerClerkOrgId,
-    projectId: event.projectId,
-    specVersionId: event.specVersionId,
-    specVersion: event.specVersion,
-    operationId: event.operationId,
-    endpoint: event.pathTemplate,
-    method: event.method,
-    listedCostCredits: event.listedCostCredits,
-    freeTierLimit: event.freeTierLimit,
-    freeTierUsedBefore: event.freeTierUsedBefore,
-    pricingDecision: event.pricingDecision,
-    credits: event.cost,
-    status: event.status,
-    latencyMs: event.latencyMs,
-    keyId: event.keyId,
-    keyFamilyId: event.keyFamilyId,
-    monthlyCapCredits: event.monthlyCapCredits,
-    budgetPeriod: event.budgetPeriod,
-    budgetUsedBefore: event.budgetUsedBefore,
-    budgetReservedBefore: event.budgetReservedBefore,
-    budgetReservationCredits: event.budgetReservationCredits,
-    at: Date.now(),
-    reservationId: event.reservationId,
-    settleRefId: `settle:${event.reservationId}`,
-    billingOutcome:
-      event.outcome === "free"
-        ? "free"
-        : event.outcome === "settled" || event.outcome === "ambiguous"
-          ? "settled"
-          : "refunded",
-    qualityOutcome:
-      event.qualityOutcome ??
-      (event.status >= 200 && event.status < 300
-        ? "success"
-        : event.status >= 400 && event.status < 500
-          ? "client_error"
-          : event.status >= 500
-            ? "server_error"
-            : "network_error"),
-    ...(event.ambiguous === undefined ? {} : { ambiguous: event.ambiguous }),
-    ...(event.publisherIdempotencyKey === undefined
-      ? {}
-      : { publisherIdempotencyKey: event.publisherIdempotencyKey }),
-    ...(event.releaseChallenge
-      ? { releaseChallenge: event.releaseChallenge }
-      : {}),
-    ...(event.gatewayRelease ? { gatewayRelease: event.gatewayRelease } : {}),
-  };
 }
 
 export function pendingToUsageRecord(input: {
@@ -734,58 +404,4 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
       sequence: wallet.sequence,
     },
   };
-}
-
-/** Test-only fake Convex mutation sink with ack-friendly bookkeeping. */
-export class FakeConvexUsageSink {
-  readonly batches: ConvexUsageRecord[][] = [];
-  readonly records: ConvexUsageRecord[] = [];
-  readonly seenSettleRefIds = new Set<string>();
-  readonly #wallets = new Map<string, WalletCheckpoint>();
-  failNext = false;
-
-  setWallet(clerkOrgId: string, balance: number, sequence: number = 0): void {
-    this.#wallets.set(clerkOrgId, { clerkOrgId, balance, sequence });
-  }
-
-  async recordUsage(events: ConvexUsageRecord[]): Promise<RecordUsageResult> {
-    if (this.failNext) {
-      this.failNext = false;
-      return Promise.reject(new Error("fake convex unavailable"));
-    }
-    this.batches.push(events.map((e) => ({ ...e })));
-    const clerkOrgId = events[0]?.consumerClerkOrgId;
-    if (
-      !clerkOrgId ||
-      events.some((event) => event.consumerClerkOrgId !== clerkOrgId)
-    ) {
-      return Promise.reject(new Error("mixed consumer wallet batch"));
-    }
-    const checkpoint = this.#wallets.get(clerkOrgId) ?? {
-      clerkOrgId,
-      balance: 0,
-      sequence: 0,
-    };
-    const results: SettlementOutcome[] = [];
-    for (const e of events) {
-      if (this.seenSettleRefIds.has(e.settleRefId)) {
-        results.push({ refId: e.settleRefId, status: "already_applied" });
-        continue;
-      }
-      this.seenSettleRefIds.add(e.settleRefId);
-      this.records.push({ ...e });
-      checkpoint.balance -= e.credits;
-      checkpoint.sequence += 1;
-      results.push({ refId: e.settleRefId, status: "applied" });
-    }
-    this.#wallets.set(clerkOrgId, checkpoint);
-    return { results, wallet: { ...checkpoint } };
-  }
-
-  asMutationFn(): (
-    name: string,
-    args: { events: ConvexUsageRecord[] },
-  ) => Promise<RecordUsageResult> {
-    return async (_name, args) => this.recordUsage(args.events);
-  }
 }

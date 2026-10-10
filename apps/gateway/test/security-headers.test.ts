@@ -5,13 +5,14 @@ import {
 } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import worker, { type Env } from "../src/index";
+import worker, { __setTestPipelineDeps, type Env } from "../src/index";
 import {
   applyGatewaySecurityHeaders,
   GATEWAY_CSP,
 } from "../src/security-headers";
 
 const REQUIRED_HEADERS = [
+  "x-zevium-request-id",
   "content-security-policy",
   "x-content-type-options",
   "referrer-policy",
@@ -41,6 +42,7 @@ describe("gateway outer security header boundary", () => {
       ["mcp", "/mcp", undefined],
       ["mock", "/mock/pub/api/ping", undefined],
       ["proxy", "/gateway/pub/api/ping", undefined],
+      ["removed-registry", "/internal/registry/v1/events", { method: "POST" }],
       ["not-found", "/does-not-exist", undefined],
     ];
     for (const [, path, init] of cases) {
@@ -58,6 +60,34 @@ describe("gateway outer security header boundary", () => {
         expect(response.headers.get("cache-control")).toBe("private, no-store");
       }
       await response.body?.cancel();
+    }
+  });
+
+  it("adds request identity and public headers to unhandled failures", async () => {
+    const { FixtureSpecSource } = await import("../src/spec-source");
+    const { FixtureKeyVerifier } = await import("../src/key-verifier");
+    const specs = new FixtureSpecSource();
+    __setTestPipelineDeps({
+      keyVerifier: new FixtureKeyVerifier(),
+      specSource: specs,
+      publicSpecSource: specs,
+      catalogueSource: {
+        async listPublic() {
+          throw new Error("private dependency error");
+        },
+      },
+    });
+    try {
+      const response = await invoke("/discovery", {
+        headers: { "x-zevium-request-id": "untrusted" },
+      });
+      expect(response.status).toBe(500);
+      expect(response.headers.get("x-zevium-request-id")).toBeTruthy();
+      expect(response.headers.get("x-zevium-request-id")).not.toBe("untrusted");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(await response.json()).toEqual({ error: "internal error" });
+    } finally {
+      __setTestPipelineDeps(null);
     }
   });
 

@@ -5,12 +5,15 @@
 
 import {
   extractPricing,
-  parseSpec,
   type HttpMethod,
   type ParsedOpenApiSpec,
 } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
-import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
+import {
+  getParsedSpec,
+  isPublishedSpecPublic,
+  type PublicSpecSource,
+} from "./spec-source";
 
 const HTTP_METHODS: readonly HttpMethod[] = [
   "get",
@@ -96,7 +99,7 @@ export async function buildDiscoveryIndex(
     }
     let endpoints: DiscoveryEndpoint[] = [];
     try {
-      const parsed = parseSpec(published.spec);
+      const parsed = getParsedSpec(published);
       endpoints = endpointsFromSpec(parsed);
     } catch {
       continue;

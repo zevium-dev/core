@@ -1507,7 +1507,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     const testFn = getTestUsageMutation();
     if (testFn) {
       return new ConvexUsageClient({
-        convexUrl: "https://test.invalid",
         mutationFn: testFn,
       });
     }
@@ -1522,16 +1521,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         env.CONVEX_SITE_URL ?? url.replace(".convex.cloud", ".convex.site")
       ).replace(/\/+$/, "");
       return new ConvexUsageClient({
-        convexUrl: url,
         ingestUrl: `${siteBase}/ingest-usage`,
         internalSecret: secret,
       });
     }
 
-    return new ConvexUsageClient({
-      convexUrl: url,
-      adminKey: env.CONVEX_DEPLOY_KEY,
-    });
+    // Fail closed; pending settlements stay queued until ingest is configured.
+    return new ConvexUsageClient({});
   }
 
   async getState(): Promise<WalletState> {

@@ -1,3 +1,5 @@
+import { applyCorsHeaders } from "./cors";
+
 const STRIP_HEADERS = [
   "x-clerk-auth-message",
   "x-clerk-auth-reason",
@@ -28,6 +30,7 @@ export function applyGatewaySecurityHeaders(
   response: Response,
 ): Response {
   const headers = new Headers(response.headers);
+  applyCorsHeaders(headers);
   for (const name of STRIP_HEADERS) headers.delete(name);
   headers.set("Content-Security-Policy", GATEWAY_CSP);
   headers.set("X-Content-Type-Options", "nosniff");

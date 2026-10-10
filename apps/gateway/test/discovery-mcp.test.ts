@@ -19,7 +19,6 @@ import {
 } from "../src/catalogue-source";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureSpecSource } from "../src/spec-source";
-import { CollectingUsageSink } from "../src/usage";
 import { handleMcpRequest, type McpDeps } from "../src/mcp";
 import { apiDocsFromSpec } from "../src/mcp-api-docs";
 import { parseSpec } from "@zevium/shared";
@@ -104,7 +103,6 @@ async function installAgentFixtures(opts: {
   catalogueSource?: CatalogueSource;
   version?: string;
 }) {
-  const usage = new CollectingUsageSink();
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: {
       orgId: opts.clerkOrgId,
@@ -131,7 +129,6 @@ async function installAgentFixtures(opts: {
     specSource: specs,
     publicSpecSource: specs,
     catalogueSource: catalogue,
-    usageSink: usage,
     fetchImpl:
       opts.fetchImpl ?? (async () => new Response("ok", { status: 200 })),
     idGenerator: () => `req_${crypto.randomUUID()}`,
@@ -153,7 +150,7 @@ async function installAgentFixtures(opts: {
     keySettings: [{ keyId: KEY_ID, familyId: KEY_ID, disabled: false }],
   }));
 
-  return { usage, keys, specs, catalogue };
+  return { keys, specs, catalogue };
 }
 
 async function workerFetch(
@@ -919,7 +916,6 @@ describe("MCP /mcp", () => {
           pipeline: {
             keyVerifier: fixtures.keys,
             specSource: fixtures.specs,
-            usageSink: fixtures.usage,
             fetchImpl: async () => new Response("buffered success"),
           },
         },

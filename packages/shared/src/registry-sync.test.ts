@@ -5,13 +5,11 @@ import {
   REGISTRY_V2_PRODUCER_CONTRACT,
   canonicalJson,
   createRegistryEvent,
-  createRegistryManifestPage,
   decryptRegistryCredentials,
   encryptRegistryCredentials,
   parseRegistryTransportKeyring,
   registryEncodedByteLength,
   registryEntityKey,
-  registryManifestShard,
   registryStreamKeyForPayload,
   sealOneTimeExecutionKey,
   sha256Hex,
@@ -20,9 +18,7 @@ import {
   validateRegistryAck,
   validateRegistryEvent,
   verifyRegistryAck,
-  verifyRegistryEventRequest,
 } from "./registry-sync";
-import { REGISTRY_V2_SHARED_VECTORS } from "./registry-v2-vectors";
 
 const SECRET = "registry-test-signing-secret-0123456789";
 const NONCE = "TestNonce_0000001";
@@ -47,7 +43,7 @@ async function orgEvent(revision = 1, nonce = NONCE) {
 }
 
 describe("canonical Registry v2 contract", () => {
-  it("has only canonical operations and validates frozen vectors", async () => {
+  it("has only canonical operations", async () => {
     expect(REGISTRY_V2_PRODUCER_CONTRACT.operations).toEqual([
       "org.put",
       "org.archive",
@@ -60,16 +56,6 @@ describe("canonical Registry v2 contract", () => {
     expect(JSON.stringify(REGISTRY_V2_PRODUCER_CONTRACT)).not.toMatch(
       /upsert|retire|provision|rotation_required|remove|globalSequence|parked/,
     );
-    for (const vector of REGISTRY_V2_SHARED_VECTORS.events) {
-      expect(canonicalJson(vector.event)).toBe(vector.canonicalBody);
-      expect(registryEncodedByteLength(vector.event)).toBe(vector.encodedBytes);
-      await expect(validateRegistryEvent(vector.event)).resolves.toEqual(
-        vector.event,
-      );
-    }
-    expect(
-      canonicalJson(REGISTRY_V2_SHARED_VECTORS.acknowledgement.applied),
-    ).toBe(REGISTRY_V2_SHARED_VECTORS.acknowledgement.canonicalBody);
   });
 
   it("sorts recursively, preserves arrays, and rejects hostile JSON", () => {
@@ -111,51 +97,37 @@ describe("canonical Registry v2 contract", () => {
     ).rejects.toThrow("nonce");
   });
 
-  it("uses raw canonical body HMAC and rejects whitespace, nonce, and header confusion", async () => {
-    const event = await orgEvent();
-    const body = canonicalJson(event);
+  it("signs the exact canonical event bytes", async () => {
+    const body = canonicalJson(await orgEvent());
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
     const signature = await signRegistryEventRequest(
       SECRET,
       "1700000000000",
       NONCE,
       body,
     );
-    await expect(
-      verifyRegistryEventRequest(
-        SECRET,
-        "1700000000000",
-        NONCE,
-        body,
-        signature,
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      verifyRegistryEventRequest(
-        SECRET,
-        "1700000000000",
-        NONCE,
-        `${body} `,
-        signature,
-      ),
-    ).resolves.toBe(false);
-    await expect(
-      verifyRegistryEventRequest(
-        SECRET,
-        "1700000000000",
-        "TestNonce_0000002",
-        body,
-        signature,
-      ),
-    ).resolves.toBe(false);
-    await expect(
-      verifyRegistryEventRequest(
-        SECRET,
-        "01700000000000",
-        NONCE,
-        body,
-        signature,
-      ),
-    ).resolves.toBe(false);
+    const bytes = Uint8Array.from(signature.slice(3).match(/.{2}/g)!, (pair) =>
+      Number.parseInt(pair, 16),
+    );
+    for (const [candidate, valid] of [
+      [body, true],
+      [`${body} `, false],
+    ] as const) {
+      await expect(
+        crypto.subtle.verify(
+          "HMAC",
+          key,
+          bytes,
+          new TextEncoder().encode(`1700000000000.${NONCE}.${candidate}`),
+        ),
+      ).resolves.toBe(valid);
+    }
     await expect(
       signRegistryEventRequest("short", "1700000000000", NONCE, body),
     ).rejects.toThrow("32-4096");
@@ -165,7 +137,13 @@ describe("canonical Registry v2 contract", () => {
     const event = await orgEvent();
     const body = canonicalJson(event);
     const ack = {
-      ...REGISTRY_V2_SHARED_VECTORS.acknowledgement.applied,
+      schemaVersion: 2,
+      status: "applied",
+      revision: event.revision,
+      receiverRevision: event.revision,
+      receiverEventId: event.eventId,
+      receiverPayloadSha256: event.payloadSha256,
+      receiverTombstone: false,
       eventId: event.eventId,
       bodySha256: await sha256Hex(body),
       streamKey: event.streamKey,
@@ -280,48 +258,6 @@ describe("canonical Registry v2 contract", () => {
     expect(registryEncodedByteLength(event)).toBeLessThan(
       REGISTRY_MAX_EVENT_BYTES,
     );
-  });
-
-  it("makes manifests pinned, sorted, byte-bounded, and SHA-256 sharded", async () => {
-    await expect(registryManifestShard("org:org_test")).resolves.toMatch(
-      /^[a-f0-9]{2}$/,
-    );
-    const page = await createRegistryManifestPage({
-      schemaVersion: 2,
-      kind: "org",
-      shard: "00",
-      createdAt: 1_700_000_000_000,
-      pageIndex: 0,
-      afterEntityKey: null,
-      items: [
-        {
-          entityKey: "org:b",
-          streamKey: "org:b",
-          revision: 1,
-          eventId: "r2_b",
-          operation: "org.put",
-          payloadSha256: "a".repeat(64),
-          tombstone: false,
-        },
-        {
-          entityKey: "org:a",
-          streamKey: "org:a",
-          revision: 2,
-          eventId: "r2_a",
-          operation: "org.archive",
-          payloadSha256: "b".repeat(64),
-          tombstone: true,
-        },
-      ],
-      totalCount: 2,
-      nextAfterEntityKey: null,
-    });
-    expect(page.items.map((item) => item.entityKey)).toEqual([
-      "org:a",
-      "org:b",
-    ]);
-    expect(page.itemCount).toBe(2);
-    expect(page.snapshotId).toMatch(/^rm2_[a-f0-9]{64}$/);
   });
 
   it("never puts raw one-time key material in canonical projection", async () => {

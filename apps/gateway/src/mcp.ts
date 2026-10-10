@@ -13,7 +13,6 @@
  * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
  */
 
-import { parseSpec } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { apiDocsFromSpec } from "./mcp-api-docs";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
@@ -24,7 +23,11 @@ import {
   type PipelineDeps,
   type PipelineEnv,
 } from "./pipeline";
-import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
+import {
+  getParsedSpec,
+  isPublishedSpecPublic,
+  type PublicSpecSource,
+} from "./spec-source";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "zevium-gateway", version: "0.1.0" } as const;
@@ -278,7 +281,7 @@ async function handleSearchApis(
     }
     let endpoints: DiscoveryEndpoint[] = [];
     try {
-      endpoints = endpointsFromSpec(parseSpec(published.spec));
+      endpoints = endpointsFromSpec(getParsedSpec(published));
     } catch {
       continue;
     }
@@ -328,7 +331,7 @@ async function handleGetApiDocs(
   let title: string | undefined;
   let version: string | undefined;
   try {
-    const parsed = parseSpec(published.spec);
+    const parsed = getParsedSpec(published);
     reference = apiDocsFromSpec(parsed);
     title = parsed.info?.title;
     version = parsed.info?.version;

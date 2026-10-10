@@ -1,8 +1,8 @@
 # Registry v2
 
-> Updated: 2026-10-10
+Status: producer remains; gateway receiver deleted (#359). Updated: 2026-10-10.
 
-Registry v2 defines the Convex producer contract; its gateway receiver remains unimplemented.
+Registry v2 describes the existing Convex producer contract. The gateway never implemented a v2 receiver. Its unrelated, unwritten v1 `ControlDO` receiver and per-call gate were deleted; both Wrangler configurations append a `v3` `deleted_classes: ["ControlDO"]` migration. Convex still enqueues v2 events to an absent route; producer/rebuild work is separate.
 
 ## Operations
 
@@ -37,4 +37,4 @@ Initial registry backfill and security rollout operators were deleted in #354. F
 ## Implementation notes (moved from former TECH.md)
 
 - **Edge registry producer contract**: `REGISTRY_V2_PRODUCER_CONTRACT` is frozen. Only `org.put`, `org.archive`, `route.put`, `route.archive`, `key.put`, `key.revoke`, and `catalogue.snapshot` exist. Events contain immutable per-stream revisions, event nonce, payload digest, and exact canonical JSON bytes capped at 524,288 UTF-8 bytes; embedded OpenAPI specs cap at 393,216 bytes. HMAC signs `timestamp.nonce.rawBody`; ACKs sign `ack.timestamp.nonce.rawAckBody` and bind every event identity field. No deployment-wide sequence or global poison ordering exists. Outbox leases are token-fenced and expired claims recover after crashes; dependencies block only same-stream predecessors or explicit rename edges. AES-GCM transport envelopes use versioned `GATEWAY_REGISTRY_TRANSPORT_KEYRING`.
-- **Receiver status — not implemented here**: shared v2 contract and credential-free conformance vectors reserve `POST /internal/registry/v2/events` and `/internal/registry/v2/bootstrap`, exact signature/nonce/ACK rules, stateful bootstrap application, terminal kill joins, contiguous sequence recovery, and transport credential handling. Gateway still uses Clerk key verification plus 30s spec / 60s catalogue and wallet-sync windows around Convex-backed reads. Receiver storage, nonce replay state, revision/gap application, receiver-at-rest encryption, signed ACK transport, bootstrap HTTP transport, registry-DO lookup, immediate edge archive propagation, and raw-key issue/rotate/revoke wiring remain cutover blockers.
+- **Receiver deleted (#359)**: `/internal/registry/v1/*`, `control.ts`, `CONTROL` binding and paid-call gate are gone. Unused shared receiver verification, bootstrap, manifest and signed entitlement helpers plus test-only conformance vectors are deleted. API-key projection signing/sealing used by web and helpers imported by Convex remain. Gateway still resolves keys via Clerk and routes via cached Convex reads (30s specs / 60s catalogue); this PR does not activate registry v2 or immediate revocation.

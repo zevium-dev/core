@@ -8,7 +8,6 @@ import worker, { __setTestPipelineDeps, type Env } from "../src/index";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
-import { NoopUsageSink } from "../src/usage";
 import type { WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -117,7 +116,6 @@ async function installFixtures(opts: {
     specSource: new FixtureSpecSource(),
     publicSpecSource: specs,
     catalogueSource: new FixtureCatalogueSource(),
-    usageSink: new NoopUsageSink(),
     idGenerator: () => `req_${crypto.randomUUID()}`,
     now: opts.now === undefined ? undefined : () => opts.now!,
   });

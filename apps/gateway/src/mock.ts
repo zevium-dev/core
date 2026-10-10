@@ -6,13 +6,13 @@
  * surface for the catalogue and agent onboarding.
  */
 
-import {
-  generateMockResponse,
-  matchOperation,
-  parseSpec,
-} from "@zevium/shared";
+import { generateMockResponse, matchOperation } from "@zevium/shared";
 import type { KeyVerifier } from "./key-verifier";
-import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
+import {
+  getParsedSpec,
+  isPublishedSpecPublic,
+  type PublicSpecSource,
+} from "./spec-source";
 import { jsonError } from "./errors";
 
 export type MockDeps = {
@@ -96,10 +96,10 @@ export async function handleMockRequest(
 
   let parsed;
   try {
-    parsed = parseSpec(published.spec);
+    parsed = getParsedSpec(published);
   } catch {
     return jsonError(
-      404,
+      422,
       "invalid_spec",
       "Published spec unreadable",
       requestId,

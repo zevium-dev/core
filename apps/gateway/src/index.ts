@@ -1,7 +1,6 @@
 import { WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
-  CachedPublicSpecSource,
   CachedSpecSource,
   ConvexPublicSpecSource,
   FailClosedPublicSpecSource,
@@ -17,7 +16,6 @@ import {
   FixtureCatalogueSource,
   type CatalogueSource,
 } from "./catalogue-source";
-import { ConvexUsageSink, NoopUsageSink } from "./usage";
 import {
   handleGatewayRequest,
   parseGatewayPath,
@@ -25,24 +23,20 @@ import {
 } from "./pipeline";
 import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
-import { corsPreflight, withCors } from "./cors";
+import { corsPreflight } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
-import { ControlDO, verifyControlRequest } from "./control";
 import { applyGatewaySecurityHeaders } from "./security-headers";
 
-export { WalletDO, ControlDO };
+export { WalletDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {
   WALLET: DurableObjectNamespace<WalletDO>;
-  CONTROL?: DurableObjectNamespace<ControlDO>;
   CLERK_SECRET_KEY?: string;
   CONVEX_URL?: string;
   /** Convex .convex.site origin for httpActions (ingest-usage). */
   CONVEX_SITE_URL?: string;
-  /** Deploy/admin key fallback for internalMutation wallets:recordUsage. */
-  CONVEX_DEPLOY_KEY?: string;
   /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
   GATEWAY_INTERNAL_SECRET?: string;
   /** Immutable git SHA stamped into every release candidate. */
@@ -176,33 +170,14 @@ function buildDeps(env: Env): WorkerDeps {
       ? new FixtureCatalogueSource()
       : new FailClosedCatalogueSource();
 
-  // Durable call evidence rides the Wallet DO settlement outbox. This sink is
-  // observability/test-only and must never become a second Convex write path.
-  const usageSink = new NoopUsageSink();
-
-  // Keep ConvexUsageSink constructable for tests / future dual-write.
-  void ConvexUsageSink;
-
   const deps: WorkerDeps = {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
-    publicSpecSource: new CachedPublicSpecSource({ inner: innerPublicSpec }),
+    publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
     catalogueSource: new CachedCatalogueSource({
       inner: innerCatalogue,
       ttlMs: 60_000,
     }),
-    usageSink,
-    routeAllowed: env.CONTROL
-      ? async (publisherHandle, projectSlug) => {
-          const stub = env.CONTROL!.get(env.CONTROL!.idFromName("global"));
-          const response = await stub.fetch(
-            `https://control.invalid/gate?route=${encodeURIComponent(`${publisherHandle}/${projectSlug}`)}`,
-          );
-          if (!response.ok) return false;
-          const gate = (await response.json()) as { allowed?: boolean } | null;
-          return gate?.allowed !== false;
-        }
-      : undefined,
   };
   cachedProdDeps = { fingerprint, deps };
   return deps;
@@ -212,11 +187,9 @@ function pipelineOnly(deps: WorkerDeps): PipelineDeps {
   return {
     keyVerifier: deps.keyVerifier,
     specSource: deps.specSource,
-    usageSink: deps.usageSink,
     fetchImpl: deps.fetchImpl,
     idGenerator: deps.idGenerator,
     now: deps.now,
-    routeAllowed: deps.routeAllowed,
   };
 }
 
@@ -264,7 +237,6 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /internal/grant — control-plane grant projection (shared secret)
  * - /internal/sync — control-plane checkpoint refresh (shared secret)
- * - /internal/key-revocation — monotonic signed key revoke (shared secret HMAC)
  * - /health
  */
 async function dispatchRequest(
@@ -292,25 +264,16 @@ async function dispatchRequest(
         env.CLERK_SECRET_KEY &&
         validGatewayDeploymentProof(deployment),
       );
-    return withCors(
-      Response.json(
-        {
-          ok: specConfigReady,
-          service: "zevium-gateway",
-          release: env.ZEVIUM_RELEASE ?? "development",
-          contract: 1,
-          deployment,
-        },
-        { status: specConfigReady ? 200 : 503 },
-      ),
+    return Response.json(
+      {
+        ok: specConfigReady,
+        service: "zevium-gateway",
+        release: env.ZEVIUM_RELEASE ?? "development",
+        contract: 1,
+        deployment,
+      },
+      { status: specConfigReady ? 200 : 503 },
     );
-  }
-
-  if (
-    request.method === "POST" &&
-    url.pathname.startsWith("/internal/registry/v1/")
-  ) {
-    return handleGatewayControl(request, env);
   }
 
   // POST /internal/grant { clerkOrgId, amount, refId }
@@ -326,36 +289,34 @@ async function dispatchRequest(
   // GET /discovery — public machine-readable index
   if (parts[0] === "discovery" && parts.length === 1) {
     const deps = buildDeps(env);
-    return withCors(
-      await handleDiscoveryRequest(request, discoveryDeps(deps, request)),
-    );
+    return await handleDiscoveryRequest(request, discoveryDeps(deps, request));
   }
 
   // /mcp — MCP Streamable HTTP
   if (parts[0] === "mcp" && parts.length === 1) {
     const deps = buildDeps(env);
-    return withCors(
-      await handleMcpRequest(request, mcpDeps(deps, env, request), ctx),
-    );
+    return await handleMcpRequest(request, mcpDeps(deps, env, request), ctx);
   }
 
   const route = parseGatewayPath(url.pathname);
   if (route) {
     const deps = buildDeps(env);
-    return withCors(
-      await handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route),
+    return await handleGatewayRequest(
+      request,
+      env,
+      pipelineOnly(deps),
+      ctx,
+      route,
     );
   }
 
   const mockRoute = parseMockPath(url.pathname);
   if (mockRoute) {
     const deps = buildDeps(env);
-    return withCors(
-      await handleMockRequest(request, mockDeps(deps), mockRoute),
-    );
+    return await handleMockRequest(request, mockDeps(deps), mockRoute);
   }
 
-  return withCors(Response.json({ error: "not found" }, { status: 404 }));
+  return Response.json({ error: "not found" }, { status: 404 });
 }
 
 export default {
@@ -368,51 +329,15 @@ export default {
     try {
       response = await dispatchRequest(request, env, ctx);
     } catch {
-      response = withCors(
-        Response.json({ error: "internal error" }, { status: 500 }),
-      );
+      response = Response.json({ error: "internal error" }, { status: 500 });
     }
-    return applyGatewaySecurityHeaders(request, response);
+    response = applyGatewaySecurityHeaders(request, response);
+    if (!response.headers.has("x-zevium-request-id")) {
+      response.headers.set("x-zevium-request-id", crypto.randomUUID());
+    }
+    return response;
   },
 } satisfies ExportedHandler<Env>;
-
-async function handleGatewayControl(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (!env.GATEWAY_INTERNAL_SECRET || !env.CONTROL) {
-    return Response.json({ error: "misconfigured" }, { status: 503 });
-  }
-  const verified = await verifyControlRequest(
-    request,
-    env.GATEWAY_INTERNAL_SECRET,
-  );
-  if (verified === null) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
-  const stub = env.CONTROL.get(env.CONTROL.idFromName("global"));
-  const applied = await stub.fetch("https://control.invalid/apply", {
-    method: "POST",
-    body: verified.body,
-  });
-  if (!applied.ok) return applied;
-  const result = (await applied.json()) as { status: string };
-  const deps = buildDeps(env);
-  deps.specSource.invalidate?.(
-    verified.payload.publisherHandle,
-    verified.payload.projectSlug,
-  );
-  deps.publicSpecSource.invalidate?.(
-    verified.payload.publisherHandle,
-    verified.payload.projectSlug,
-  );
-  deps.catalogueSource.invalidate?.();
-  return Response.json({
-    status: result.status,
-    sourceRevision: verified.payload.sourceRevision,
-    operation: verified.payload.operation,
-  });
-}
 
 async function handleInternalGrant(
   request: Request,
