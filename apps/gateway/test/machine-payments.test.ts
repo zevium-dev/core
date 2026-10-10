@@ -480,6 +480,41 @@ describe("Stripe x402 facilitator HTTP contract", () => {
     ).toMatchObject({ paymentId: "pi_retry" });
     expect(mock).toHaveBeenCalledTimes(4);
   });
+  it("retrieves an intent when Stripe replays its original processing response", async () => {
+    const mock = vi.fn<typeof fetch>(async (input, init) => {
+      const target = String(input);
+      if (target.endsWith("/verify"))
+        return Response.json({ isValid: true, payer });
+      if (target.endsWith("/settle"))
+        return Response.json({
+          success: true,
+          payer,
+          network,
+          transaction: "0x" + "1".repeat(64),
+        });
+      const succeeded = target.endsWith("/pi_async");
+      if (succeeded) expect(init?.method).toBeUndefined();
+      return Response.json({
+        id: "pi_async",
+        status: succeeded ? "succeeded" : "processing",
+        amount: 100,
+        amount_received: succeeded ? 100 : 0,
+        currency: "usd",
+        livemode: false,
+      });
+    });
+    const adapter = new StripeX402Facilitator({
+      depositAddress: requirements.payTo,
+      facilitatorUrl: "https://facilitator.test",
+      facilitatorToken: "fixture",
+      stripeKey: "sk_test_fixture",
+      fetchImpl: mock,
+    });
+    expect(
+      await adapter.settle({ x402Version: 2, accepted: requirements }),
+    ).toMatchObject({ paymentId: "pi_async" });
+    expect(mock).toHaveBeenCalledTimes(4);
+  });
   it("does not fund pending Stripe payments or a substituted payer", async () => {
     for (const badPayer of [false, true]) {
       const mock = vi.fn<typeof fetch>(async (input) => {
@@ -512,7 +547,7 @@ describe("Stripe x402 facilitator HTTP contract", () => {
       await expect(
         adapter.settle({ x402Version: 2, accepted: requirements }),
       ).rejects.toBeInstanceOf(badPayer ? PaymentRejected : PaymentUnavailable);
-      expect(mock).toHaveBeenCalledTimes(badPayer ? 2 : 3);
+      expect(mock).toHaveBeenCalledTimes(badPayer ? 2 : 4);
     }
   });
 });

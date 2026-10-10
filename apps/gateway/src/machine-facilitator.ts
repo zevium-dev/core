@@ -158,7 +158,30 @@ export class StripeX402Facilitator implements MachineFacilitator {
       },
     );
     if (!response.ok) throw new PaymentUnavailable();
-    const pi = record(await response.json());
+    let pi = record(await response.json());
+    // Stripe idempotency replays the original create response, including a
+    // processing status. Read the current intent before deciding a retry failed.
+    if (
+      pi.status !== "succeeded" &&
+      typeof pi.id === "string" &&
+      /^pi_[A-Za-z0-9]+$/.test(pi.id)
+    ) {
+      const current = await fetchImpl(
+        `https://api.stripe.com/v1/payment_intents/${pi.id}`,
+        {
+          headers: {
+            authorization: `Bearer ${this.options.stripeKey}`,
+            "Stripe-Version": "2026-05-27.preview",
+          },
+          signal: AbortSignal.timeout(20_000),
+          redirect: "manual",
+        },
+      );
+      if (!current.ok) throw new PaymentUnavailable();
+      const latest = record(await current.json());
+      if (latest.id !== pi.id) throw new PaymentUnavailable();
+      pi = latest;
+    }
     if (
       pi.status !== "succeeded" ||
       pi.amount_received !== MACHINE_TOPUP_CENTS ||
