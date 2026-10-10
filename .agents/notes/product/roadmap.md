@@ -23,7 +23,7 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 
 ## Next — P0 product gaps
 
-1. **Public quality signals and automated listing gates** — mostly built (probes, gates, detail-page badges). Remaining: badges on catalogue cards, admin quality dashboard with auto-delist, publisher quality view, per-API status pages, security scan. → [quality-signals](../features/quality-signals.md)
+1. **Public quality signals and automated listing gates** — mostly built (probes, gates, detail-page badges; catalogue card badges + publisher quality view #331). Remaining: admin quality dashboard with auto-delist, per-API status pages, security scan. → [quality-signals](../features/quality-signals.md)
 2. **Production acceptance journey** — separate publisher and consumer orgs: publish → buy credits → issue key → paid gateway call → usage ingest → 95/5 earnings → Connect transfer. Also verify keyless mock and MCP calls against same listing. → [wallet-billing](../features/wallet-billing.md)
 
 ## Codebase reset (do first) — [decision](../decisions/2026-10-10-codebase-reset.md)

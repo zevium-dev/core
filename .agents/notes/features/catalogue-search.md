@@ -67,6 +67,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - Web: semantic mode is a URL search flag (`semantic`), separate from keyword `q` filtering; cards show relevance score on semantic hits. Card/detail share `data-transition-surface` for list→detail morph.
 - Detail tabs: `Try it`, `Reference`, `Connect your agent`; `QualityBadges`, deprecation banner and `ReviewSection` render on the page. Agent-ready badge shows when the published spec has ≥1 endpoint.
 
+- **Card quality (#331)**: browse and semantic cards render compact `QualityBadges` with gateway success/latency, health-endpoint reachability and measurement freshness. Insufficient evidence retains the 20-call/3-probe floors. `catalogueListings.quality` stores current-version aggregates; normal paginated browse maps them without per-card snapshot reads. Maintenance/backfill details live in [quality-signals](quality-signals.md).
+
 ## Decisions
 
 - None recorded beyond TECH.md bullets above.
@@ -82,7 +84,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - FLOW sort "relevance / popularity / recently updated"; code sorts `newest`/`name`/`cheapest` (relevance only in semantic mode). No popularity sort.
 - FLOW filter "price range"; code has max cost only.
 - PRODUCT "tag filters derived from spec metadata"; code tags are admin-set project tags (`projects.update`, ≤32), not derived from the spec.
-- FLOW cards show quality + agent-ready badges; code cards show neither (detail page only).
+- FLOW cards show agent-ready badges; that badge remains detail-page-only. Quality badges ship on cards (#331).
 - FLOW docs "three-column, curl/js/python, hover-sync"; code detail shows a `Reference` tab and curl copy only. Verify against FLOW or fix doc.
 - Version picker on detail page absent; only latest version shown.
 - Research idea ("use when" line + output schema required) undecided.

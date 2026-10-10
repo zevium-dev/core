@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { syncCatalogueListing } from "./catalogue";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -266,6 +267,7 @@ describe("search.fetchSearchListings", () => {
         publishedAt: version1.publishedAt,
         updatedAt: 1_700_000_010_000,
       });
+      await syncCatalogueListing(ctx, seed.publicId);
     });
     const current = await t.query(internal.search.fetchSearchListings, {
       ids: [seed.publicEmbedId],

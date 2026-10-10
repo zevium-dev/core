@@ -1,3 +1,4 @@
+import { QualityBadges } from "#/components/quality-badges";
 import { ListBoundary } from "#/components/list-boundary";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
@@ -620,7 +621,7 @@ export function CatalogueList({
 }
 
 /** Shared catalogue card — used by both browse grid and semantic results. */
-function CatalogueCard({ item }: { item: CatalogueCardItem }) {
+export function CatalogueCard({ item }: { item: CatalogueCardItem }) {
   const links = useCatalogueLinks();
   const priceLabel = formatCataloguePriceRange(item.pricing);
   const endpointLabel =
@@ -694,6 +695,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               </Badge>
             ))}
           </div>
+          <QualityBadges quality={item.quality} compact />
         </CardContent>
       </Card>
     </Link>
@@ -761,6 +763,11 @@ function CatalogueGridSkeleton() {
               <Skeleton className="h-5 w-16 rounded-full" />
               <Skeleton className="h-5 w-20 rounded-full" />
               <Skeleton className="h-5 w-14 rounded-full" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-4/5" />
+              <Skeleton className="h-4 w-full" />
             </div>
           </CardContent>
         </Card>

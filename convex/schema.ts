@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { qualityEvidence } from "./lib/qualityContract";
 
 const fundingProvenanceSlice = v.object({
   sourceRef: v.string(),
@@ -1013,6 +1014,7 @@ export default defineSchema({
 
   /** Denormalized, bounded public catalogue/search projection. */
   catalogueListings: defineTable({
+    quality: v.optional(qualityEvidence),
     projectId: v.id("projects"),
     clerkOrgId: v.string(),
     publisherHandle: v.string(),

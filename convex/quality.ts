@@ -269,8 +269,8 @@ export const syncPublishedTarget = internalMutation({
         qualitySuspensionReason: reason,
         qualityRecoveryPasses: 0,
       });
-      await syncCatalogueListing(ctx, project._id);
     }
+    await syncCatalogueListing(ctx, project._id);
   },
 });
 
@@ -767,6 +767,54 @@ export const getPublicSnapshot = query({
     return latest === null || latest._id !== snapshot.specVersionId
       ? null
       : qualitySnapshotContract(snapshot);
+  },
+});
+
+/** Org members can diagnose their own private or suspended listing. */
+export const getPublisherQuality = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, { projectId }) => {
+    const { project } = await requireProjectMember(ctx, projectId);
+    const latest = await ctx.db
+      .query("specVersions")
+      .withIndex("by_project_published", (q) => q.eq("projectId", projectId))
+      .order("desc")
+      .first();
+    const snapshot = await ctx.db
+      .query("qualitySnapshots")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .unique();
+    const probes =
+      latest === null
+        ? []
+        : await ctx.db
+            .query("qualityProbeResults")
+            .withIndex("by_project_version_checked", (q) =>
+              q.eq("projectId", projectId).eq("specVersionId", latest._id),
+            )
+            .order("desc")
+            .take(QUALITY_WINDOW_SIZE);
+    return {
+      version: latest?.version ?? null,
+      quality:
+        snapshot !== null && snapshot.specVersionId === latest?._id
+          ? qualitySnapshotContract(snapshot)
+          : null,
+      status: project.qualityStatus ?? "active",
+      suspensionReason: project.qualitySuspensionReason ?? null,
+      suspendedAt: project.qualitySuspendedAt ?? null,
+      recoveryPasses: project.qualityRecoveryPasses ?? 0,
+      recoveryRequired: INCIDENT_RECOVERY_PASSES,
+      probeIntervalMs: PROBE_INTERVAL_MS,
+      historyLimit: QUALITY_WINDOW_SIZE,
+      probes: probes.map((probe) => ({
+        id: probe._id,
+        checkedAt: probe.checkedAt,
+        outcome: probe.outcome,
+        statusCode: probe.statusCode ?? null,
+        latencyMs: probe.latencyMs ?? null,
+      })),
+    };
   },
 });
 

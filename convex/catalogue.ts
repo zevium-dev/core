@@ -15,7 +15,10 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getActiveOrgById } from "./lib/auth";
-import { qualitySnapshotContract } from "./lib/qualityContract";
+import {
+  projectQualityEvidence,
+  qualitySnapshotContract,
+} from "./lib/qualityContract";
 import {
   getActivePublicRouteBinding,
   resolveActivePublicRoute,
@@ -127,7 +130,7 @@ function publicListing(listing: Doc<"catalogueListings">): PublicListing {
     publisherHandle: listing.publisherHandle,
     publishedAt: listing.publishedAt || null,
     pricing: listingPricing(listing),
-    quality: null,
+    quality: listing.quality ? qualitySnapshotContract(listing.quality) : null,
   };
 }
 
@@ -278,7 +281,15 @@ export async function syncCatalogueListing(
     .first();
   const pricing =
     latest === null ? null : summarizePublishedPricing(latest.spec);
+  const snapshot = await ctx.db
+    .query("qualitySnapshots")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .unique();
   const next = {
+    quality:
+      snapshot !== null && snapshot.specVersionId === latest?._id
+        ? projectQualityEvidence(snapshot)
+        : undefined,
     projectId,
     clerkOrgId: organization.clerkOrgId,
     publisherHandle: organization.publicHandle,
@@ -306,6 +317,7 @@ export async function syncCatalogueListing(
   };
   const unchanged =
     existing !== null &&
+    JSON.stringify(existing.quality) === JSON.stringify(next.quality) &&
     existing.clerkOrgId === next.clerkOrgId &&
     existing.publisherHandle === next.publisherHandle &&
     existing.orgName === next.orgName &&
@@ -569,8 +581,8 @@ const publicList = {
         ) {
           continue;
         }
-        const qualitySnapshot = await ctx.db
-          .query("qualitySnapshots")
+        const listing = await ctx.db
+          .query("catalogueListings")
           .withIndex("by_project", (q) => q.eq("projectId", project._id))
           .unique();
         items.push({
@@ -583,11 +595,9 @@ const publicList = {
           publishedAt: latest?.publishedAt ?? null,
           pricing,
           quality:
-            latest === null ||
-            qualitySnapshot === null ||
-            qualitySnapshot.specVersionId !== latest._id
-              ? null
-              : qualitySnapshotContract(qualitySnapshot),
+            listing?.quality && listing.quality.specVersionId === latest?._id
+              ? qualitySnapshotContract(listing.quality)
+              : null,
         });
       }
       items.sort((a, b) => {
@@ -774,30 +784,7 @@ const publicList = {
     );
     const staleCount = active.filter((row) => row.stale).length;
     const items = active.filter((row) => !row.stale).map((row) => row.listing);
-    const publicItems = await Promise.all(
-      items.map(async (listing) => {
-        const base = publicListing(listing);
-        const latest = await ctx.db
-          .query("specVersions")
-          .withIndex("by_project_published", (q) =>
-            q.eq("projectId", listing.projectId),
-          )
-          .order("desc")
-          .first();
-        if (latest === null) return { ...base, quality: null };
-        const snapshot = await ctx.db
-          .query("qualitySnapshots")
-          .withIndex("by_project", (q) => q.eq("projectId", listing.projectId))
-          .unique();
-        return {
-          ...base,
-          quality:
-            snapshot === null || snapshot.specVersionId !== latest._id
-              ? null
-              : qualitySnapshotContract(snapshot),
-        };
-      }),
-    );
+    const publicItems = items.map(publicListing);
     return {
       ...page,
       page: publicItems,

@@ -33,7 +33,7 @@ Org switcher selects the workspace; URLs do not repeat the org slug (see Open qu
 - **Create project** — `.../projects/create` (code: `/app/projects/create`): org admin only. Name (slug auto-derived), description → project page.
 - **Project page** — `.../projects/{project}` (code: `/app/projects/$projectSlug`):
   - Header: name, slug, status badge (draft/published), visibility badge (private/public), admin-only Make Public action.
-  - Tabs: Overview / Spec / Analytics / Earnings / Settings.
+  - Tabs: Overview / Spec / Analytics / Quality / Earnings / Settings.
   - Settings tab: admin-only description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls; see [upstream-credentials](upstream-credentials.md)), webhook secret/config, spec variables, danger zone.
 - **Spec editor** — `.../projects/{project}/spec` (code: `/app/projects/$projectSlug/spec`):
   - Members: code editor with live validation, Issues panel, Save draft.
@@ -85,6 +85,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - **Editor ownership**: the workspace is keyed by project ID. Draft reducer, YAML conversion, publish controls, version dialog, lifecycle dialogs, and rail components are separate modules. `SaveStatusLabel` owns the one-second clock. Publish version suggestions are derived until typed; realtime version updates never reset typed text. Navigation has one save-and-leave completion path and does not leave if new text was typed during the save.
 - **Editor feedback**: pricing rail writes valid bounded integers immediately and keeps raw text such as `1.` until blur; failed `applyPricingEdit` writes show a human error. Endpoint rows are parsed once for the rail and pricing summary. Health results are tied to the tested draft. CodeMirror uses its own debounced linter and syntax-tree diagnostic ranges, without React lint state.
 - **YAML bounds**: byte/line preflight stays outside the killable worker; alias/expansion validation runs inside it, so markdown bullets and scalar text are not mistaken for aliases. A ready handshake separates the 10-second module startup bound from the 250 ms hard parser deadline. Conversion revisions are canceled on replacement, reload, rail edits, and unmount.
+- **Quality tab (#331)**: project route accepts `tab=quality` and mounts `components/project-quality-panel.tsx` for all org members. Current-version metrics, probe history, suspension reasons and recovery steps are owned by [quality-signals](quality-signals.md).
 - **Settings**: project-ID-keyed cards derive untouched fields from realtime data and retain local overrides while typing. Convex subscriptions own updates; there are no cache invalidations or manual optimistic cache writes in editor/settings. Admin/owner access follows the shared privileged-role predicate. Webhook URL input survives rotation; reveal-once version tracking remains intact.
 
 ## Decisions
