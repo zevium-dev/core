@@ -1,14 +1,20 @@
 import { v } from "convex/values";
 import {} from "@zevium/shared";
-import { internalQuery, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
+  getActiveOrgById,
   requireOrgAdmin,
   requireProjectMember,
   requireSpecVersionAdmin,
 } from "./lib/auth";
-import { createNotification } from "./lib/notifications";
+import { createNotification, upsertNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
   decryptCredential,
@@ -597,13 +603,29 @@ export const deprecateVersion = mutation({
     });
     await enqueuePublishedProjectProjection(ctx, version.projectId);
 
-    await createNotification(ctx, {
+    const noticeMessage = message ?? version.deprecationMessage;
+    await upsertNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
       kind: "version_deprecated",
       title: "Version deprecated",
-      body: `Version ${version.version} has been deprecated${message !== undefined ? `: ${message}` : ""}.`,
+      body: versionDeprecationBody(
+        version.version,
+        args.sunsetAt,
+        noticeMessage,
+      ),
       refId: `version_deprecated:${args.versionId}`,
     });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.specs.notifyDeprecatedVersionConsumersPage,
+      {
+        versionId: args.versionId,
+        deprecatedAt: version.deprecatedAt ?? now,
+        sunsetAt: args.sunsetAt,
+        message: noticeMessage,
+        cursor: null,
+      },
+    );
 
     await fireWebhookEvent(ctx, version.projectId, "spec.deprecated", {
       projectId: version.projectId,
@@ -645,5 +667,81 @@ export const undeprecateVersion = mutation({
       throw new Error("Failed to load version");
     }
     return updated;
+  },
+});
+
+function versionDeprecationBody(
+  version: string,
+  sunsetAt?: number,
+  message?: string,
+): string {
+  return `Version ${version} has been deprecated.${sunsetAt === undefined ? "" : ` Sunset: ${new Date(sunsetAt).toISOString()}.`}${message === undefined ? "" : ` ${message}`}`;
+}
+
+/** Existing consumers of this version (plus unversioned legacy usage), in bounded pages. */
+export const notifyDeprecatedVersionConsumersPage = internalMutation({
+  args: {
+    versionId: v.id("specVersions"),
+    deprecatedAt: v.number(),
+    sunsetAt: v.optional(v.number()),
+    message: v.optional(v.string()),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const version = await ctx.db.get(args.versionId);
+    if (
+      !version ||
+      version.deprecatedAt !== args.deprecatedAt ||
+      version.sunsetAt !== args.sunsetAt ||
+      version.deprecationMessage !== args.message
+    )
+      return;
+    const project = await ctx.db.get(version.projectId);
+    if (
+      !project ||
+      project.retiredAt !== undefined ||
+      project.deletionState !== undefined
+    )
+      return;
+    const publisher = await getActiveOrgById(ctx, project.organizationId);
+    if (!publisher) return;
+    const page = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_project_at", (q) => q.eq("projectId", project._id))
+      .order("asc")
+      .paginate({ cursor: args.cursor, numItems: 50 });
+    const consumerIds = new Set(
+      page.page
+        .filter(
+          (event) =>
+            event.specVersionId === undefined ||
+            event.specVersionId === version._id,
+        )
+        .map((event) => event.organizationId),
+    );
+    for (const organizationId of consumerIds) {
+      if (organizationId === publisher._id) continue;
+      const consumer = await getActiveOrgById(ctx, organizationId);
+      if (!consumer) continue;
+      await upsertNotification(ctx, {
+        clerkOrgId: consumer.clerkOrgId,
+        kind: "version_deprecated",
+        title: `${project.name} version ${version.version} deprecated`,
+        body: versionDeprecationBody(
+          version.version,
+          version.sunsetAt,
+          version.deprecationMessage,
+        ),
+        refId: `version_deprecated:${version._id}:consumer:${consumer.clerkOrgId}`,
+        publisherHandle: publisher.publicHandle,
+        projectSlug: project.slug,
+      });
+    }
+    if (!page.isDone)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.specs.notifyDeprecatedVersionConsumersPage,
+        { ...args, cursor: page.continueCursor },
+      );
   },
 });

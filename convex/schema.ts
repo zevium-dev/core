@@ -829,6 +829,24 @@ export default defineSchema({
     count: v.number(),
   }).index("by_key", ["key"]),
 
+  notificationPreferences: defineTable({
+    clerkOrgId: v.string(),
+    clerkUserId: v.string(),
+    emailOptOut: v.boolean(),
+  }).index("by_org_user", ["clerkOrgId", "clerkUserId"]),
+
+  // Permanent enqueue receipts survive component email retention/cleanup.
+  notificationEmailDeliveries: defineTable({
+    notificationId: v.id("notifications"),
+    revision: v.number(),
+    clerkUserId: v.string(),
+    emailId: v.string(),
+  }).index("by_notification_revision_user", [
+    "notificationId",
+    "revision",
+    "clerkUserId",
+  ]),
+
   // In-app notifications (org-scoped, idempotent by refId)
   notifications: defineTable({
     clerkOrgId: v.string(),
@@ -847,6 +865,17 @@ export default defineSchema({
     title: v.string(),
     body: v.string(),
     refId: v.string(),
+    emailRevision: v.optional(v.number()),
+    emailOffset: v.optional(v.number()),
+    emailAttempts: v.optional(v.number()),
+    emailState: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("queued"),
+        v.literal("skipped"),
+        v.literal("failed"),
+      ),
+    ),
     /** Optional safe, typed destination for catalogue lifecycle notices. */
     publisherHandle: v.optional(v.string()),
     projectSlug: v.optional(v.string()),

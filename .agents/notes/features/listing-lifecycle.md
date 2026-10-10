@@ -4,6 +4,8 @@
 > Code: `convex/projects.ts` (`update`, `scheduleRetirement`, `cancelRetirement`, `remove`, `retire`, `retireSunsetProjects`, `notifyRetirementConsumersPage`), `convex/specs.ts` (`publish`, `deprecateVersion`, `undeprecateVersion`), `convex/quality.ts` (`setSubscription`), `convex/lib/publicRoutes.ts`, `convex/project-visibility-webhooks.test.ts`, `convex/deprecation.test.ts`, `convex/project-retirement.test.ts`, `convex/project-lifecycle.test.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mock.ts`, `apps/web/src/components/project/visibility-card.tsx`, `apps/web/src/components/project/danger-zone.tsx`, `apps/web/src/components/spec-editor/rail-versions.tsx`, `apps/web/src/components/spec-editor/version-lifecycle-dialogs.tsx`
 > Related: [publishing-specs](publishing-specs.md), [quality-signals](quality-signals.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [catalogue-search](catalogue-search.md), [registry-v2](../architecture/registry-v2.md), [roadmap](../product/roadmap.md)
 
+> Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
+
 How a listing moves through publish, deprecate/unpublish and terminal archive without silently breaking consumers. A publisher cannot kill an API with active consumers: removal requires a notice window, response signaling and consumer notices; archived URLs stay reserved as tombstones.
 
 ## Product
@@ -31,6 +33,8 @@ Related surfaces:
 
 ## Tech
 
+- **Email (#320)**: existing lifecycle/listing notices now use optional Resend delivery, including consumer-org project-retirement notices and their changed/canceled revisions. Version-deprecation now also fans out to existing version consumers in indexed 50-row usage pages (legacy unversioned usage included), deduping notices per org and rejecting stale/restored schedules. Changed publisher deprecation content also updates its canonical notice. Setup, recipient selection, stale-job fencing, and preferences: [webhooks-notifications](webhooks-notifications.md#transactional-email-320).
+
 - **Suspension preservation (#355)**: `projects.update` and `cancelRetirement` use targeted patches. Clearing a description or canceling retirement removes only the intended optional fields; quality suspension/recovery metadata, desired visibility, and `publicationGeneration` survive. Cancellation still increments `retirementRevision`, invalidating stale fanout jobs. Regression coverage: `project-authorization.test.ts` and `project-retirement.test.ts`.
 
 From [architecture overview](../architecture/overview.md):
@@ -57,7 +61,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 
 - Resolved #355: clearing metadata or canceling retirement cannot clear quality enforcement or the publication generation fence.
 
-- FLOW says consumers notified by "banner + email"; code sends in-app notifications only (no email provider in tree). Fix FLOW or add email.
+- Consumer project-retirement email is built (#320) but dormant until owner configures Resend. Version-deprecation also notifies existing consumers of the affected version.
 - `410` tombstones for retired public URLs depend on the unimplemented registry receiver ([registry-v2](../architecture/registry-v2.md)); current direct Convex lookups fail closed instead.
 - Deprecation `Link` header hardcodes `https://zevium.dev` while live web is `https://www.zevium.dev` (per [build-plan](../history/build-plan.md)); confirm redirect or use configured origin.
 - P2 #19 version pinning per key and consumer-facing spec-diff changelog: no code.

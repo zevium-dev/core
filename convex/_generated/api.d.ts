@@ -24,6 +24,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_credentialCrypto from "../lib/credentialCrypto.js";
 import type * as lib_funding from "../lib/funding.js";
 import type * as lib_keysetCursor from "../lib/keysetCursor.js";
+import type * as lib_notificationEmail from "../lib/notificationEmail.js";
 import type * as lib_notifications from "../lib/notifications.js";
 import type * as lib_paymentStatus from "../lib/paymentStatus.js";
 import type * as lib_publicIds from "../lib/publicIds.js";
@@ -37,6 +38,8 @@ import type * as lib_stripePlatform from "../lib/stripePlatform.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
 import type * as lib_webhookTransport from "../lib/webhookTransport.js";
+import type * as notificationEmail from "../notificationEmail.js";
+import type * as notificationEmailAction from "../notificationEmailAction.js";
 import type * as notifications from "../notifications.js";
 import type * as organizations from "../organizations.js";
 import type * as payouts from "../payouts.js";
@@ -80,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   "lib/credentialCrypto": typeof lib_credentialCrypto;
   "lib/funding": typeof lib_funding;
   "lib/keysetCursor": typeof lib_keysetCursor;
+  "lib/notificationEmail": typeof lib_notificationEmail;
   "lib/notifications": typeof lib_notifications;
   "lib/paymentStatus": typeof lib_paymentStatus;
   "lib/publicIds": typeof lib_publicIds;
@@ -93,6 +97,8 @@ declare const fullApi: ApiFromModules<{
   "lib/validate": typeof lib_validate;
   "lib/webhookDelivery": typeof lib_webhookDelivery;
   "lib/webhookTransport": typeof lib_webhookTransport;
+  notificationEmail: typeof notificationEmail;
+  notificationEmailAction: typeof notificationEmailAction;
   notifications: typeof notifications;
   organizations: typeof organizations;
   payouts: typeof payouts;
@@ -142,4 +148,5 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
+  resend: import("@convex-dev/resend/_generated/component.js").ComponentApi<"resend">;
 };

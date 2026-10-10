@@ -1,3 +1,4 @@
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 
@@ -111,6 +112,7 @@ export async function createNotification(
     createdAt: Date.now(),
   });
   await changeUnreadNotificationCount(ctx, args.clerkOrgId, 1);
+  await scheduleNotificationEmail(ctx, id, 1);
   return { created: true, id };
 }
 
@@ -152,6 +154,11 @@ export async function upsertNotification(
   if (wasRead) {
     await changeUnreadNotificationCount(ctx, args.clerkOrgId, 1);
   }
+  await scheduleNotificationEmail(
+    ctx,
+    existing._id,
+    (existing.emailRevision ?? 0) + 1,
+  );
   return { created: false, id: existing._id };
 }
 
@@ -186,5 +193,31 @@ export async function upsertProjectRetirementConsumerNotice(
     refId: `project_retirement:${args.projectId}:consumer:${args.consumerClerkOrgId}`,
     publisherHandle: args.publisherHandle,
     projectSlug: args.projectSlug,
+  });
+}
+
+/** Only schedule local work here. Provider failures cannot roll back the inbox. */
+async function scheduleNotificationEmail(
+  ctx: MutationCtx,
+  notificationId: Id<"notifications">,
+  revision: number,
+): Promise<void> {
+  const configured = Boolean(process.env.RESEND_API_KEY?.trim());
+  await ctx.db.patch(notificationId, {
+    emailRevision: revision,
+    emailOffset: 0,
+    emailAttempts: 0,
+    emailState: configured ? "pending" : "skipped",
+  });
+  if (!configured) {
+    console.info("Notification email skipped: RESEND_API_KEY unset", {
+      notificationId,
+    });
+    return;
+  }
+  await ctx.scheduler.runAfter(0, internal.notificationEmail.tick, {
+    notificationId,
+    revision,
+    offset: 0,
   });
 }

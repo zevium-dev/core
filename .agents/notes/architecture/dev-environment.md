@@ -61,3 +61,40 @@ Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 - Sessions isolate via `AGENT_BROWSER_SESSION`; each E2E lane derives its own session from `E2E_SESSION_PREFIX`, including retries. The suite shares only temporary publisher/consumer fixtures.
 - `eval` runs in an ISOLATED world: page-world JS props (e.g. CodeMirror `contentDOM.cmView`) are invisible. Dispatched events cross worlds — inject editor text via synthetic ClipboardEvent paste (see `e2e/02`).
 - Editing `apps/web` files while an e2e run is in flight triggers Vite HMR reloads that wipe Clerk forms mid-fill → spurious sign-in failures. Freeze the tree during e2e runs.
+
+## Email via Resend (#320)
+
+Email is optional and dormant by default. Without `RESEND_API_KEY`, notifications
+remain in-app; email is recorded/logged as skipped with no external requests.
+Do not copy production email credentials into previews or local test runs.
+
+Owner activation, separately for each intended Convex deployment:
+
+1. Verify a sending domain in Resend (configure the DNS records Resend supplies).
+2. In the Convex dashboard environment settings, set `EMAIL_FROM` to an address
+   on that verified domain, optionally `Zevium <notifications@your-domain>`.
+   Confirm `APP_ORIGIN` is the correct HTTPS web origin and `CLERK_SECRET_KEY`
+   belongs to the same Clerk instance as the app.
+3. Create a Resend sending API key for the verified domain. Set
+   `RESEND_API_KEY` privately in the Convex dashboard **last**. Never paste the
+   key in chat, notes, a PR, shell history, or a tracked env file.
+4. Optional delivery tracking: add Resend webhook
+   `https://<deployment>.convex.site/resend-webhook`, subscribe to all `email.*`
+   events, and privately set its signing secret as `RESEND_WEBHOOK_SECRET` in
+   Convex. Sending works without it; delivery/bounce/complaint updates need it.
+5. Trigger fresh notifications in a test deployment for a member with a verified
+   primary Clerk email. Check the inbox and Convex component `resend` → `emails`
+   / `deliveryEvents`; exercise opt-out through the authenticated
+   `notifications.setEmailPreference` API. Live delivery was not verified in #320
+   because the owner API key was intentionally absent.
+
+Only new/changed notifications send after activation; skipped history is not
+backfilled. Unsetting the key stops new enqueues. **Already queued component
+messages retain their send configuration**: to stop those, cancel them in the
+component or revoke the provider API key. Changing opt-out also affects future
+enqueues only. Preference UI is deferred; per-user/org backend API is available.
+
+Watch `notifications.emailState` for fanout failures, and the component for actual
+send/delivery state. No `queued` flag in the app proves delivery. Component email
+retention is operator-managed (`cleanupOldEmails` / `cleanupAbandonedEmails`);
+keep app `notificationEmailDeliveries` receipts for durable deduplication.

@@ -1,6 +1,11 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
@@ -226,6 +231,81 @@ describe("specs.deprecateVersion — metadata", () => {
     expect(
       await t.run(async (ctx) => ctx.db.query("notifications").collect()),
     ).toHaveLength(0);
+  });
+
+  it("notifies version consumers once across pages and fences changed/restored schedules", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      const consumer = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", "org_stranger"))
+        .unique();
+      for (let index = 0; index < 55; index++) {
+        await ctx.db.insert("usageEvents", {
+          organizationId: consumer!._id,
+          projectId: seed.projectId,
+          specVersionId: seed.versionId,
+          endpoint: "/ping",
+          method: "GET",
+          credits: 1,
+          status: 200,
+          latencyMs: 1,
+          keyId: "test-key",
+          at: index,
+        });
+      }
+    });
+    const publisher = asPublisher(t);
+    await publisher.mutation(api.specs.deprecateVersion, {
+      versionId: seed.versionId,
+      message: "Old",
+    });
+    const old = await t.run((ctx) => ctx.db.get(seed.versionId));
+    await publisher.mutation(api.specs.deprecateVersion, {
+      versionId: seed.versionId,
+      message: "Current",
+    });
+    await t.mutation(internal.specs.notifyDeprecatedVersionConsumersPage, {
+      versionId: seed.versionId,
+      deprecatedAt: old!.deprecatedAt!,
+      message: "Old",
+      cursor: null,
+    });
+    await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimersAsync());
+    const notices = await t.run((ctx) =>
+      ctx.db
+        .query("notifications")
+        .withIndex("by_org", (q) => q.eq("clerkOrgId", "org_stranger"))
+        .collect(),
+    );
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      kind: "version_deprecated",
+      publisherHandle: "pub-co",
+      projectSlug: "dep-api",
+      emailState: "skipped",
+    });
+    expect(notices[0]!.body).toContain("Current");
+    expect(notices[0]!.body).not.toContain("Old");
+    await publisher.mutation(api.specs.undeprecateVersion, {
+      versionId: seed.versionId,
+    });
+    await t.mutation(internal.specs.notifyDeprecatedVersionConsumersPage, {
+      versionId: seed.versionId,
+      deprecatedAt: old!.deprecatedAt!,
+      message: "Old",
+      cursor: null,
+    });
+    expect(
+      await t.run((ctx) =>
+        ctx.db
+          .query("notifications")
+          .withIndex("by_org", (q) => q.eq("clerkOrgId", "org_stranger"))
+          .collect(),
+      ),
+    ).toHaveLength(1);
   });
 
   it("fires version_deprecated notification", async () => {

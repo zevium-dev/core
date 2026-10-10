@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@convex-dev/rate-limiter": "^0.4.2",
+    "@convex-dev/resend": "^0.2.9",
     "@zevium/shared": "workspace:*",
     "convex": "^1.46.0",
     "stripe": "22.3.1",
