@@ -59,6 +59,8 @@ export interface Env {
   X402_FACILITATOR_TOKEN?: string;
   X402_STRIPE_SECRET_KEY?: string;
   WALLET_SESSION_SECRET?: string;
+  /** Paired web application origin for payment recovery actions. */
+  APP_ORIGIN?: string;
   WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
   /** Enable OAuth with the Clerk Frontend API origin and canonical /mcp URL. */
@@ -313,6 +315,7 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
     specSource: deps.publicSpecSource,
     pipeline: pipelineOnly(deps),
     pipelineEnv: {
+      APP_ORIGIN: env.APP_ORIGIN,
       WALLET: env.WALLET,
       GATEWAY_INTERNAL_SECRET: env.GATEWAY_INTERNAL_SECRET,
     },

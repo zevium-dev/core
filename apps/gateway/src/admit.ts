@@ -27,10 +27,12 @@ export async function admit(
   requestId: string,
   started: number,
 ) {
+  const paymentRequired = (detail: string, extra: Record<string, unknown>) =>
+    paymentRequiredResponse(requestId, detail, extra, env.APP_ORIGIN);
   const secret = extractApiKey(request);
   if (!secret && !deps.authenticatedKey) {
     // Unauthenticated calls never execute — no unmetered path.
-    return paymentRequiredResponse(requestId, "API key required", {
+    return paymentRequired("API key required", {
       reason: "missing_api_key",
     });
   }
@@ -65,7 +67,7 @@ export async function admit(
     );
   }
   if (outcome.status !== "ok") {
-    return paymentRequiredResponse(requestId, "Invalid API key", {
+    return paymentRequired("Invalid API key", {
       reason: "invalid_api_key",
     });
   }
@@ -311,7 +313,7 @@ export async function admit(
         );
       }
       if (authorization.reason === "insufficient_credits") {
-        return paymentRequiredResponse(requestId, "Insufficient credits", {
+        return paymentRequired("Insufficient credits", {
           reason: "insufficient_credits",
           available: authorization.available ?? 0,
           cost: 0,
@@ -365,7 +367,7 @@ export async function admit(
       freeResult.status === "rejected" &&
       freeResult.reason === "insufficient_credits"
     ) {
-      return paymentRequiredResponse(requestId, "Insufficient credits", {
+      return paymentRequired("Insufficient credits", {
         reason: "insufficient_credits",
         available: freeResult.available ?? 0,
         cost: 0,
@@ -412,8 +414,7 @@ export async function admit(
       (reserve.reason === "in_flight_budget_exhausted" ||
         reserve.reason === "weight_exceeds_budget")
     ) {
-      const response = paymentRequiredResponse(
-        requestId,
+      const response = paymentRequired(
         reserve.reason === "in_flight_budget_exhausted"
           ? "Wait for active calls to finish"
           : "Reduce the prompt or output limit, or add credits",
@@ -430,7 +431,7 @@ export async function admit(
     if (reserve.status === "insufficient") {
       // Zero/insufficient balance blocks the call — same payment shape
       // as an unauthenticated request, plus the balance detail agents need.
-      return paymentRequiredResponse(requestId, "Insufficient credits", {
+      return paymentRequired("Insufficient credits", {
         reason: "insufficient_credits",
         available: reserve.available,
         cost: reserve.cost,
@@ -438,22 +439,29 @@ export async function admit(
     }
     if (
       reserve.status === "rejected" &&
+      reserve.reason === "key_cap_exceeded"
+    ) {
+      return paymentRequired("Monthly spending limit reached for this key", {
+        error: "key_cap_exceeded",
+        reason: "key_cap_exceeded",
+        cost,
+      });
+    }
+    if (
+      reserve.status === "rejected" &&
       (reserve.reason === "key_disabled" ||
         reserve.reason === "key_untracked" ||
-        reserve.reason === "key_cap_exceeded" ||
         reserve.reason === "organization_archived")
     ) {
       return jsonError(
-        reserve.reason === "key_cap_exceeded" ? 402 : 403,
+        403,
         reserve.reason,
 
         reserve.reason === "key_disabled"
           ? "API key is disabled"
           : reserve.reason === "key_untracked"
             ? "API key is not managed by Zevium"
-            : reserve.reason === "organization_archived"
-              ? "Organization is archived"
-              : "Monthly spending limit reached for this key",
+            : "Organization is archived",
         requestId,
       );
     }

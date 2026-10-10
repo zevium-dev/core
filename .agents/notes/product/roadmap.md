@@ -15,7 +15,7 @@ Status legend: **built** · **partial** · **planned**. Status is set by each fe
 
 Round 2 on `75633792`: [verification, new issues and limits](../findings/dogfood-2026-10-10-round-2.md). Ten requested round-one findings passed; #396 reopened for incomplete monthly-cap recovery. #385 was excluded from standalone re-verification. New work:
 
-- **P1 #417:** local 402 actions target production keys/billing. → [agent-surface](../features/agent-surface.md)
+- **P1 #417 (implemented):** recovery actions now target the configured local/preview/production web origin. → [agent-surface](../features/agent-surface.md)
 - **P2 #416:** organization creation leaves notifications in a persistent authentication error. → [webhooks-notifications](../features/webhooks-notifications.md)
 
 The original baseline findings below are historical; use the round-two report for their current retest status.
@@ -121,3 +121,8 @@ Decision: [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md), [house supply
 - Browser-fetch paid-call and anonymous mock E2E coverage
 - Payout notification kinds
 - Production CI deployment from green `develop`
+
+## Payment recovery fixes — 2026-10-10
+
+- **P1 #396, #417 (implemented):** all gateway/MCP admission 402s retain safe explanations and recovery actions for the paired web environment. → [agent-surface](../features/agent-surface.md)
+- **P1 #421 (implemented):** cached empty wallets refresh once before admission, with concurrent deduplication and a persistent five-second cooldown; immediate signup credit succeeds on direct/MCP paid, free-tier, and zero-price paths. → [wallet-billing](../features/wallet-billing.md)

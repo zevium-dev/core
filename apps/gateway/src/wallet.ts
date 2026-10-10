@@ -439,6 +439,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         compacted_at INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0
       );
       INSERT OR IGNORE INTO wallet_checkpoint (id) VALUES (1);
+      CREATE TABLE IF NOT EXISTS empty_wallet_refresh (
+        id INTEGER PRIMARY KEY CHECK (id = 1), retry_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS terminal_refs (
         id TEXT PRIMARY KEY, status TEXT NOT NULL, at INTEGER NOT NULL
       );
@@ -883,8 +886,14 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   > {
     if (!keyId || !clerkOrgId || !Number.isSafeInteger(now) || now < 0)
       return { status: "rejected", reason: "invalid_rate_limit_request" };
+    // Cold admissions already await their initial snapshot. Only an already
+    // cached empty org wallet needs the extra grant-recovery read.
+    const cachedEmpty = this.#keySettingsSyncedAt > 0 && this.#balance <= 0;
     const setting = await this.#resolveKeySetting(keyId, clerkOrgId, now);
-    return this.#mutate(async () => {
+    const result = await this.#mutate<
+      | { status: "allowed" }
+      | { status: "rejected"; reason: string; retryAfterSeconds?: number }
+    >(async () => {
       if (this.#orgArchived)
         return { status: "rejected", reason: "organization_archived" };
       if (setting === undefined)
@@ -933,6 +942,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         return { status: "allowed" as const };
       });
     });
+    if (result.status === "allowed" && cachedEmpty && this.#balance <= 0)
+      await this.syncGrants(clerkOrgId, now, true);
+    return result;
   }
 
   async reserve(
@@ -1879,11 +1891,16 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   async syncGrants(
     clerkOrgId: string,
     nowMs: number = Date.now(),
+    emptyAdmission = false,
   ): Promise<SyncGrantsResult> {
     if (clerkOrgId.startsWith("x402:"))
       return { status: "ok", balance: this.#balance, sequence: this.#sequence };
     if (this.#syncInFlight) return this.#syncInFlight;
-    this.#syncInFlight = this.#refreshGrants(clerkOrgId, nowMs).finally(() => {
+    this.#syncInFlight = this.#refreshGrants(
+      clerkOrgId,
+      nowMs,
+      emptyAdmission,
+    ).finally(() => {
       this.#syncInFlight = null;
     });
     return this.#syncInFlight;
@@ -1892,9 +1909,24 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   async #refreshGrants(
     clerkOrgId: string,
     nowMs: number,
+    emptyAdmission: boolean,
   ): Promise<SyncGrantsResult> {
     const retryAfter = await this.#mutate(async () => {
-      if (nowMs < this.#syncRetryAt) return this.#syncRetryAt - nowMs;
+      if (emptyAdmission) {
+        // Independent of the normal 60s refresh: persist before I/O so an
+        // empty-wallet burst or DO eviction cannot hammer the control plane.
+        const retryAt =
+          this.ctx.storage.sql
+            .exec<{ retry_at: number }>(
+              "SELECT retry_at FROM empty_wallet_refresh WHERE id = 1",
+            )
+            .toArray()[0]?.retry_at ?? 0;
+        if (nowMs < retryAt) return retryAt - nowMs;
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO empty_wallet_refresh (id, retry_at) VALUES (1, ?)",
+          nowMs + FLUSH_ALARM_MS,
+        );
+      } else if (nowMs < this.#syncRetryAt) return this.#syncRetryAt - nowMs;
       this.#syncRetryAt = nowMs + SYNC_GRANTS_WINDOW_MS;
       await this.#persist({ syncRetryAt: this.#syncRetryAt });
       return 0;

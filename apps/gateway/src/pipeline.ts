@@ -12,6 +12,8 @@ import { forward } from "./forward";
 import { finalize } from "./finalize";
 
 export type PipelineEnv = {
+  /** Paired web application origin for payment recovery actions. */
+  APP_ORIGIN?: string;
   WALLET: DurableObjectNamespace<WalletDO>;
   ZEVIUM_RELEASE?: string;
   GATEWAY_INTERNAL_SECRET?: string;

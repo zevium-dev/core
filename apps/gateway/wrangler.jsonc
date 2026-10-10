@@ -11,6 +11,8 @@
   // the production route above. Override --host too when changing --port.
   "dev": { "host": "localhost:8787" },
   "vars": {
+    // Override with the paired web origin for preview deployments.
+    "APP_ORIGIN": "https://zevium.dev",
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
     // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage
     // MCP_OAUTH_ISSUER + MCP_OAUTH_RESOURCE — optional OAuth activation; configure

@@ -2129,3 +2129,75 @@ describe("unpriced operation visibility", () => {
     },
   );
 });
+
+describe("immediate wallet credit recovery (#421)", () => {
+  it.each([
+    { surface: "direct", cost: 3, freeTier: undefined },
+    { surface: "direct", cost: 3, freeTier: 5 },
+    { surface: "direct", cost: 0, freeTier: undefined },
+    { surface: "mcp", cost: 3, freeTier: undefined },
+    { surface: "mcp", cost: 3, freeTier: 5 },
+    { surface: "mcp", cost: 0, freeTier: undefined },
+  ])(
+    "uses a new grant on the next $surface call (cost=$cost, free=$freeTier)",
+    async ({ surface, cost, freeTier }) => {
+      const clerkOrgId = `org_grant_${crypto.randomUUID()}`;
+      const upstream = vi.fn(async () => new Response("ok"));
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 0,
+        fetchImpl: upstream,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Grant test", version: "1" },
+          servers: [{ url: "https://upstream.test" }],
+          paths: {
+            "/echo": {
+              post: { "x-zevium-cost": cost, "x-zevium-free-tier": freeTier },
+            },
+          },
+        }),
+      });
+      let balance = 0;
+      const fetchGrants = vi.fn(async () => ({
+        wallet: { clerkOrgId, balance, sequence: balance ? 1 : 0 },
+        keySettings: [{ keyId: KEY_ID, disabled: false }],
+      }));
+      __setTestGrantsFetcher(fetchGrants);
+      const invoke = async () => {
+        if (surface === "direct")
+          return (
+            await workerFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
+              method: "POST",
+              headers: { authorization: `Bearer ${KEY_SECRET}` },
+            })
+          ).status;
+        const rpc = await mcpCall("tools/call", {
+          name: "call_api",
+          arguments: {
+            org: ORG_SLUG,
+            project: PROJECT_SLUG,
+            method: "POST",
+            path: "/echo",
+            key: KEY_SECRET,
+          },
+        });
+        return JSON.parse(toolText(rpc)).status as number;
+      };
+      expect(await invoke()).toBe(402);
+      expect(fetchGrants).toHaveBeenCalledTimes(1);
+      expect(upstream).not.toHaveBeenCalled();
+      // Model the committed signup grant in the authoritative checkpoint. No
+      // manual DO grant, clock advance, explicit refresh, or delayed retry.
+      balance = 10_000;
+      expect(await invoke()).toBe(200);
+      expect(fetchGrants).toHaveBeenCalledTimes(2);
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect((await walletStub(clerkOrgId).getState()).balance).toBe(
+        10_000 - (freeTier ? 0 : cost),
+      );
+      expect(await invoke()).toBe(200);
+      expect(fetchGrants).toHaveBeenCalledTimes(2);
+    },
+  );
+});

@@ -572,3 +572,91 @@ describe("per-key request bucket", () => {
     __setTestGrantsFetcher(null);
   });
 });
+
+describe("empty-wallet admission refresh", () => {
+  afterEach(() => __setTestGrantsFetcher(null));
+
+  it("dedupes concurrent admissions without locking wallet operations during I/O", async () => {
+    const stub = walletStub("empty-concurrent-refresh");
+    await seed(stub, {
+      balance: 0,
+      keySettings: [{ keyId: "k1", disabled: false }],
+    });
+    await runInDurableObject(stub, async (wallet) => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started!: () => void;
+      const fetching = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let fetches = 0;
+      __setTestGrantsFetcher(async () => {
+        fetches++;
+        started();
+        await gate;
+        return {
+          wallet: { clerkOrgId: ORG, balance: 10_000, sequence: 1 },
+          keySettings: [{ keyId: "k1", disabled: false }],
+        };
+      });
+      const admissions = Array.from({ length: 10 }, () =>
+        wallet.consumeKeyRateLimit("k1", ORG),
+      );
+      try {
+        await fetching;
+        expect((await wallet.getState()).balance).toBe(0);
+        expect(await wallet.refund("unknown")).toEqual({ status: "unknown" });
+        expect(fetches).toBe(1);
+      } finally {
+        release();
+        expect(await Promise.all(admissions)).toEqual(
+          Array.from({ length: 10 }, () => ({ status: "allowed" })),
+        );
+      }
+      expect(fetches).toBe(1);
+      expect(
+        await wallet.reserve("funded", 7, { keyId: "k1", clerkOrgId: ORG }),
+      ).toMatchObject({ status: "reserved" });
+    });
+  });
+
+  it.each([false, true])(
+    "bounds empty refresh across eviction and fails closed (outage=%s)",
+    async (outage) => {
+      const stub = walletStub(`empty-refresh-bound-${outage}`);
+      await seed(stub, {
+        balance: 0,
+        keySettings: [{ keyId: "k1", disabled: false }],
+      });
+      let fetches = 0;
+      let balance = 0;
+      __setTestGrantsFetcher(async () => {
+        fetches++;
+        if (outage && balance === 0)
+          throw new Error("control plane unavailable");
+        return {
+          wallet: { clerkOrgId: ORG, balance, sequence: balance ? 1 : 0 },
+          keySettings: [{ keyId: "k1", disabled: false }],
+        };
+      });
+      const now = Date.now();
+      await stub.consumeKeyRateLimit("k1", ORG, now);
+      expect(await stub.authorizeKey("k1", ORG, now)).toMatchObject({
+        reason: "insufficient_credits",
+      });
+      await evictDurableObject(stub);
+      await stub.consumeKeyRateLimit("k1", ORG, now + 1);
+      expect(fetches).toBe(1);
+      balance = 10_000;
+      await stub.consumeKeyRateLimit("k1", ORG, now + 5_001);
+      expect(await stub.authorizeKey("k1", ORG, now + 5_001)).toMatchObject({
+        status: "allowed",
+      });
+      expect(fetches).toBe(2);
+      await stub.consumeKeyRateLimit("k1", ORG, now + 5_002);
+      expect(fetches).toBe(2);
+    },
+  );
+});

@@ -130,6 +130,7 @@ jobs:
           pnpm --filter @zevium/gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
+            --var "APP_ORIGIN:https://zevium-web-pr-$PR_NUMBER.zevium-dev.workers.dev" \
             --var "ZEVIUM_RELEASE:$release_sha"
           printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter @zevium/gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
           printf '%s' "$GATEWAY_PREVIEW_INTERNAL_SECRET" | pnpm --filter @zevium/gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
@@ -139,6 +140,7 @@ jobs:
             --tag "preview-$PR_NUMBER-$release_sha" \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
+            --var "APP_ORIGIN:https://zevium-web-pr-$PR_NUMBER.zevium-dev.workers.dev" \
             --var "ZEVIUM_RELEASE:$release_sha"
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"

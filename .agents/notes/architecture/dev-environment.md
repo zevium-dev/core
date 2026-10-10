@@ -104,3 +104,13 @@ Watch `notifications.emailState` for fanout failures, and the component for actu
 send/delivery state. No `queued` flag in the app proves delivery. Component email
 retention is operator-managed (`cleanupOldEmails` / `cleanupAbandonedEmails`);
 keep app `notificationEmailDeliveries` receipts for durable deduplication.
+
+## Gateway recovery origin (#417)
+
+`mise exec -- pnpm --filter @zevium/gateway dev` passes `APP_ORIGIN` to Wrangler,
+defaulting to `http://localhost:3000`. Export `APP_ORIGIN` when using a different
+local web origin. Direct Wrangler invocations need `--var APP_ORIGIN:<web-origin>`
+or the matching `.dev.vars` setting. Production defaults to `https://zevium.dev`;
+preview CI injects its paired `zevium-web-pr-<number>.zevium-dev.workers.dev` origin.
+This binding drives direct gateway and MCP recovery actions independently of the
+gateway's own discovery origin.

@@ -13,6 +13,7 @@ test("Wrangler dev uses the configured local discovery origin, not the productio
       ip: "127.0.0.1",
       port: 0,
       local: true,
+      vars: { APP_ORIGIN: "http://localhost:3000" },
       persist: false,
       logLevel: "error",
       experimental: {
@@ -33,4 +34,11 @@ test("Wrangler dev uses the configured local discovery origin, not the productio
     body.apis[0].gatewayBaseUrl,
     "http://localhost:8787/gateway/test-publisher/test-api",
   );
+  const payment = await fetch(`${origin}/gateway/test-publisher/test-api/ping`);
+  assert.equal(payment.status, 402);
+  assert.deepEqual((await payment.json()).actions, {
+    createKey: "http://localhost:3000/app/settings/keys",
+    topUp: "http://localhost:3000/app/billing",
+    docs: "http://localhost:3000/docs/consuming",
+  });
 });
