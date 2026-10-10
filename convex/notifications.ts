@@ -200,3 +200,40 @@ export const markAllReadPage = internalMutation({
     return result;
   },
 });
+
+/** Per-user/per-org preference, scoped exclusively by the authenticated org. */
+export const emailPreference = query({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args) => {
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const preference = await ctx.db
+      .query("notificationPreferences")
+      .withIndex("by_org_user", (q) =>
+        q.eq("clerkOrgId", org.clerkOrgId).eq("clerkUserId", claims.subject),
+      )
+      .unique();
+    return { emailOptOut: preference?.emailOptOut ?? false };
+  },
+});
+
+export const setEmailPreference = mutation({
+  args: { orgSlug: v.string(), emailOptOut: v.boolean() },
+  handler: async (ctx, args) => {
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const preference = await ctx.db
+      .query("notificationPreferences")
+      .withIndex("by_org_user", (q) =>
+        q.eq("clerkOrgId", org.clerkOrgId).eq("clerkUserId", claims.subject),
+      )
+      .unique();
+    if (preference)
+      await ctx.db.patch(preference._id, { emailOptOut: args.emailOptOut });
+    else
+      await ctx.db.insert("notificationPreferences", {
+        clerkOrgId: org.clerkOrgId,
+        clerkUserId: claims.subject,
+        emailOptOut: args.emailOptOut,
+      });
+    return { emailOptOut: args.emailOptOut };
+  },
+});

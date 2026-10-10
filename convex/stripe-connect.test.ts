@@ -1360,6 +1360,74 @@ describe("Stripe Connect publisher accounting", () => {
     });
   });
 
+  it.each(["sent", "provider_failure", "definitive_failure"] as const)(
+    "creates one publisher notification for %s despite projection retries",
+    async (outcome) => {
+      const t = convexTest(schema, modules);
+      const seed = await seedConnect(t);
+      await t.mutation(internal.payouts.setConnectedAccount, {
+        organizationId: seed.organizationId,
+        stripeConnectedAccountId: "acct_notices",
+        expectedLivemode: false,
+      });
+      await t.run(async (ctx) => {
+        const profile = await ctx.db
+          .query("organizationPayments")
+          .withIndex("by_organization", (q) =>
+            q.eq("organizationId", seed.organizationId),
+          )
+          .unique();
+        await ctx.db.patch(profile!._id, { payoutsEnabled: true });
+      });
+      await t.mutation(internal.payouts.releaseMatureEarnings, {
+        publisherOrganizationId: seed.organizationId,
+      });
+      const transfer = await t.mutation(
+        internal.payouts.preparePublisherTransfer,
+        {
+          expectedLivemode: false,
+          publisherOrganizationId: seed.organizationId,
+          ...TRANSFER_CORRELATION,
+        },
+      );
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (outcome === "definitive_failure") {
+          await t.mutation(
+            internal.payouts.recordDefinitivePublisherTransferFailure,
+            { transferId: transfer.transferId, code: "private provider error" },
+          );
+        } else {
+          await t.mutation(internal.payouts.projectStripeTransfer, {
+            stripeTransferId: "tr_notices",
+            publisherTransferId: transfer.transferId,
+            amount: transfer.amount,
+            amountReversed: 0,
+            currency: transfer.currency,
+            destination: transfer.connectedAccountId,
+            platformAccountId: transfer.platformAccountId,
+            correlationNonce: transfer.correlationNonce,
+            correlationHmac: transfer.correlationHmac,
+            metadataRepairVersion: 2,
+            requestFingerprint: transfer.requestFingerprint,
+            failed: outcome === "provider_failure",
+            failureReason: "private provider error",
+          });
+        }
+      }
+      const notifications = await t.run((ctx) =>
+        ctx.db.query("notifications").collect(),
+      );
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toMatchObject({
+        clerkOrgId: "org_publisher",
+        kind: outcome === "sent" ? "transfer_sent" : "transfer_failed",
+        emailState: "skipped",
+      });
+      expect(notifications[0]!.body).toContain("10.45 USD");
+      expect(notifications[0]!.body).not.toContain("private provider error");
+    },
+  );
+
   it("carries sub-cent earnings into the next transfer", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedConnect(t);
@@ -1586,6 +1654,10 @@ describe("Stripe Connect publisher accounting", () => {
       "transfer_reversal",
     ]);
     expect(state.payouts).toHaveLength(1);
+    const notices = await t.run((ctx) =>
+      ctx.db.query("notifications").collect(),
+    );
+    expect(notices.map((notice) => notice.kind)).toEqual(["transfer_sent"]);
     const publicState = await t
       .withIdentity({ subject: "publisher", org_id: "org_publisher" } as {
         subject: string;
@@ -1737,6 +1809,9 @@ describe("Stripe Connect publisher accounting", () => {
       reversedAmount: local.amount,
       status: "reversed",
     });
+    expect(
+      await t.run((ctx) => ctx.db.query("notifications").collect()),
+    ).toHaveLength(0);
     expect(state.balance).toMatchObject({
       availableAtoms: 1_045_000_000,
       allocatedAtoms: 0,

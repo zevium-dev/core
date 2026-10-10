@@ -4,6 +4,8 @@
 > Code: `convex/projects.ts` (`update`), `convex/admin.ts` (`setProjectVisibility`), `convex/project-visibility-webhooks.test.ts`, `convex/webhooks.ts`, `convex/webhookDeliveryAction.ts`, `convex/lib/webhookDelivery.ts`, `convex/webhooks.test.ts`, `convex/notifications.ts`, `convex/lib/notifications.ts`, `convex/notifications.test.ts`, `apps/web/src/components/project/webhooks-card.tsx`, `apps/web/src/components/project/webhook-deliveries.tsx`, `apps/web/src/components/webhook-secret.test.tsx`, `apps/web/src/components/notification-bell.tsx`, `apps/web/src/routes/docs/publishing.tsx` (Webhooks section), `apps/web/src/components/project-settings-panel.tsx`
 > Related: [wallet-billing](wallet-billing.md) (spend alerts, budget webhooks), [listing-lifecycle](listing-lifecycle.md), [upstream-credentials](upstream-credentials.md) (webhook signing-secret encryption), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
+> Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
+
 Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project receiving listing events, with retries and a delivery log. Notifications: org-scoped email + in-app messages for account, billing, lifecycle, and payout events. Consumer spend alerts and budget webhooks belong to [wallet-billing](wallet-billing.md).
 
 ## Product
@@ -29,6 +31,19 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 - **P1 #393:** normal publisher visibility changes do not emit the documented webhook event. The admin mutation emits it, but `projects.update` does not. A local `spec.published` webhook delivered successfully in one attempt.
   Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
+### Transactional email (#320)
+
+- Official [`@convex-dev/resend`](https://github.com/get-convex/resend) component owns the durable send queue, batching, provider idempotency, backoff/retries, and delivery status. `testMode: false`; credentials are read only at invocation time.
+- Shared `createNotification` / `upsertNotification` schedule email separately from inbox writes. Unset/blank `RESEND_API_KEY` records `emailState: skipped`, logs a static reason and notification id, and makes no Clerk/Resend calls. Missing `EMAIL_FROM` also skips. Enabling credentials affects new/changed notifications; skipped history is not replayed.
+- All ten existing kinds flow through this path: low balance, published spec, version deprecation, project retirement, failed publisher webhook, visibility, sent/failed transfer, and quality suspension/restoration. Transfer kinds existed without producers; #320 adds idempotent notices after verified transfer success/failure and definitive dispatch failure, suppressing stale failures and already-reversed success snapshots. This does not introduce planned 50/75/100% budget events or bank-payout event notifications. Project-retirement consumer fanout already creates consumer-org notices; those now receive email too. Version-deprecation events now also page through existing version consumers (including legacy unversioned usage), with one canonical notice per org and stale schedule guards.
+- Recipients: current Clerk organization members, in pages of 25, each sent separately to their verified primary email. No BCC lists, browser-supplied recipient ids, or mirror-email fallback. Deleted/archived/tombstoned orgs are suppressed. Clerk `CLERK_SECRET_KEY` must be configured in Convex.
+- Minimal `notificationPreferences` row per `(clerkOrgId, clerkUserId)` defaults to email enabled. Authenticated `notifications.emailPreference` / `setEmailPreference` derive both ids from the active JWT context; supplied slug cannot select another org. `emailOptOut` is checked immediately before component enqueue. Preference UI is deferred; API is ready. Opt-out affects future enqueues, not messages already queued at Resend.
+- Each notification has a monotonic `emailRevision`; identical event retries do nothing, changed lifecycle content starts a new revision, and stale jobs exit. Indexed `notificationEmailDeliveries` receipts permanently dedupe `(notification, revision, user)` atomically with component enqueue; the same key is passed to Resend's component. Receipts remain after component retention cleanup.
+- Scheduled mutation watchdog attempts each recipient page up to five times (1/2/4/8/16-minute waits), including recovery from crashed actions and partially queued pages. Resend independently retries sends (five attempts, initial 30-second backoff). Provider errors are never logged verbatim. In-app notification creation never calls either provider.
+- `emailState` is fanout state, not proof of delivery: `queued` means recipient enumeration completed (possibly all opted out/no verified addresses), `failed` means retries exhausted, `skipped` means dormant/missing config/inactive org. Component `resend` data owns email send/delivery/bounce/complaint state. Optional signed `/resend-webhook` updates it; missing webhook config returns 503, invalid signature 400, processing failure 500 for retry.
+- Text + small escaped HTML templates reuse event facts and safe application links under `APP_ORIGIN`. No tracking pixels, promotional copy, or unescaped publisher HTML. Verification/invitation email stays with Clerk.
+- Tests: dormant logging/no provider calls, all existing kinds, real component enqueue, idempotent partial retries, revision fencing, preferences/auth, verified address selection, bounded lookup failures/pagination, and webhook authentication. Live delivery remains owner verification after credentials are supplied. [Owner setup](../architecture/dev-environment.md#email-via-resend-320).
 
 ### Implementation notes
 
@@ -57,7 +72,7 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 - Wave 8 — notifications + webhooks backend (86 tests, b77388f); bell + webhooks card UI browser-verified.
 - Payout notification kinds added (BACKLOG completed findings).
 - 2026-10-10 — ACCEPTED: two roles for now, admin + member (owner treated as admin); full permission-based access later. [decision](../decisions/2026-10-10-two-roles-admin-member.md) Delivery history is admin-only — code correct.
-- 2026-10-10 — ACCEPTED (not built): email via Resend; API key pending from user. [decision](../decisions/2026-10-10-email-resend.md)
+- 2026-10-10 — ACCEPTED: email via Resend; #320 implemented, activation awaits owner configuration. [decision](../decisions/2026-10-10-email-resend.md)
 
 ## Open questions
 

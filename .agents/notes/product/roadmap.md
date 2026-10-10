@@ -42,7 +42,7 @@ Small, decided items. Each links to its decision; build in any order unless note
 2. **Built** #317 $1 signup credit per eligible org, once per Clerk creator (funds free-tier calls) — [decision](../decisions/2026-10-10-signup-credit.md)
 3. #318 Card fee passed through at cost on top-ups (legal check first) — [decision](../decisions/2026-10-10-card-fee-passthrough.md)
 4. **Built** #319 Review eligibility includes free-tier callers — [decision](../decisions/2026-10-10-review-eligibility.md)
-5. #320 Email via Resend (blocked on API key) — [decision](../decisions/2026-10-10-email-resend.md)
+5. #320 Email via Resend (built; dormant until owner configures verified sender + API key) — [decision](../decisions/2026-10-10-email-resend.md)
 6. #321 Docs/FLOW alignment: two roles (admin, member), admin-only analytics + delivery history — [decision](../decisions/2026-10-10-two-roles-admin-member.md)
 
 Bigger P0 items (x402 rail, distribution, capability routing, house supply, LLM per-token) are in the P0 table below.

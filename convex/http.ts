@@ -9,8 +9,41 @@ import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { stripeClient } from "./billing";
+import { notificationMailer } from "./lib/notificationEmail";
 
 const http = httpRouter();
+
+http.route({
+  path: "/resend-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.RESEND_WEBHOOK_SECRET?.trim()) {
+      return new Response("Email webhook not configured", { status: 503 });
+    }
+    const body = await request.text();
+    try {
+      new Webhook(process.env.RESEND_WEBHOOK_SECRET).verify(body, {
+        "svix-id": request.headers.get("svix-id") ?? "",
+        "svix-timestamp": request.headers.get("svix-timestamp") ?? "",
+        "svix-signature": request.headers.get("svix-signature") ?? "",
+      });
+    } catch {
+      return new Response("Invalid signature", { status: 400 });
+    }
+    try {
+      return await notificationMailer().handleResendEventWebhook(
+        ctx,
+        new Request(request.url, {
+          method: "POST",
+          headers: request.headers,
+          body,
+        }),
+      );
+    } catch {
+      return new Response("Email event processing failed", { status: 500 });
+    }
+  }),
+});
 
 type ClerkEmailAddress = { email_address?: string; id?: string };
 type ClerkUserEventData = {

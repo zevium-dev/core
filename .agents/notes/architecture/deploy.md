@@ -135,3 +135,24 @@ Preview jobs share `.github/actions/setup/action.yml` for tools and installation
 Full-e2e retries use a fresh session prefix, with distinct anonymous and signed-in
 lane suffixes. Authenticated browser snapshots are not uploaded; public HTTP
 contract evidence remains available on failure.
+
+## Optional Resend email activation (#320)
+
+The Resend component deploys with Convex and stays dormant without
+`RESEND_API_KEY`. No email credential is required by CI or deployment workflows.
+Keep preview deployments unset unless deliberately testing email.
+
+Owner setup: verify the sender domain in Resend; configure Convex `EMAIL_FROM`,
+`APP_ORIGIN`, and existing `CLERK_SECRET_KEY`; then privately set
+`RESEND_API_KEY`. Optional: subscribe Resend `email.*` events to
+`https://<deployment>.convex.site/resend-webhook` and set
+`RESEND_WEBHOOK_SECRET`. These are Convex runtime settings, not web/gateway
+bindings or required GitHub environment secrets. [Detailed activation and
+verification](dev-environment.md#email-via-resend-320).
+
+Test a fresh low-balance, lifecycle, transfer, and listing-status notification
+before enabling production. Verify both inbox creation and component delivery
+status; API-key absence was intentional during implementation, so real provider
+acceptance remains an owner check. Skipped history is never replayed on activation.
+Unsetting the key prevents new email enqueues but does not cancel already queued
+component messages; cancel those separately or revoke the Resend key.

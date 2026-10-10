@@ -24,7 +24,12 @@ import {
   atomsToCredits,
   atomsToUsdCents,
 } from "./accounting";
-import { getOrgByClerkId, requireIdentity, requireOrgAdmin } from "./lib/auth";
+import {
+  getOrgByClerkId,
+  requireIdentity,
+  requireOrgAdmin,
+  getActiveOrgById,
+} from "./lib/auth";
 
 import {
   adjustPublisherBalanceAggregates,
@@ -35,6 +40,7 @@ import {
   releasePublisherEarning,
 } from "./lib/publisherLedger";
 import { stripeClient } from "./billing";
+import { createNotification } from "./lib/notifications";
 
 export type ConnectProfileStatus =
   "not_started" | "incomplete" | "restricted" | "enabled";
@@ -2317,6 +2323,29 @@ async function markTransferDispatchProviderVerified(
   });
 }
 
+async function notifyPublisherTransfer(
+  ctx: MutationCtx,
+  transfer: Doc<"publisherTransfers">,
+  kind: "transfer_sent" | "transfer_failed",
+): Promise<void> {
+  const org = await getActiveOrgById(ctx, transfer.publisherOrganizationId);
+  if (org === null) return;
+  const amount = `${(transfer.amount / 100).toFixed(2)} ${transfer.currency.toUpperCase()}`;
+  await createNotification(ctx, {
+    clerkOrgId: org.clerkOrgId,
+    kind,
+    title:
+      kind === "transfer_sent"
+        ? "Publisher transfer sent"
+        : "Publisher transfer failed",
+    body:
+      kind === "transfer_sent"
+        ? `Your transfer of ${amount} to your connected Stripe account was confirmed. Bank delivery follows Stripe's payout schedule.`
+        : `Your transfer of ${amount} could not be completed. Review Earnings for its status.`,
+    refId: `${kind}:${transfer._id}`,
+  });
+}
+
 async function applyStripeTransferProjection(
   ctx: MutationCtx,
   transfer: Doc<"publisherTransfers">,
@@ -2383,6 +2412,7 @@ async function applyStripeTransferProjection(
       args.stripeTransferId,
       args.requestFingerprint,
     );
+    await notifyPublisherTransfer(ctx, transfer, "transfer_failed");
     return;
   }
 
@@ -2446,6 +2476,10 @@ async function applyStripeTransferProjection(
     args.stripeTransferId,
     args.requestFingerprint,
   );
+  // A reversed snapshot must never produce a misleading success notice.
+  if (targetReversedAmount === 0) {
+    await notifyPublisherTransfer(ctx, transfer, "transfer_sent");
+  }
 }
 
 async function assertStripeTransferSnapshotMatches(
@@ -2738,6 +2772,7 @@ export const recordDefinitivePublisherTransferFailure = internalMutation({
       attemptedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    await notifyPublisherTransfer(ctx, transfer, "transfer_failed");
   },
 });
 
