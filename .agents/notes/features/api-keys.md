@@ -1,6 +1,6 @@
 # API keys
 
-> Status: partial (P0 issuance blocked by #385; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-10
+> Status: partial (UI issuance verified in round-two dogfood; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-10
 > Code: `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
 > Related: [gateway](gateway.md), [wallet-billing](wallet-billing.md), [accounts-orgs](accounts-orgs.md), [machine-payments](machine-payments.md), [registry-v2](../architecture/registry-v2.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -24,6 +24,8 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 - Programmatic key-management API for SaaS consumers (P1)
 
 ## Tech
+
+**Round-two dogfood — 2026-10-10:** normal UI issuance and copy-once reveal worked in separate publisher/consumer orgs; publisher revocation subsequently returned `invalid_api_key` at the gateway. Two rotations initially returned `403 key_untracked` and recovered within the UI’s documented one-minute control-refresh window. #419 was closed as not planned after confirming that notice. Grace-period predecessors and inherited monthly cap worked. No two-identity ownership/RBAC claim. [Evidence](../findings/dogfood-2026-10-10-round-2.md).
 
 - x402 wallet sessions use the same request gate and admission proofs, scoped to the stable payer wallet; see [machine-payments](machine-payments.md).
 
