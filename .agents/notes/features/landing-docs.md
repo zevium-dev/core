@@ -48,6 +48,10 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - `/docs/publishing` documents all five emitted publisher webhook events and visibility-change payload/no-op semantics (#393); event contract owned by [webhooks-notifications](webhooks-notifications.md).
 - Integrate: API detail ships "Copy curl" (keyless mock URL or placeholder key, never the real secret) plus agent config snippet; no js/python snippet generation.
 
+### Gateway errors
+
+- Consuming guide error list documents #336: 60-request burst / one request per second refill, `429` + `Retry-After`, monthly spend cap `402`, disabled key `403`.
+
 ## Decisions
 
 - 2026-10-10 — Web distribution implementation of [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md): #326 client installs share one component; #322 serves web `/llms.txt`, with gateway-side copy deferred to avoid concurrent gateway restructuring. Catalogue changes are limited to the agent panel.

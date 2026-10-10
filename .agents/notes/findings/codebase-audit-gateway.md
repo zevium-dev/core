@@ -1,5 +1,7 @@
 # Codebase audit — gateway
 
+> Resolution 2026-10-10 (#334, #336): admission now carries a signed immutable proof; settlement no longer gates on mutable deprecation/entitlement. Per-key SQLite request buckets return 429 + Retry-After; monthly caps return 402. Details: [gateway](../features/gateway.md), [API keys](../features/api-keys.md). Historical audit below remains as recorded.
+
 > Date: 2026-10-10 · Read-only audit
 > Scope: `apps/gateway/src` (7,210 LOC), `apps/gateway/test` (6,425 LOC), wrangler configs, gateway-facing `packages/shared/src` (`openapi.ts`, `registry-sync.ts`, `public-claims.ts`, `registry-v2-vectors.ts`). Cross-checked Convex callers where the gateway contract depends on them.
 

@@ -3,7 +3,11 @@ import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import schema from "./schema";
 import { internal } from "./_generated/api";
-import { fundingExpiresAt, machineWalletId } from "@zevium/shared";
+import {
+  fundingExpiresAt,
+  machineWalletId,
+  signAdmissionProof,
+} from "@zevium/shared";
 import { parseIngestUsageBody } from "./http";
 const modules = import.meta.glob("./**/*.ts");
 const payer = "0x" + "a".repeat(40);
@@ -77,6 +81,65 @@ async function fixture() {
 }
 
 describe("anonymous wallet ledger", () => {
+  it("settles wallet-bound admission after deprecation and rejects a proof from another payer", async () => {
+    const { t, usage } = await fixture();
+    const secret = "test-wallet-admission-secret";
+    vi.stubEnv("GATEWAY_INTERNAL_SECRET", secret);
+    const grant = await t.mutation(internal.machinePayments.fund, payment(1));
+    const event = usage("admitted", grant.sourceRef, grant.createdAt);
+    const claims = {
+      reservationId: event.reservationId,
+      consumerClerkOrgId: walletId,
+      projectId: event.projectId,
+      routeRevision: event.specVersionId,
+      policyRevision: 1,
+      mode: "open" as const,
+      admittedAt: grant.createdAt,
+    };
+    const admissionProof = await signAdmissionProof(secret, claims);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(event.projectId, {
+        deprecationStartedAt: grant.createdAt + 1,
+        retirementRevision: 1,
+      });
+    });
+    const wrongProof = await signAdmissionProof(secret, {
+      ...claims,
+      consumerClerkOrgId: machineWalletId(network, "0x" + "b".repeat(40)),
+    });
+    expect(
+      (
+        await t.mutation(internal.wallets.recordUsage, {
+          events: [{ ...event, admissionProof: wrongProof }],
+        })
+      ).results,
+    ).toMatchObject([
+      { status: "rejected", reason: "invalid admission proof" },
+    ]);
+    const admitted = { ...event, admissionProof, at: grant.createdAt + 2 };
+    expect(
+      (
+        await t.mutation(internal.wallets.recordUsage, {
+          events: [admitted],
+        })
+      ).results,
+    ).toMatchObject([{ status: "applied" }]);
+    expect(
+      (
+        await t.mutation(internal.wallets.recordUsage, {
+          events: [admitted],
+        })
+      ).results,
+    ).toMatchObject([{ status: "already_applied" }]);
+    const state = await t.run(async (ctx) => ({
+      wallet: await ctx.db.query("wallets").first(),
+      lot: await ctx.db.query("walletFundingLots").first(),
+      entitlement: await ctx.db.query("projectConsumerEntitlements").first(),
+    }));
+    expect(state.wallet?.balance).toBe(9000);
+    expect(state.lot?.availableCredits).toBe(9000);
+    expect(state.entitlement?.firstUsedAt).toBe(grant.createdAt);
+  });
   it("requires the gateway secret on the HTTP funding boundary", async () => {
     const { t } = await fixture();
     vi.stubEnv("GATEWAY_INTERNAL_SECRET", "fixture-internal-secret");

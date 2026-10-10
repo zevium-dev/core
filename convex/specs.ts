@@ -463,11 +463,17 @@ export const getPublishedForGatewayInternal = internalQuery({
   args: {
     publisherHandle: v.string(),
     projectSlug: v.string(),
+    consumerClerkOrgId: v.optional(v.string()),
   },
   handler: async (
     ctx,
     args,
   ): Promise<{
+    admission: {
+      mode: "open" | "entitled_only";
+      policyRevision: number;
+      allowed: boolean;
+    };
     spec: string;
     version: string;
     specVersionId: string;
@@ -534,7 +540,45 @@ export const getPublishedForGatewayInternal = internalQuery({
           .withIndex("by_project", (q) => q.eq("projectId", project._id))
           .collect();
 
+    const mode =
+      project.deprecationStartedAt === undefined ? "open" : "entitled_only";
+    let allowed = mode === "open" || args.consumerClerkOrgId === org.clerkOrgId;
+    if (!allowed && args.consumerClerkOrgId) {
+      const consumer = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_org", (q) =>
+          q.eq("clerkOrgId", args.consumerClerkOrgId!),
+        )
+        .unique();
+      if (consumer) {
+        const entitlement = await ctx.db
+          .query("projectConsumerEntitlements")
+          .withIndex("by_project_consumer", (q) =>
+            q
+              .eq("projectId", project._id)
+              .eq("consumerOrganizationId", consumer._id),
+          )
+          .unique();
+        const historical = entitlement
+          ? null
+          : await ctx.db
+              .query("usageEvents")
+              .withIndex("by_org_project_at", (q) =>
+                q
+                  .eq("organizationId", consumer._id)
+                  .eq("projectId", project._id)
+                  .lte("at", project.deprecationStartedAt!),
+              )
+              .first();
+        allowed = entitlement !== null || historical !== null;
+      }
+    }
     return {
+      admission: {
+        mode,
+        policyRevision: (project.retirementRevision ?? 0) + 1,
+        allowed,
+      },
       spec: latest.spec,
       version: latest.version,
       specVersionId: latest._id,

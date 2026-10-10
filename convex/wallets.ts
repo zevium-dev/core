@@ -4,6 +4,7 @@ import {
   validMachineFunding,
   MAX_ENDPOINT_COST_CREDITS,
   MAX_USAGE_INGEST_EVENTS,
+  verifyAdmissionProof,
 } from "@zevium/shared";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -705,6 +706,7 @@ const usageEventArg = v.object({
   ),
   organizationId: v.string(),
   projectId: v.string(),
+  admissionProof: v.optional(v.string()),
   specVersionId: v.string(),
   specVersion: v.string(),
   operationId: v.string(),
@@ -755,6 +757,7 @@ type UsageEventArg = {
   machineFunding?: MachineFunding;
   organizationId: string;
   projectId: string;
+  admissionProof?: string;
   specVersionId: string;
   specVersion: string;
   operationId: string;
@@ -1079,51 +1082,29 @@ export const recordUsage = internalMutation({
         });
         continue;
       }
-      let entitlement =
-        project.organizationId === consumerOrg._id
+      // Legacy outbox rows predate proofs; the authenticated ingest remains their
+      // authority. New proofs cannot fall back to that path if invalid.
+      const admission =
+        event.admissionProof === undefined
           ? null
-          : await ctx.db
-              .query("projectConsumerEntitlements")
-              .withIndex("by_project_consumer", (q) =>
-                q
-                  .eq("projectId", project._id)
-                  .eq("consumerOrganizationId", consumerOrg._id),
-              )
-              .unique();
-      if (
-        project.organizationId !== consumerOrg._id &&
-        entitlement === null &&
-        project.deprecationStartedAt !== undefined &&
-        event.at >= project.deprecationStartedAt
-      ) {
-        const historicalUse = await ctx.db
-          .query("usageEvents")
-          .withIndex("by_org_project_at", (q) =>
-            q
-              .eq("organizationId", consumerOrg._id)
-              .eq("projectId", project._id)
-              .lte("at", project.deprecationStartedAt!),
-          )
-          .first();
-        if (historicalUse === null) {
-          results.push({
-            refId: event.settleRefId,
-            status: "rejected",
-            reason: "consumer became eligible after retirement freeze",
-            retryable: false,
-          });
-          continue;
-        }
-        const entitlementId = await ctx.db.insert(
-          "projectConsumerEntitlements",
-          {
-            projectId: project._id,
-            consumerOrganizationId: consumerOrg._id,
-            firstUsedAt: historicalUse.at,
-            createdAt: Date.now(),
-          },
-        );
-        entitlement = await ctx.db.get(entitlementId);
+          : await verifyAdmissionProof(
+              process.env.GATEWAY_INTERNAL_SECRET ?? "",
+              event.admissionProof,
+              {
+                reservationId: event.reservationId,
+                consumerClerkOrgId: event.consumerClerkOrgId,
+                projectId: event.projectId,
+                routeRevision: event.specVersionId,
+              },
+            );
+      if (event.admissionProof !== undefined && admission === null) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "invalid admission proof",
+          retryable: false,
+        });
+        continue;
       }
       const binding: SettlementBinding = {
         consumerOrganizationId: consumerOrg._id,
@@ -1299,19 +1280,29 @@ export const recordUsage = internalMutation({
         },
       );
 
+      // Maintain the eligibility projection after settlement; never use it to
+      // approve or reject a call that already executed.
       if (
         event.billingOutcome !== "refunded" &&
-        project.organizationId !== consumerOrg._id &&
-        entitlement === null
+        project.organizationId !== consumerOrg._id
       ) {
-        await ctx.db.insert("projectConsumerEntitlements", {
-          projectId: project._id,
-          consumerOrganizationId: consumerOrg._id,
-          firstUsedAt: event.at,
-          createdAt: Date.now(),
-        });
+        const entitlement = await ctx.db
+          .query("projectConsumerEntitlements")
+          .withIndex("by_project_consumer", (q) =>
+            q
+              .eq("projectId", project._id)
+              .eq("consumerOrganizationId", consumerOrg._id),
+          )
+          .unique();
+        if (entitlement === null) {
+          await ctx.db.insert("projectConsumerEntitlements", {
+            projectId: project._id,
+            consumerOrganizationId: consumerOrg._id,
+            firstUsedAt: admission?.admittedAt ?? event.at,
+            createdAt: Date.now(),
+          });
+        }
       }
-
       const split = publisherEarningSplit(event.credits);
       let earningId: Id<"publisherEarnings"> | undefined;
       if (event.billingOutcome === "settled") {

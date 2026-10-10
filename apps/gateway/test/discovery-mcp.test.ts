@@ -1213,6 +1213,9 @@ describe("MCP /mcp", () => {
     const namespace = {
       idFromName: (name: string) => env.WALLET.idFromName(name),
       get: () => ({
+        consumeKeyRateLimit: (
+          ...args: Parameters<WalletDO["consumeKeyRateLimit"]>
+        ) => wallet.consumeKeyRateLimit(...args),
         reserve: (...args: Parameters<WalletDO["reserve"]>) =>
           wallet.reserve(...args),
         settle: async (...args: Parameters<WalletDO["settle"]>) => {
@@ -1231,7 +1234,10 @@ describe("MCP /mcp", () => {
           catalogueSource: fixtures.catalogue,
           specSource: fixtures.specs,
           gatewayOrigin: "https://gateway.test",
-          pipelineEnv: { WALLET: namespace },
+          pipelineEnv: {
+            WALLET: namespace,
+            GATEWAY_INTERNAL_SECRET: "test-admission-secret",
+          },
           pipeline: {
             keyVerifier: fixtures.keys,
             specSource: fixtures.specs,
@@ -1258,7 +1264,24 @@ describe("MCP /mcp", () => {
     }
   });
 
-  it.each([302, 400, 500])(
+  it("returns the platform key-rate retry delay without dispatch", async () => {
+    const clerkOrgId = "org_mcp_key_rate";
+    const fetchImpl = vi.fn(async () => new Response("must not run"));
+    await installAgentFixtures({ clerkOrgId, credits: 100, fetchImpl });
+    const now = Date.now() + 1000;
+    const wallet = walletStub(clerkOrgId);
+    for (let i = 0; i < 60; i++)
+      await wallet.consumeKeyRateLimit(KEY_ID, clerkOrgId, now);
+    const rpc = await callEcho();
+    expect(JSON.parse(toolText(rpc))).toMatchObject({
+      status: 429,
+      cost: 0,
+      retryAfterSeconds: 1,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([302, 400, 429, 500])(
     "returns a static error and charges zero for upstream %i",
     async (status) => {
       const clerkOrgId = `org_mcp_upstream_error_${status}`;
@@ -1267,7 +1290,10 @@ describe("MCP /mcp", () => {
         clerkOrgId,
         credits: 100,
         fetchImpl: async () =>
-          new Response(secret, { status, headers: { "x-error": secret } }),
+          new Response(secret, {
+            status,
+            headers: { "x-error": secret, "retry-after": "123" },
+          }),
       });
       const rpc = await callEcho();
       expect(rpc).toMatchObject({ result: { isError: true } });
@@ -1277,6 +1303,7 @@ describe("MCP /mcp", () => {
         cost: 0,
         message: "The API call failed. Please try again.",
       });
+      expect(JSON.parse(toolText(rpc))).not.toHaveProperty("retryAfterSeconds");
       await expectRefund(clerkOrgId);
     },
   );
@@ -2069,6 +2096,9 @@ describe("unpriced operation visibility", () => {
           },
         }),
       });
+      // Request limiting loads key controls before route lookup. Start from
+      // that checkpoint so the assertion detects only execution/billing writes.
+      await walletStub(clerkOrgId).syncGrants(clerkOrgId);
       const before = await walletStub(clerkOrgId).getState();
       const rpc = await mcpCall(
         "tools/call",

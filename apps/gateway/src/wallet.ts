@@ -60,6 +60,9 @@ import { WalletRows } from "./wallet-storage";
 // Types
 // ---------------------------------------------------------------------------
 
+/** Launch default: burst 60, refill one request per second, per physical key or stable x402 payer wallet. */
+export const KEY_RATE_LIMIT = { capacity: 60, refillPerSecond: 1 } as const;
+
 export type InFlightEntry = {
   machineFunding?: MachineFunding;
   cost: number;
@@ -90,6 +93,7 @@ export type SettlementUsage = {
   /** Consumer's Clerk org id — the org whose wallet actually pays. */
   consumerClerkOrgId: string;
   projectId: string;
+  admissionProof?: string;
   specVersionId: string;
   specVersion: string;
   operationId: string;
@@ -439,6 +443,10 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         id TEXT PRIMARY KEY, status TEXT NOT NULL, at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS terminal_refs_at ON terminal_refs(at);
+      CREATE TABLE IF NOT EXISTS key_rate_buckets (
+        key_id TEXT PRIMARY KEY, tokens REAL NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS key_rate_buckets_updated ON key_rate_buckets(updated_at);
       CREATE TABLE IF NOT EXISTS counters (
         id TEXT PRIMARY KEY, kind TEXT NOT NULL, period TEXT NOT NULL, amount INTEGER NOT NULL
       );
@@ -861,6 +869,69 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         keySettings: Object.fromEntries(this.#keySettings),
       });
       return { status: "applied", balance: this.#balance };
+    });
+  }
+
+  /** One admission attempt across paid, free-tier and zero-price paths. */
+  async consumeKeyRateLimit(
+    keyId: string,
+    clerkOrgId: string,
+    now = Date.now(),
+  ): Promise<
+    | { status: "allowed" }
+    | { status: "rejected"; reason: string; retryAfterSeconds?: number }
+  > {
+    if (!keyId || !clerkOrgId || !Number.isSafeInteger(now) || now < 0)
+      return { status: "rejected", reason: "invalid_rate_limit_request" };
+    const setting = await this.#resolveKeySetting(keyId, clerkOrgId, now);
+    return this.#mutate(async () => {
+      if (this.#orgArchived)
+        return { status: "rejected", reason: "organization_archived" };
+      if (setting === undefined)
+        return { status: "rejected", reason: "wallet_unavailable" };
+      const current = this.#keySettings.get(keyId);
+      if (!current) return { status: "rejected", reason: "key_untracked" };
+      if (this.#isKeyDisabled(current, now))
+        return { status: "rejected", reason: "key_disabled" };
+      return this.ctx.storage.transactionSync(() => {
+        const sql = this.ctx.storage.sql;
+        const row = sql
+          .exec<{ tokens: number; updated_at: number }>(
+            "SELECT tokens, updated_at FROM key_rate_buckets WHERE key_id = ?",
+            keyId,
+          )
+          .toArray()[0];
+        const updatedAt = Math.max(now, row?.updated_at ?? now);
+        const tokens = Math.min(
+          KEY_RATE_LIMIT.capacity,
+          (row?.tokens ?? KEY_RATE_LIMIT.capacity) +
+            ((updatedAt - (row?.updated_at ?? updatedAt)) *
+              KEY_RATE_LIMIT.refillPerSecond) /
+              1000,
+        );
+        if (tokens < 1)
+          return {
+            status: "rejected" as const,
+            reason: "key_rate_limited",
+            retryAfterSeconds: Math.max(
+              1,
+              Math.ceil((1 - tokens) / KEY_RATE_LIMIT.refillPerSecond),
+            ),
+          };
+        sql.exec(
+          "INSERT OR REPLACE INTO key_rate_buckets (key_id, tokens, updated_at) VALUES (?, ?, ?)",
+          keyId,
+          tokens - 1,
+          updatedAt,
+        );
+        // Fully refilled idle buckets carry no state; indexed cleanup bounds retention.
+        sql.exec(
+          "DELETE FROM key_rate_buckets WHERE updated_at < ?",
+          now -
+            (KEY_RATE_LIMIT.capacity * 1000) / KEY_RATE_LIMIT.refillPerSecond,
+        );
+        return { status: "allowed" as const };
+      });
     });
   }
 
@@ -1632,6 +1703,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
           organizationId: usage.organizationId,
           consumerClerkOrgId: usage.consumerClerkOrgId,
           projectId: usage.projectId,
+          admissionProof: usage.admissionProof,
           specVersionId: usage.specVersionId,
           specVersion: usage.specVersion,
           operationId: usage.operationId,

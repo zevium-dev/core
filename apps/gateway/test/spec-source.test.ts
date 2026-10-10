@@ -25,6 +25,7 @@ describe("internal gateway spec source", () => {
           specVersionId: "version",
           version: "1.0.0",
           projectId: "project",
+          admission: { mode: "open", policyRevision: 1, allowed: true },
           organizationId: "organization",
           clerkOrgId: "org_publisher",
           visibility: "public",
@@ -60,6 +61,7 @@ describe("internal gateway spec source", () => {
           specVersionId: "version",
           version: "1.0.0",
           projectId: "project",
+          admission: { mode: "open", policyRevision: 1, allowed: true },
           organizationId: "organization",
           clerkOrgId: "org_publisher",
           visibility: "public",
@@ -171,6 +173,33 @@ describe("cached route versions", () => {
     expect(
       getParsedSpec((await source.getPublishedSpec("pub", "api"))!),
     ).not.toBe(parsed);
+  });
+
+  it("isolates cached eligibility between consumer organizations", async () => {
+    const load = vi.fn(
+      async (_publisher: string, _project: string, consumer?: string) => ({
+        spec: "{}",
+        visibility: "public" as const,
+        admission: {
+          mode: "entitled_only" as const,
+          policyRevision: 2,
+          allowed: consumer === "existing",
+        },
+      }),
+    );
+    const source = new CachedSpecSource({ inner: { getPublishedSpec: load } });
+    expect(
+      (await source.getPublishedSpec("pub", "api", "existing"))?.admission
+        .allowed,
+    ).toBe(true);
+    expect(
+      (await source.getPublishedSpec("pub", "api", "new"))?.admission.allowed,
+    ).toBe(false);
+    expect(
+      (await source.getPublishedSpec("pub", "api", "existing"))?.admission
+        .allowed,
+    ).toBe(true);
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache source outages as missing routes", async () => {

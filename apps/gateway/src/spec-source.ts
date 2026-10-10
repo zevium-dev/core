@@ -28,6 +28,11 @@ export type PublishedSpec = {
   visibility: "public" | "private";
   /** Publisher-owned headers injected after consumer auth headers are stripped. */
   upstreamHeaders?: Record<string, string>;
+  admission?: {
+    mode: "open" | "entitled_only";
+    policyRevision: number;
+    allowed: boolean;
+  };
   /** Epoch seconds when this spec version was deprecated (RFC 8594). Undefined when active. */
   deprecatedAt?: number;
   /** Epoch seconds when this spec version is scheduled for removal (RFC 8594 Sunset). */
@@ -42,6 +47,7 @@ export interface SpecSource {
   getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
+    consumerClerkOrgId?: string,
   ): Promise<PublishedSpec | null>;
   invalidate?(publisherHandle?: string, projectSlug?: string): void;
 }
@@ -116,6 +122,7 @@ export type CachedSpecSourceOptions<
     getPublishedSpec(
       publisherHandle: string,
       projectSlug: string,
+      consumerClerkOrgId?: string,
     ): Promise<T | null>;
   };
   ttlMs?: number;
@@ -137,21 +144,25 @@ export class CachedSpecSource<T extends PublicPublishedSpec = PublishedSpec> {
   async getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
+    consumerClerkOrgId?: string,
   ): Promise<T | null> {
-    const key = `${publisherHandle}/${projectSlug}`;
+    const key = `${publisherHandle}/${projectSlug}/${consumerClerkOrgId ?? ""}`;
     const hit = this.#cache.get(key);
     if (hit !== undefined) return hit;
     return this.#cache.set(
       key,
-      await this.#inner.getPublishedSpec(publisherHandle, projectSlug),
+      await this.#inner.getPublishedSpec(
+        publisherHandle,
+        projectSlug,
+        consumerClerkOrgId,
+      ),
     );
   }
   invalidate(publisherHandle?: string, projectSlug?: string): void {
-    this.#cache.invalidate(
-      publisherHandle && projectSlug
-        ? `${publisherHandle}/${projectSlug}`
-        : undefined,
-    );
+    // One route can have several consumer-specific eligibility snapshots.
+    void publisherHandle;
+    void projectSlug;
+    this.#cache.invalidate();
   }
 }
 
@@ -281,10 +292,13 @@ export class InternalHttpSpecSource implements SpecSource {
   async getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
+    consumerClerkOrgId?: string,
   ): Promise<PublishedSpec | null> {
     const target = new URL(`${this.#siteUrl}/gateway-spec`);
     target.searchParams.set("publisherHandle", publisherHandle);
     target.searchParams.set("projectSlug", projectSlug);
+    if (consumerClerkOrgId)
+      target.searchParams.set("consumerClerkOrgId", consumerClerkOrgId);
     try {
       const response = await this.#fetch(target, {
         headers: { "x-internal-secret": this.#internalSecret },
@@ -296,7 +310,10 @@ export class InternalHttpSpecSource implements SpecSource {
           "Internal spec source unavailable",
         );
       }
-      return parsePublishedSpecPayload(await response.json());
+      const published = parsePublishedSpecPayload(await response.json());
+      if (published && !published.admission)
+        throw new SpecSourceUnavailableError("Admission policy unavailable");
+      return published;
     } catch (err) {
       if (err instanceof SpecSourceUnavailableError) throw err;
       logDependencyFailure("internal_spec_source");
@@ -365,6 +382,27 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     clerkOrgId,
     visibility,
   };
+  if ("admission" in candidate) {
+    const policy = candidate.admission;
+    if (
+      !policy ||
+      typeof policy !== "object" ||
+      !("mode" in policy) ||
+      (policy.mode !== "open" && policy.mode !== "entitled_only") ||
+      !("policyRevision" in policy) ||
+      typeof policy.policyRevision !== "number" ||
+      !Number.isSafeInteger(policy.policyRevision) ||
+      policy.policyRevision < 1 ||
+      !("allowed" in policy) ||
+      typeof policy.allowed !== "boolean"
+    )
+      return null;
+    published.admission = {
+      mode: policy.mode,
+      policyRevision: policy.policyRevision,
+      allowed: policy.allowed,
+    };
+  }
   if (
     "upstreamHeaders" in candidate &&
     candidate.upstreamHeaders !== null &&

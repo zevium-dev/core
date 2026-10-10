@@ -14,6 +14,7 @@ export type ConvexUsageRecord = {
   /** Consumer's Clerk org id — recordUsage resolves this to the wallet debited. */
   consumerClerkOrgId: string;
   projectId: string;
+  admissionProof?: string;
   specVersionId: string;
   specVersion: string;
   operationId: string;
@@ -264,6 +265,7 @@ export function pendingToUsageRecord(input: {
   organizationId: string;
   consumerClerkOrgId: string;
   projectId: string;
+  admissionProof?: string;
   specVersionId: string;
   specVersion: string;
   operationId: string;
@@ -301,6 +303,7 @@ export function pendingToUsageRecord(input: {
     organizationId: input.organizationId,
     consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,
+    admissionProof: input.admissionProof,
     specVersionId: input.specVersionId,
     specVersion: input.specVersion,
     operationId: input.operationId,

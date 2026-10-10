@@ -43,9 +43,12 @@ Use search_apis({ query }) to find candidates, then get_api_docs({ org, project 
 ## Gateway errors and recovery
 
 - 402: missing_api_key, invalid_api_key, or insufficient_credits. JSON contains error: "payment_required", detail, reason, requestId, and actions.createKey, actions.topUp, actions.docs. Insufficient-credit responses also include available and cost. Supply a valid key or top up before retrying. This is a prepaid-credit recovery envelope, not an x402 payment challenge.
-- 403: key_disabled, key_untracked, key_cap_exceeded (monthly key spending limit), or organization_archived. JSON contains error, message, requestId. Fix the key or organization restriction before retrying; topping up alone does not remove it.
-- 404: project_not_found (missing, unavailable, or private to another organization), route_not_found (no matching method/path), invalid_spec (unreadable published spec), or no_upstream (publisher has no upstream URL). Recheck the listing and endpoint documentation. Private APIs are not disclosed to other organizations.
-- MCP call_api wraps gateway failures in an error tool result containing status and body; the HTTP transport status alone does not indicate call success.
+- 402: key_cap_exceeded means the monthly key spending limit would be exceeded. JSON contains error, message, requestId. Ask an organization admin to raise the cap or wait for the next UTC month; topping up alone does not raise it.
+- 403: key_disabled, key_untracked, organization_archived, or consumer_not_entitled (deprecated API no longer accepts new consumers). JSON contains error, message, requestId. Fix the key or organization restriction before retrying; topping up alone does not remove it.
+- 404: project_not_found (missing, unavailable, or private to another organization), route_not_found (no matching method/path), or no_upstream (publisher has no upstream URL). Recheck the listing and endpoint documentation. Private APIs are not disclosed to other organizations.
+- 422: invalid_spec means the published spec or endpoint pricing is unreadable. Contact the publisher.
+- 429: key_rate_limited. Each physical key allows a burst of 60 requests, refilling at one request per second. Paid, free-tier, and zero-price calls share the limit. Wait for Retry-After seconds; no upstream call or charge occurs.
+- MCP call_api wraps gateway failures in an error tool result with status and safe error details; rate errors include retryAfterSeconds. The HTTP transport status alone does not indicate call success.
 
 ## Free mock evaluation
 
