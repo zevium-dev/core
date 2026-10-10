@@ -14,6 +14,8 @@
 
 Order: tooling prune and Convex deletion first (cheap, unblock everything), then gateway restructure (admit → forward → finalize, needed by x402/routing/LLM), then Convex rebuild behind the same web-facing functions, then web fixes.
 
+Plan: [Convex rebuild — contracts, schema, money core and seven PRs](../architecture/convex-rebuild.md) (proposed implementation plan for #353).
+
 ## Already done (2026-10-10)
 
 Publisher-copy claims filter and compliance doc deleted ([repo cleanup](2026-10-10-repo-cleanup.md)); all tests green after.
