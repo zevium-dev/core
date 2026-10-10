@@ -84,7 +84,7 @@ function AppLayout() {
       </a>
       <AppSidebar />
       <SidebarInset className="min-w-0 md:peer-data-[state=collapsed]:ml-0!">
-        <AppHeader />
+        <AppHeader workspaceReady={mirror.isReady} />
         <div
           id="main-content"
           tabIndex={-1}

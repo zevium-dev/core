@@ -1,6 +1,6 @@
 # Webhooks & notifications
 
-> Status: #416 notification transition open; partial (#363 list/presentation and #397 heading fixes complete) (P1) · Updated: 2026-10-10
+> Status: partial (#363 list/presentation, #397 headings, #416 bell auth recovery complete) (P1) · Updated: 2026-10-10
 > Code: `convex/projects.ts` (`update`), `convex/admin.ts` (`setProjectVisibility`), `convex/project-visibility-webhooks.test.ts`, `convex/webhooks.ts`, `convex/webhookDeliveryAction.ts`, `convex/lib/webhookDelivery.ts`, `convex/webhooks.test.ts`, `convex/notifications.ts`, `convex/lib/notifications.ts`, `convex/notifications.test.ts`, `apps/web/src/components/project/webhooks-card.tsx`, `apps/web/src/components/project/webhook-deliveries.tsx`, `apps/web/src/components/webhook-secret.test.tsx`, `apps/web/src/components/notification-bell.tsx`, `apps/web/src/routes/docs/publishing.tsx` (Webhooks section), `apps/web/src/components/project-settings-panel.tsx`
 > Related: [wallet-billing](wallet-billing.md) (spend alerts, budget webhooks), [listing-lifecycle](listing-lifecycle.md), [upstream-credentials](upstream-credentials.md) (webhook signing-secret encryption), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
@@ -26,9 +26,10 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 ## Tech
 
-**Round-two dogfood — 2026-10-10:** publisher `spec.published` and `project.visibility_changed` deliveries both succeeded in one attempt, confirming #393. **P2 #416:** creating an organization can leave `BellWithOrg` in a persistent `Not authenticated` error boundary after the rest of the dashboard recovers. [Evidence](../findings/dogfood-2026-10-10-round-2.md).
+**Round-two dogfood — 2026-10-10:** publisher `spec.published` and `project.visibility_changed` deliveries both succeeded in one attempt, confirming #393. **P2 #416:** organization creation left `BellWithOrg` in a persistent `Not authenticated` error boundary after the dashboard recovered; fixed by the readiness gate below. [Original evidence](../findings/dogfood-2026-10-10-round-2.md).
 
 - **Realtime bell (#363)**: `usePaginatedQuery(listForOrg)` keeps every loaded page reactive, including mark-read/all-read changes. `unreadForOrg` subscribes to the whole-org count independently of loaded rows; both queries share the same bounded legacy count fallback. Switching organizations remounts bell UI and resets pagination. No cached older pages or optimistic local read timestamps.
+- **Organization creation/auth recovery (#416)**: `routes/app.tsx` passes the existing `useEnsureMirror().isReady` signal through `AppHeader` to `NotificationBell`. Both notification subscriptions wait for workspace provisioning, Clerk organization loading, and confirmed Convex authentication behind a bell-sized skeleton. The readiness gate lives outside `ListBoundary`, so an auth transition unmounts a latched failure and settling auth remounts the queries without navigation or manual retry. The boundary reset key includes Clerk user ID, organization ID, and slug; genuine query failures retain the local Retry action. Coverage: `components/notification-bell.test.tsx` (creation, delayed provisioning, same-org auth recovery, principal changes, manual retry) and `routes/-app-landmarks.test.tsx` (shell readiness wiring).
   **Dogfood — 2026-10-10**
 
 - **P1 #393:** normal publisher visibility changes do not emit the documented webhook event. The admin mutation emits it, but `projects.update` does not. A local `spec.published` webhook delivered successfully in one attempt.

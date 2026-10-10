@@ -14,6 +14,8 @@ Cross-cutting TanStack Start + Clerk + Convex wiring. Feature-specific web notes
 
 Catalogue route adapters and the navigation-provider rules (public vs authenticated Convex providers, list→detail morph seeding, Clerk CSS layer) are owned by [catalogue-search](../features/catalogue-search.md) Tech. Authentication loading (Clerk mount, CSP origin derivation) is owned by [accounts-orgs](../features/accounts-orgs.md) Tech.
 
+The app header passes the same workspace readiness signal as the route outlet to its notification bell; notification queries also wait for confirmed Convex auth. Bell boundary recovery and regression coverage are owned by [webhooks-notifications](../features/webhooks-notifications.md) Tech (#416).
+
 ## Local assets and CSP
 
 - **Local web assets**: the web dev server runs on port 3000. Worker-first routing forwards Vite client modules, styles, and HMR entry points through the asset binding in development; production only forwards built and allowlisted public assets. CSP uses the same gateway origin resolution as the playground, including the local port 8787 fallback. `src/lib/security-headers.ts` converts HTTPS Convex origins to WSS in every build; only dev builds add WS for the configured HTTP loopback origin (`localhost`, `127.0.0.1`, or `[::1]`, exact port). Production CSP gains no insecure WebSocket sources. Dev/prod regression coverage lives in `src/lib/security-headers.test.ts`.
