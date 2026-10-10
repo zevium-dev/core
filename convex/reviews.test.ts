@@ -89,7 +89,7 @@ describe("verified reviews", () => {
           projectId: seeded.projectId,
           rating: 5,
         }),
-    ).rejects.toThrow("settled call");
+    ).rejects.toThrow("successful call");
     await t.run(async (ctx) => {
       // Legacy analytics rows without gateway settlement proof cannot verify a
       // reviewer.
@@ -104,7 +104,7 @@ describe("verified reviews", () => {
         keyId: "legacy",
         at: Date.now(),
       });
-      for (const billingOutcome of ["refunded", "free"] as const) {
+      for (const billingOutcome of ["refunded"] as const) {
         await ctx.db.insert("usageEvents", {
           organizationId: seeded.otherId,
           projectId: seeded.projectId,
@@ -128,7 +128,7 @@ describe("verified reviews", () => {
           projectId: seeded.projectId,
           rating: 5,
         }),
-    ).rejects.toThrow("settled call");
+    ).rejects.toThrow("successful call");
     await expect(
       t
         .withIdentity({ subject: "other", org_id: "org_other" })
@@ -147,6 +147,94 @@ describe("verified reviews", () => {
       }),
     ).rejects.toThrow("integer");
   });
+
+  it.each(["free_tier", "zero_price"] as const)(
+    "allows successful %s calls and still keeps one active review",
+    async (pricingDecision) => {
+      const t = convexTest(schema, modules);
+      const seeded = await seed(t, false);
+      await t.run(async (ctx) => {
+        await ctx.db.insert("usageEvents", {
+          organizationId: seeded.consumerId,
+          projectId: seeded.projectId,
+          endpoint: "/free",
+          method: "GET",
+          credits: 0,
+          status: 200,
+          latencyMs: 10,
+          keyId: "key",
+          at: Date.now(),
+          settleRefId: "settle:free",
+          billingOutcome: "free",
+          qualityOutcome: "success",
+          pricingDecision,
+        });
+      });
+      const consumer = t.withIdentity(consumerIdentity);
+      expect(
+        await consumer.query(api.reviews.getViewerState, {
+          projectId: seeded.projectId,
+        }),
+      ).toMatchObject({ canReview: true });
+      const created = await consumer.mutation(api.reviews.upsert, {
+        projectId: seeded.projectId,
+        rating: 4,
+      });
+      const edited = await consumer.mutation(api.reviews.upsert, {
+        projectId: seeded.projectId,
+        rating: 5,
+      });
+      expect(edited._id).toBe(created._id);
+      expect(
+        await t.query(api.reviews.getAggregate, {
+          projectId: seeded.projectId,
+        }),
+      ).toMatchObject({ count: 1, averageRating: 5 });
+      expect(
+        await t
+          .withIdentity({ subject: "other", org_id: "org_other" })
+          .query(api.reviews.getViewerState, { projectId: seeded.projectId }),
+      ).toMatchObject({ canReview: false });
+    },
+  );
+
+  it.each(["client_error", "server_error", "network_error"] as const)(
+    "does not qualify %s usage as a successful call",
+    async (qualityOutcome) => {
+      const t = convexTest(schema, modules);
+      const seeded = await seed(t, false);
+      await t.run(async (ctx) => {
+        for (const billingOutcome of ["free", "refunded", "settled"] as const) {
+          await ctx.db.insert("usageEvents", {
+            organizationId: seeded.consumerId,
+            projectId: seeded.projectId,
+            endpoint: "/failed",
+            method: "GET",
+            credits: 0,
+            status: 500,
+            latencyMs: 10,
+            keyId: "key",
+            at: Date.now(),
+            settleRefId: `settle:${billingOutcome}`,
+            billingOutcome,
+            qualityOutcome,
+          });
+        }
+      });
+      const consumer = t.withIdentity(consumerIdentity);
+      expect(
+        await consumer.query(api.reviews.getViewerState, {
+          projectId: seeded.projectId,
+        }),
+      ).toMatchObject({ canReview: false });
+      await expect(
+        consumer.mutation(api.reviews.upsert, {
+          projectId: seeded.projectId,
+          rating: 5,
+        }),
+      ).rejects.toThrow("successful call");
+    },
+  );
 
   it("normalizes empty text, keeps one review, audits edits, and derives exact aggregates", async () => {
     const t = convexTest(schema, modules);

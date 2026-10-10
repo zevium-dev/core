@@ -37,13 +37,13 @@ const endpoints = parsePublishedEndpoints(
   }),
 );
 
-function panel() {
+function panel(rows = endpoints) {
   return (
     <TryItPanel
       userId={null}
       publisherHandle="publisher"
       projectSlug="weather"
-      endpoints={endpoints}
+      endpoints={rows}
       endpointId={endpoints[0]!.id}
       mode="live"
       onEndpointChange={vi.fn()}
@@ -74,12 +74,16 @@ it("disables the server-rendered form so secrets cannot enter a native GET submi
 it("enables the hydrated form and sends the key only as a gateway header", async () => {
   const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
   vi.stubGlobal("fetch", fetch);
-  render(panel());
+  const view = render(panel());
   const key = screen.getByLabelText<HTMLInputElement>("API key");
   expect(key.matches(":disabled")).toBe(false);
   fireEvent.change(key, { target: { value: "qa-placeholder-key" } });
   fireEvent.click(screen.getByRole("button", { name: "Send live · 1 credit" }));
   await screen.findByText("200");
+  // Quality refreshes can replace the endpoint objects without changing selection.
+  view.rerender(panel(endpoints.map((endpoint) => ({ ...endpoint }))));
+  expect(screen.getByText("200")).toBeTruthy();
+
   expect(fetch).toHaveBeenCalledWith(
     "http://localhost:8787/gateway/publisher/weather/get",
     expect.objectContaining({

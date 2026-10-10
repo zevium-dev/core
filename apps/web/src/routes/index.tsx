@@ -1,8 +1,7 @@
+import { CopyButton } from "#/components/copy-button";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { Check, Copy } from "lucide-react";
-import { useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
@@ -453,39 +452,12 @@ function LandingPage() {
 }
 
 function McpConfigBlock({ snippet }: { snippet: string }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState(false);
-
-  async function onCopy() {
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      setCopyError(false);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopyError(true);
-    }
-  }
-
   return (
     <Card className="min-w-0">
       <CardHeader>
         <CardTitle>MCP config</CardTitle>
         <CardAction>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void onCopy()}
-            aria-label="Copy MCP config"
-          >
-            {copied ? (
-              <Check data-icon="inline-start" />
-            ) : (
-              <Copy data-icon="inline-start" />
-            )}
-            {copied ? "Copied" : "Copy"}
-          </Button>
+          <CopyButton text={snippet} aria-label="Copy MCP config" />
         </CardAction>
         <CardDescription>
           Paste into your agent client. Replace YOUR_API_KEY with a Zevium key.
@@ -500,12 +472,6 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
         >
           <SyntaxCode code={snippet} lang="json" />
         </pre>
-        <p
-          className="mt-2 min-h-4 text-xs text-muted-foreground"
-          aria-live="polite"
-        >
-          {copyError ? "Copy failed. Select the config and copy manually." : ""}
-        </p>
       </CardContent>
     </Card>
   );

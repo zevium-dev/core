@@ -1,8 +1,15 @@
-import { convexQuery } from "@convex-dev/react-query";
-import { useQuery } from "@tanstack/react-query";
+import { ListBoundary } from "#/components/list-boundary";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
+import { usePaginatedQuery } from "convex/react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Building2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -15,7 +22,6 @@ import {
 } from "#/components/ui/card";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -24,14 +30,15 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { formatCredits } from "#/lib/billing-cycle";
-import { mergeHandlePages } from "#/lib/activity-filters";
-import { humanError } from "#/lib/human-error";
-import type { AdminOrgView } from "../../../../../convex/admin";
 
 const ORG_PAGE_SIZE = 25;
 
 export const Route = createFileRoute("/admin/orgs")({
-  component: AdminOrgsPage,
+  component: () => (
+    <ListBoundary label="organizations">
+      <AdminOrgsPage />
+    </ListBoundary>
+  ),
   head: () => ({
     meta: [{ title: "Admin Orgs · Zevium" }],
   }),
@@ -39,34 +46,18 @@ export const Route = createFileRoute("/admin/orgs")({
 });
 
 function AdminOrgsPage() {
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [rows, setRows] = useState<AdminOrgView[]>([]);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-
-  const args = useMemo(
-    () => ({
-      paginationOpts: { numItems: ORG_PAGE_SIZE, cursor },
-    }),
-    [cursor],
+  const {
+    results: rows,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.admin.listOrgs,
+    {},
+    { initialNumItems: ORG_PAGE_SIZE },
   );
-  const orgsQuery = useQuery(convexQuery(api.admin.listOrgs, args));
-
-  useEffect(() => {
-    if (!orgsQuery.data || orgsQuery.isPending) return;
-    const page = orgsQuery.data.page as AdminOrgView[];
-    setRows((prev) => mergeHandlePages(prev, page, cursor === null));
-    setIsDone(orgsQuery.data.isDone);
-    setContinueCursor(orgsQuery.data.continueCursor);
-  }, [orgsQuery.data, orgsQuery.isPending, cursor]);
-
-  const firstPagePending = orgsQuery.isPending && cursor === null;
-  const loadMorePending = orgsQuery.isPending && cursor !== null;
-  const canLoadMore =
-    !isDone &&
-    continueCursor !== null &&
-    !orgsQuery.isPending &&
-    !orgsQuery.isError;
+  const firstPagePending = status === "LoadingFirstPage";
+  const loadMorePending = status === "LoadingMore";
+  const canLoadMore = status === "CanLoadMore";
 
   return (
     <div className="flex flex-col gap-6">
@@ -85,65 +76,49 @@ function AdminOrgsPage() {
         <CardContent>
           {firstPagePending ? (
             <OrgsTableSkeleton />
-          ) : orgsQuery.isError && rows.length === 0 ? (
-            <Empty className="border border-dashed">
-              <EmptyHeader>
-                <EmptyTitle>Could not load organizations</EmptyTitle>
-                <EmptyDescription>
-                  {humanError(
-                    orgsQuery.error,
-                    "Platform organizations are temporarily unavailable.",
-                  )}
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void orgsQuery.refetch()}
-                >
-                  Retry
-                </Button>
-              </EmptyContent>
-            </Empty>
           ) : rows.length === 0 ? (
             <EmptyOrgs />
           ) : (
             <div className="flex flex-col gap-4">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th scope="col" className="px-2 py-2 font-medium">
+                <Table className="w-full text-sm">
+                  <TableHeader>
+                    <TableRow className="border-b text-left text-muted-foreground">
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Name
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Slug
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
                         Balance
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {rows.map((org) => (
-                      <tr key={org.handle} className="border-b last:border-0">
-                        <td className="px-2 py-2.5 font-medium">{org.name}</td>
-                        <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
+                      <TableRow
+                        key={org.handle}
+                        className="border-b last:border-0"
+                      >
+                        <TableCell className="px-2 py-2.5 font-medium">
+                          {org.name}
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
                           {org.slug}
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 text-right tabular-nums">
                           <Badge variant="secondary">
                             {formatCredits(org.balance)}
                           </Badge>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               {canLoadMore || loadMorePending ? (
                 <div className="flex justify-center">
@@ -151,32 +126,9 @@ function AdminOrgsPage() {
                     variant="outline"
                     size="sm"
                     disabled={loadMorePending || !canLoadMore}
-                    onClick={() => {
-                      if (continueCursor !== null) {
-                        setCursor(continueCursor);
-                      }
-                    }}
+                    onClick={() => loadMore(ORG_PAGE_SIZE)}
                   >
                     {loadMorePending ? "Loading…" : "Load more"}
-                  </Button>
-                </div>
-              ) : null}
-              {orgsQuery.isError && rows.length > 0 ? (
-                <div
-                  className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
-                  role="alert"
-                >
-                  <p className="text-sm text-destructive">
-                    More organizations could not be loaded. Existing rows are
-                    still available.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void orgsQuery.refetch()}
-                  >
-                    Retry page
                   </Button>
                 </div>
               ) : null}

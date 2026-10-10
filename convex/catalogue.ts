@@ -1,10 +1,11 @@
+import { paginationOptsValidator } from "convex/server";
 import {
   extractPricing,
   MAX_ENDPOINT_COST_CREDITS,
   parseSpec,
   type QualitySnapshotContract,
 } from "@zevium/shared";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import {
   internalMutation,
   query,
@@ -429,22 +430,31 @@ function parseSort(raw: string | undefined): CatalogueSort {
   return "newest";
 }
 
-export const listPublic = query({
-  args: {
-    search: v.optional(v.string()),
-    tag: v.optional(v.string()),
-    cursor: v.optional(v.string()),
-    sort: v.optional(
-      v.union(v.literal("newest"), v.literal("name"), v.literal("cheapest")),
-    ),
-    hasFreeTier: v.optional(v.boolean()),
-    maxCost: v.optional(v.number()),
-  },
+const publicListArgs = {
+  search: v.optional(v.string()),
+  tag: v.optional(v.string()),
+  cursor: v.optional(v.string()),
+  paginationOpts: v.optional(paginationOptsValidator),
+  sort: v.optional(
+    v.union(v.literal("newest"), v.literal("name"), v.literal("cheapest")),
+  ),
+  hasFreeTier: v.optional(v.boolean()),
+  maxCost: v.optional(v.number()),
+};
+const publicListValidator = v.object(publicListArgs);
+
+const publicList = {
+  args: publicListArgs,
   handler: async (
-    ctx,
-    args,
+    ctx: QueryCtx,
+    args: Infer<typeof publicListValidator>,
   ): Promise<{
     items: PublicListing[];
+    page: PublicListing[];
+    isDone: boolean;
+    continueCursor: string;
+    splitCursor?: string | null;
+    pageStatus?: "SplitRecommended" | "SplitRequired" | null;
     nextCursor: string | null;
     /** Total public+published projects, uncapped by search/tag/price filters. */
     total: number;
@@ -470,7 +480,17 @@ export const listPublic = query({
       throw new Error("Invalid maximum endpoint cost");
     }
     const maxCostCap = args.maxCost ?? null;
-    const cursor = args.cursor && args.cursor !== "" ? args.cursor : null;
+    const pagination = {
+      ...args.paginationOpts,
+      cursor: args.paginationOpts
+        ? args.paginationOpts.cursor
+        : (args.cursor ?? null),
+      numItems: Math.min(
+        Math.max(args.paginationOpts?.numItems ?? PAGE_SIZE, 1),
+        PAGE_SIZE,
+      ),
+      maximumRowsRead: PUBLIC_SCAN_CAP,
+    };
     const stats = await ctx.db
       .query("catalogueStats")
       .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
@@ -487,11 +507,7 @@ export const listPublic = query({
           q.eq("visibility", "public").eq("status", "published"),
         )
         .order("desc")
-        .paginate({
-          cursor,
-          numItems: PAGE_SIZE,
-          maximumRowsRead: PUBLIC_SCAN_CAP,
-        });
+        .paginate(pagination);
       for (const project of rawPage.page) {
         if (
           project.deprecationStartedAt !== undefined ||
@@ -578,6 +594,8 @@ export const listPublic = query({
         return (b.publishedAt ?? 0) - (a.publishedAt ?? 0);
       });
       return {
+        ...rawPage,
+        page: items,
         items,
         nextCursor: rawPage.isDone ? null : rawPage.continueCursor,
         total: Math.max(
@@ -607,11 +625,7 @@ export const listPublic = query({
                 q.eq("tag", tag).eq("discoverable", true),
               )
               .order("asc")
-              .paginate({
-                cursor,
-                numItems: PAGE_SIZE,
-                maximumRowsRead: PUBLIC_SCAN_CAP,
-              })
+              .paginate(pagination)
           : sort === "cheapest"
             ? await ctx.db
                 .query("catalogueTagListings")
@@ -619,22 +633,14 @@ export const listPublic = query({
                   q.eq("tag", tag).eq("discoverable", true),
                 )
                 .order("asc")
-                .paginate({
-                  cursor,
-                  numItems: PAGE_SIZE,
-                  maximumRowsRead: PUBLIC_SCAN_CAP,
-                })
+                .paginate(pagination)
             : await ctx.db
                 .query("catalogueTagListings")
                 .withIndex("by_tag_newest", (q) =>
                   q.eq("tag", tag).eq("discoverable", true),
                 )
                 .order("desc")
-                .paginate({
-                  cursor,
-                  numItems: PAGE_SIZE,
-                  maximumRowsRead: PUBLIC_SCAN_CAP,
-                });
+                .paginate(pagination);
       const tagged = (
         await Promise.all(
           tagPage.page.map(async (row) => {
@@ -657,6 +663,8 @@ export const listPublic = query({
         (listing): listing is Doc<"catalogueListings"> => listing !== null,
       );
       return {
+        ...tagPage,
+        page: tagged.map(publicListing),
         items: tagged.map(publicListing),
         nextCursor: tagPage.isDone ? null : tagPage.continueCursor,
         total: stats.tagCounts?.[tag] ?? 0,
@@ -670,11 +678,6 @@ export const listPublic = query({
       };
     }
 
-    const pagination = {
-      cursor,
-      numItems: PAGE_SIZE,
-      maximumRowsRead: PUBLIC_SCAN_CAP,
-    };
     const page =
       search !== ""
         ? await ctx.db
@@ -763,33 +766,34 @@ export const listPublic = query({
     );
     const staleCount = active.filter((row) => row.stale).length;
     const items = active.filter((row) => !row.stale).map((row) => row.listing);
+    const publicItems = await Promise.all(
+      items.map(async (listing) => {
+        const base = publicListing(listing);
+        const latest = await ctx.db
+          .query("specVersions")
+          .withIndex("by_project_published", (q) =>
+            q.eq("projectId", listing.projectId),
+          )
+          .order("desc")
+          .first();
+        if (latest === null) return { ...base, quality: null };
+        const snapshot = await ctx.db
+          .query("qualitySnapshots")
+          .withIndex("by_project", (q) => q.eq("projectId", listing.projectId))
+          .unique();
+        return {
+          ...base,
+          quality:
+            snapshot === null || snapshot.specVersionId !== latest._id
+              ? null
+              : qualitySnapshotContract(snapshot),
+        };
+      }),
+    );
     return {
-      items: await Promise.all(
-        items.map(async (listing) => {
-          const base = publicListing(listing);
-          const latest = await ctx.db
-            .query("specVersions")
-            .withIndex("by_project_published", (q) =>
-              q.eq("projectId", listing.projectId),
-            )
-            .order("desc")
-            .first();
-          if (latest === null) return { ...base, quality: null };
-          const snapshot = await ctx.db
-            .query("qualitySnapshots")
-            .withIndex("by_project", (q) =>
-              q.eq("projectId", listing.projectId),
-            )
-            .unique();
-          return {
-            ...base,
-            quality:
-              snapshot === null || snapshot.specVersionId !== latest._id
-                ? null
-                : qualitySnapshotContract(snapshot),
-          };
-        }),
-      ),
+      ...page,
+      page: publicItems,
+      items: publicItems,
       nextCursor: page.isDone ? null : page.continueCursor,
       total: Math.max(
         0,
@@ -807,6 +811,28 @@ export const listPublic = query({
         freeTierCount: stats.freeTierCount ?? 0,
       },
     };
+  },
+};
+
+// Preserve the existing first-page/cursor API for landing and external callers.
+export const listPublic = query(publicList);
+export const listPublicPaginated = query({
+  args: { ...publicListArgs, paginationOpts: paginationOptsValidator },
+  handler: publicList.handler,
+});
+
+/** Facets subscribe independently of the loaded page boundaries. */
+export const publicFacets = query({
+  args: {},
+  handler: async (ctx) => {
+    const stats = await ctx.db
+      .query("catalogueStats")
+      .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
+      .unique();
+    return Object.entries(stats?.tagCounts ?? {}).map(([name, count]) => ({
+      name,
+      count,
+    }));
   },
 });
 

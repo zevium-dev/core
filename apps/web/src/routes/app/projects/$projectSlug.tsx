@@ -1,10 +1,15 @@
+import { formatNumber } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import {
   Link,
   Outlet,
@@ -167,7 +172,6 @@ function ProjectShell({
   const { tab: searchTab, range: searchRange } = Route.useSearch();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const updateProject = useConvexMutation(api.projects.update);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
@@ -180,16 +184,7 @@ function ProjectShell({
         patch: { visibility },
       });
     },
-    onSuccess: async () => {
-      setVisibilityOpen(false);
-      await queryClient.invalidateQueries({
-        queryKey: convexQuery(api.projects.get, { orgSlug, projectSlug })
-          .queryKey,
-      });
-      await queryClient.invalidateQueries({
-        queryKey: convexQuery(api.projects.list, { orgSlug }).queryKey,
-      });
-    },
+    onSuccess: () => setVisibilityOpen(false),
     onError: (err: unknown) => {
       toast.error(humanError(err, "Could not update visibility"));
     },
@@ -620,7 +615,7 @@ function ProjectAnalyticsPanel({
           ) : (
             <div
               role="img"
-              aria-label={`Bar chart of daily calls from ${dailyCalls[0]?.label ?? "range start"} to ${dailyCalls.at(-1)?.label ?? "range end"}. ${analytics.calls.toLocaleString("en-US")} calls total.`}
+              aria-label={`Bar chart of daily calls from ${dailyCalls[0]?.label ?? "range start"} to ${dailyCalls.at(-1)?.label ?? "range end"}. ${formatNumber(analytics.calls)} calls total.`}
             >
               <div
                 className="flex h-28 items-end gap-px border-b sm:gap-1"
@@ -651,8 +646,8 @@ function ProjectAnalyticsPanel({
           )}
           {analytics.truncated ? (
             <p className="mt-3 text-xs text-muted-foreground">
-              Scan capped at {analytics.scanCap.toLocaleString("en-US")} events
-              — stats may undercount.
+              Scan capped at {formatNumber(analytics.scanCap)} events — stats
+              may undercount.
             </p>
           ) : null}
           {hasTraffic && dailyCalls.length > 0 ? (
@@ -661,33 +656,36 @@ function ProjectAnalyticsPanel({
                 View daily data
               </summary>
               <div className="mt-3 max-h-72 overflow-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 border-b bg-background text-xs text-muted-foreground">
-                    <tr>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                <Table className="w-full text-left text-sm">
+                  <TableHeader className="sticky top-0 border-b bg-background text-xs text-muted-foreground">
+                    <TableRow>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Day (UTC)
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 text-right font-medium"
                       >
                         Calls
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {dailyCalls.map((day) => (
-                      <tr key={day.at} className="border-b last:border-0">
-                        <th scope="row" className="px-2 py-2 font-normal">
+                      <TableRow key={day.at} className="border-b last:border-0">
+                        <TableHead
+                          scope="row"
+                          className="px-2 py-2 font-normal"
+                        >
                           {day.label}
-                        </th>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          {day.calls.toLocaleString("en-US")}
-                        </td>
-                      </tr>
+                        </TableHead>
+                        <TableCell className="px-2 py-2 text-right tabular-nums">
+                          {formatNumber(day.calls)}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </details>
           ) : null}
@@ -704,80 +702,80 @@ function ProjectAnalyticsPanel({
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th scope="col" className="px-2 py-2 font-medium">
+              <Table className="w-full text-sm">
+                <TableHeader>
+                  <TableRow className="border-b text-left text-muted-foreground">
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Method
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Path
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Calls
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Credits
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       4xx
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       5xx
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       p95
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {analytics.endpoints.map((row) => (
-                    <tr
+                    <TableRow
                       key={`${row.method} ${row.endpoint}`}
                       className="border-b last:border-0"
                     >
-                      <td className="px-2 py-2.5">
+                      <TableCell className="px-2 py-2.5">
                         <Badge variant="outline" className="font-mono">
                           {row.method}
                         </Badge>
-                      </td>
-                      <td className="px-2 py-2.5 font-mono text-xs">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 font-mono text-xs">
                         {row.endpoint}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
-                        {row.calls.toLocaleString("en-US")}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
-                        {row.credits.toLocaleString("en-US")}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
+                        {formatNumber(row.calls)}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
+                        {formatNumber(row.credits)}
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                         {row.errors4xx}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                         {row.errors5xx}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
                         {formatMs(row.p95)}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </CardContent>
         </Card>

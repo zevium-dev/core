@@ -1,8 +1,9 @@
+import { ListBoundary } from "#/components/list-boundary";
 import { convexQuery } from "@convex-dev/react-query";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import { Link } from "@tanstack/react-router";
-import { useAction } from "convex/react";
+import { useAction, usePaginatedQuery } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -422,15 +423,19 @@ function BrowsePanel({
   maxCost: number | null;
 }) {
   return (
-    <CatalogueList
-      key={JSON.stringify([search, activeTag, sort, freeOnly, maxCost])}
-      search={search}
-      activeTag={activeTag}
-      onTagChange={onTagChange}
-      sort={sort}
-      freeOnly={freeOnly}
-      maxCost={maxCost}
-    />
+    <ListBoundary
+      label="catalogue"
+      resetKey={JSON.stringify([search, activeTag, sort, freeOnly, maxCost])}
+    >
+      <CatalogueList
+        search={search}
+        activeTag={activeTag}
+        onTagChange={onTagChange}
+        sort={sort}
+        freeOnly={freeOnly}
+        maxCost={maxCost}
+      />
+    </ListBoundary>
   );
 }
 
@@ -499,73 +504,43 @@ export function CatalogueList({
   maxCost: number | null;
 }) {
   const trimmed = search.trim();
-  const [cursors, setCursors] = useState<Array<string | undefined>>([
-    undefined,
-  ]);
-  const catalogueQueries = useQueries({
-    queries: cursors.map((cursor) =>
-      convexQuery(api.catalogue.listPublic, {
-        ...catalogueListArgs({
-          search,
-          tag: activeTag,
-          sort,
-          freeOnly,
-          maxCost,
-        }),
-        ...(cursor === undefined ? {} : { cursor }),
-      }),
-    ),
+  const args = catalogueListArgs({
+    search,
+    tag: activeTag,
+    sort,
+    freeOnly,
+    maxCost,
   });
-  const catalogueQuery = catalogueQueries[0]!;
-  const lastQuery = catalogueQueries[catalogueQueries.length - 1]!;
-  const items = useMemo(() => {
-    const unique = new Map<string, CatalogueCardItem>();
-    for (const query of catalogueQueries) {
-      for (const item of query.data?.items ?? []) {
-        unique.set(`${item.publisherHandle}/${item.slug}`, item);
-      }
-    }
-    return Array.from(unique.values());
-  }, [catalogueQueries]);
+  // Reuse the public route's dehydrated first page until the live hook catches up.
+  const initialPage = useQuery({
+    ...convexQuery(api.catalogue.listPublic, args),
+    enabled: false,
+  });
+
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.catalogue.listPublicPaginated,
+    args,
+    { initialNumItems: 24 },
+  );
+  const items =
+    status === "LoadingFirstPage"
+      ? (initialPage.data?.items ?? results)
+      : results;
+  const facetsQuery = useQuery(convexQuery(api.catalogue.publicFacets, {}));
+  const facets = facetsQuery.data ?? initialPage.data?.facets.tags;
   const tags = useMemo(() => {
     const set = new Set<string>();
-    for (const tag of catalogueQuery.data?.facets.tags ?? []) {
+    for (const tag of facets ?? []) {
       if (tag.count > 0) set.add(tag.name);
     }
     if (activeTag) set.add(activeTag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [catalogueQuery.data?.facets.tags, activeTag]);
+  }, [facets, activeTag]);
 
-  if (catalogueQuery.isPending) return <CatalogueGridSkeleton />;
-  if (catalogueQuery.isError || catalogueQuery.data === undefined) {
-    return (
-      <Empty
-        className="min-h-64 border border-destructive/40"
-        role="alert"
-        data-state="error"
-      >
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <PackageSearch />
-          </EmptyMedia>
-          <EmptyTitle>Catalogue did not load</EmptyTitle>
-          <EmptyDescription>
-            Check your connection, then retry. Your filters are preserved.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void catalogueQuery.refetch()}
-          >
-            Retry catalogue
-          </Button>
-        </EmptyContent>
-      </Empty>
-    );
-  }
-  const nextCursor = lastQuery.data?.nextCursor;
+  if (status === "LoadingFirstPage" && !initialPage.data)
+    return <CatalogueGridSkeleton />;
+  const canLoadMore = status === "CanLoadMore";
+  const loadMorePending = status === "LoadingMore";
 
   const hasFilters =
     trimmed.length > 0 || activeTag !== null || freeOnly || maxCost !== null;
@@ -612,7 +587,7 @@ export function CatalogueList({
       ) : null}
 
       {items.length === 0 ? (
-        nextCursor || lastQuery.isPending ? (
+        canLoadMore || loadMorePending ? (
           <p role="status" className="text-sm text-muted-foreground">
             No matching APIs in the results loaded so far. Load more to
             continue.
@@ -630,28 +605,14 @@ export function CatalogueList({
           ))}
         </div>
       )}
-      {cursors.length > 1 && lastQuery.isError ? (
-        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-          <p>More APIs did not load. Your current results are preserved.</p>
-          <Button variant="outline" onClick={() => void lastQuery.refetch()}>
-            Retry more APIs
-          </Button>
-        </div>
-      ) : lastQuery.isPending || nextCursor ? (
+      {loadMorePending || canLoadMore ? (
         <Button
           variant="outline"
           className="self-center"
-          disabled={lastQuery.isPending}
-          onClick={() => {
-            if (nextCursor)
-              setCursors((previous) =>
-                previous.includes(nextCursor)
-                  ? previous
-                  : [...previous, nextCursor],
-              );
-          }}
+          disabled={loadMorePending}
+          onClick={() => loadMore(24)}
         >
-          {lastQuery.isPending ? "Loading more APIs…" : "Load more APIs"}
+          {loadMorePending ? "Loading more APIs…" : "Load more APIs"}
         </Button>
       ) : null}
     </FadeIn>

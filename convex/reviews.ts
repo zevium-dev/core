@@ -45,22 +45,28 @@ async function activeOrg(ctx: DbCtx) {
   return { claims, org };
 }
 
-async function settledUsageForReview(
+async function successfulUsageForReview(
   ctx: DbCtx,
   organizationId: Id<"organizations">,
   projectId: Id<"projects">,
 ) {
-  return await ctx.db
-    .query("usageEvents")
-    .withIndex("by_org_project_billing_settlement", (q) =>
-      q
-        .eq("organizationId", organizationId)
-        .eq("projectId", projectId)
-        .eq("billingOutcome", "settled")
-        .gte("settleRefId", "settle:")
-        .lt("settleRefId", "settle;"),
-    )
-    .first();
+  for (const billingOutcome of ["settled", "free"] as const) {
+    const usage = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_org_project_review_eligibility", (q) =>
+        q
+          .eq("organizationId", organizationId)
+          .eq("projectId", projectId)
+          .eq("billingOutcome", billingOutcome)
+          .eq("qualityOutcome", "success")
+          .gte("settleRefId", "settle:")
+          .lt("settleRefId", "settle;"),
+      )
+      .first();
+    // Ingest enforces qualityOutcome=success iff HTTP status is 2xx.
+    if (usage !== null) return usage;
+  }
+  return null;
 }
 
 function pageSize(value: number | undefined): number {
@@ -244,10 +250,14 @@ async function requireEligibleReviewer(
   if (project.organizationId === org._id) {
     throw new Error("Publisher organizations cannot review their own listing");
   }
-  const settledUsage = await settledUsageForReview(ctx, org._id, projectId);
-  if (settledUsage === null) {
+  const successfulUsage = await successfulUsageForReview(
+    ctx,
+    org._id,
+    projectId,
+  );
+  if (successfulUsage === null) {
     throw new Error(
-      "A settled call from this organization is required before reviewing",
+      "A successful call from this organization is required before reviewing",
     );
   }
   return { claims, org };
@@ -898,14 +908,14 @@ export const getViewerState = query({
         review,
       };
     }
-    const usage = await settledUsageForReview(ctx, org._id, args.projectId);
+    const usage = await successfulUsageForReview(ctx, org._id, args.projectId);
     return {
       signedIn: true,
       canReview: usage !== null,
       isPublisher: false,
       reason:
         usage === null
-          ? "Make one settled gateway call before reviewing"
+          ? "Make one successful gateway call before reviewing"
           : review?.active
             ? "Your verified review is published"
             : "Eligible verified consumer",

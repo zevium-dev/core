@@ -1,7 +1,7 @@
 # Catalogue and search
 
-> Status: built (P0 #7 semantic search built; FLOW gaps listed in Open questions) · Updated: 2026-10-10
-> Code: `convex/catalogue.ts`, `convex/search.ts`, `convex/catalogue.test.ts`, `convex/search.test.ts`, `apps/web/src/routes/catalogue.tsx`, `apps/web/src/routes/catalogue/index.tsx`, `apps/web/src/routes/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/routes/app/catalogue/index.tsx`, `apps/web/src/routes/app/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/components/catalogue-browser.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `apps/web/src/components/catalogue-shell.tsx`, `apps/web/src/components/route-providers.tsx`, `apps/web/src/lib/catalogue-search.ts`
+> Status: built (#363 realtime lists and detail fixes; P0 #7 semantic search built; FLOW gaps listed in Open questions) · Updated: 2026-10-10
+> Code: `convex/catalogue.ts`, `convex/search.ts`, `convex/catalogue.test.ts`, `convex/search.test.ts`, `apps/web/src/routes/catalogue.tsx`, `apps/web/src/routes/catalogue/index.tsx`, `apps/web/src/routes/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/routes/app/catalogue/index.tsx`, `apps/web/src/routes/app/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/components/catalogue-browser.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `apps/web/src/components/catalogue-shell.tsx`, `apps/web/src/components/route-providers.tsx`, `apps/web/src/lib/catalogue-search.ts`, `apps/web/src/components/copy-button.tsx`, `apps/web/src/components/list-boundary.tsx`, `apps/web/src/lib/format.ts`
 > Related: [quality-signals](quality-signals.md), [reviews](reviews.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [pricing](pricing.md), [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [landing-docs](landing-docs.md), [web-app](../architecture/web-app.md)
 
 The public, no-auth catalogue of published APIs and each API's detail page. It is the SEO surface, the human evaluation surface, and the shared shell for the authenticated in-app catalogue. Discovery is semantic search plus tag filters; spec metadata drives every listing page.
@@ -44,6 +44,10 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 - Browse actions open `/app/catalogue`; listing cards open `/app/catalogue/{org}/{api}`. Search, filters, API reference, playground, and back navigation keep the dashboard sidebar. Public catalogue URLs remain shareable outside the app.
 
 ## Tech
+
+- **Realtime lists (#363)**: `CatalogueList` uses Convex `usePaginatedQuery` over `catalogue.listPublicPaginated`; every loaded page remains subscribed and filter arguments reset pagination during render. Empty filtered pages remain loadable. `listPublic` retains its cursor/items contract for landing and SSR callers; the new endpoint shares its indexed implementation and preserves Convex split/end cursors. `publicFacets` subscribes independently. Public catalogue reuses its dehydrated first page while the live hook starts.
+- **Detail fixes (#363)**: endpoints memoize on the immutable spec string; playground defaults reset only on selected endpoint id, preserving inputs/results during quality refreshes. Agent notes normalize the live `/gateway` base; key placeholder uses `ak_`; sign-in return paths follow the active catalogue namespace. Quality percentages require finite numeric evidence. Request/reference examples use shared `mock.ts` synthesis, including component refs.
+- **Shared presentation (#363)**: stock shadcn Table, `components/copy-button.tsx`, `lib/format.ts`, and local `ListBoundary` replace duplicate rendering/copy/error machinery. Public and in-app route adapters remain separate because their authentication/provider and SSR boundaries differ; their page components are shared.
 
 From [architecture overview](../architecture/overview.md):
 

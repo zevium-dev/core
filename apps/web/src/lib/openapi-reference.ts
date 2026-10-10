@@ -1,4 +1,5 @@
 import {
+  synthesize,
   extractPricing,
   parseSpec,
   resolveLocalJsonRefChain,
@@ -6,7 +7,7 @@ import {
   type OpenApiOperation,
 } from "@zevium/shared";
 
-import { exampleFromSchema, tryItBodyDefaults } from "./try-it";
+import { tryItBodyDefaults } from "./try-it";
 
 export type ApiParameterLocation = "path" | "query" | "header";
 
@@ -166,7 +167,7 @@ function extractResponses(
         firstMedia.example ??
         (isRecord(firstMedia.schema)
           ? (firstMedia.schema.example ??
-            exampleFromSchema(firstMedia.schema, 0, components))
+            synthesize(firstMedia.schema, components))
           : undefined);
       if (generated !== undefined) {
         example = stringValue(generated);

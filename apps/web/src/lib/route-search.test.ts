@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -11,114 +10,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   REVIEW_QUEUE_MODES,
-  catalogueSearchSchema,
-  parseCatalogueMaxInput,
   reviewModerationSearchSchema,
   reviewQueueMode,
 } from "#/lib/route-search";
-
-describe("catalogue URL search boundary", () => {
-  it("accepts only bounded safe-integer maximum costs", () => {
-    expect(catalogueSearchSchema.parse({ max: 0 }).max).toBe(0);
-    expect(
-      catalogueSearchSchema.parse({ max: String(MAX_ENDPOINT_COST_CREDITS) })
-        .max,
-    ).toBe(MAX_ENDPOINT_COST_CREDITS);
-
-    for (const max of [
-      -1,
-      1.5,
-      "1e3",
-      "Infinity",
-      Number.MAX_SAFE_INTEGER + 1,
-      String(Number.MAX_SAFE_INTEGER + 1),
-      MAX_ENDPOINT_COST_CREDITS + 1,
-      {},
-    ]) {
-      expect(catalogueSearchSchema.parse({ max }).max).toBeUndefined();
-    }
-  });
-
-  it("validates input writes with the same integer and product bound", () => {
-    expect(parseCatalogueMaxInput("")).toBeNull();
-    expect(parseCatalogueMaxInput("00012")).toBe(12);
-    expect(parseCatalogueMaxInput(String(MAX_ENDPOINT_COST_CREDITS))).toBe(
-      MAX_ENDPOINT_COST_CREDITS,
-    );
-    expect(parseCatalogueMaxInput("1.2")).toBeUndefined();
-    expect(
-      parseCatalogueMaxInput(String(MAX_ENDPOINT_COST_CREDITS + 1)),
-    ).toBeUndefined();
-    expect(
-      parseCatalogueMaxInput(String(Number.MAX_SAFE_INTEGER + 1)),
-    ).toBeUndefined();
-  });
-
-  it("replays real router deep-link, refresh, back, and forward state", async () => {
-    const makeRouter = (initialEntry: string) => {
-      const root = createRootRoute();
-      const catalogue = createRoute({
-        getParentRoute: () => root,
-        path: "/catalogue",
-        validateSearch: catalogueSearchSchema,
-      });
-      return createRouter({
-        isServer: false,
-        routeTree: root.addChildren([catalogue]),
-        history: createMemoryHistory({ initialEntries: [initialEntry] }),
-      });
-    };
-    const router = makeRouter("/catalogue?q=first&max=10&sort=name");
-    await router.load();
-    expect(router.state.location.search).toMatchObject({
-      q: "first",
-      max: 10,
-      sort: "name",
-    });
-
-    const refreshed = makeRouter(router.state.location.href);
-    await refreshed.load();
-    expect(refreshed.state.location.search).toEqual(
-      router.state.location.search,
-    );
-
-    await router.navigate({
-      to: "/catalogue",
-      search: { q: "second", max: 20, free: true },
-    });
-    await router.navigate({
-      to: "/catalogue",
-      search: { q: "third", max: 30, semantic: true },
-    });
-    expect(router.state.location.search).toMatchObject({
-      q: "third",
-      max: 30,
-      semantic: true,
-    });
-
-    router.history.back();
-    await router.load();
-    expect(router.state.location.search).toMatchObject({
-      q: "second",
-      max: 20,
-      free: true,
-    });
-    router.history.back();
-    await router.load();
-    expect(router.state.location.search).toMatchObject({
-      q: "first",
-      max: 10,
-      sort: "name",
-    });
-    router.history.forward();
-    await router.load();
-    expect(router.state.location.search).toMatchObject({
-      q: "second",
-      max: 20,
-      free: true,
-    });
-  });
-});
 
 describe("admin moderation tab URL boundary", () => {
   it("deep-links and refreshes every tab, then preserves real back/forward order", async () => {

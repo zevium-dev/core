@@ -1,6 +1,6 @@
 # Platform admin
 
-> Status: partial · Updated: 2026-10-10
+> Status: partial (#363 list/presentation fixes complete) · Updated: 2026-10-10
 > Code: `convex/admin.ts`, `convex/admin.test.ts`, `convex/lib/auth.ts` (`requireAdmin`, `isAdmin`), `apps/web/src/routes/admin.tsx`, `apps/web/src/routes/admin/index.tsx`, `apps/web/src/routes/admin/orgs.tsx`, `apps/web/src/routes/admin/projects.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/routes/admin/reviews.tsx`, `apps/web/src/routes/admin/-reviews-ui.tsx`, `apps/web/src/components/admin-header.tsx`
 > Related: [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [reviews](reviews.md), [earnings-payouts](earnings-payouts.md), [wallet-billing](wallet-billing.md), [webhooks-notifications](webhooks-notifications.md), [upstream-credentials](upstream-credentials.md), [accounts-orgs](accounts-orgs.md)
 
@@ -21,6 +21,8 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 - **Platform metrics**: GMV, take, active consumers/publishers, call volume, error rates
 
 ## Tech
+
+- **Realtime lists (#363)**: orgs, projects, and transfer operations use native Convex `usePaginatedQuery`; filter/URL changes reset cursors in the same render. Loaded rows update or disappear after mutations without client merge effects, row copies, or forced refetches. `ListBoundary` contains query errors and retries by remounting the subscription. Stock Table, common UTC/money/credits formatters, and HTTP StatusBadge replace local copies. Test-only org-map helpers were removed from `admin-filters.ts`.
 
 ### Implementation notes
 

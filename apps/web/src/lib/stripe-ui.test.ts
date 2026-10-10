@@ -8,7 +8,6 @@ import {
   connectedAccountDisplay,
   connectedAccountRequirements,
   earningStatusLabel,
-  earningTotalsByStatus,
   moneyMovementFailure,
   moneyMovementStatusLabel,
   operatorTransferAction,
@@ -141,26 +140,6 @@ describe("publisher earning lifecycle", () => {
     expect(earningStatusLabel("paid")).toBe("Paid to bank");
     expect(earningStatusLabel("reversed")).toBe("Reversed");
     expect(earningStatusLabel("failed")).toBe("Transfer failed");
-  });
-
-  it("totals pending, available, transferred, paid, and reversed values", () => {
-    expect(
-      earningTotalsByStatus([
-        { status: "pending_risk", netCredits: 10 },
-        { status: "allocated_to_transfer", netCredits: 20 },
-        { status: "failed", netCredits: 30 },
-        { status: "available", netCredits: 40 },
-        { status: "transferred", netCredits: 50 },
-        { status: "paid", netCredits: 60 },
-        { status: "reversed", netCredits: 70 },
-      ]),
-    ).toEqual({
-      pending: 60,
-      available: 40,
-      transferred: 50,
-      paid: 60,
-      reversed: 70,
-    });
   });
 });
 

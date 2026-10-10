@@ -1,6 +1,6 @@
 # Mock sandbox
 
-> Status: built (P1 #14) · Updated: 2026-10-10
+> Status: built (P1 #14; #363 shared synthesis) · Updated: 2026-10-10
 > Code: `apps/gateway/src/mock.ts`, `packages/shared/src/mock.ts` (`generateMockResponse`), `packages/shared/src/openapi.ts` (`matchOperation`), `apps/web/src/components/catalogue-detail.tsx` (Try it panel), `apps/web/src/lib/landing.ts` (`tryItBaseUrl`), `apps/web/src/lib/catalogue-detail-search.ts`
 > Related: [gateway](gateway.md), [catalogue-search](catalogue-search.md), [pricing](pricing.md), [agent-surface](agent-surface.md), [listing-lifecycle](listing-lifecycle.md)
 
@@ -27,6 +27,8 @@ Free, anonymous, spec-generated responses for any published API: exercise the AP
 - Keyless `/mock` has no authentication or payment failure path; missing, unsafe, or unreadable projects/specs/routes return generic `404` responses (FLOW 3.4)
 
 ## Tech
+
+- **Shared examples (#363)**: `packages/shared/src/mock.ts` exports bounded `synthesize` for gateway mocks, reference responses, and playground request bodies. Explicit examples/defaults and local component refs share one implementation; boolean/date/depth behavior no longer drifts in `lib/try-it.ts`. Realtime quality refreshes preserve playground inputs/results; selecting another operation resets its defaults. CopyButton keeps curl authorization as a placeholder.
 
 - **Payment-required errors** (mock part): `/mock` is keyless and free; project, spec, and route failures return generic `404` responses
 - **Gateway CORS**: `/gateway`, `/mock`, `/discovery`, `/mcp` all allow wildcard origin. Safe because auth is bearer-key only, never cookie-based — a wildcard origin doesn't widen the attack surface for a bearer-token API

@@ -1,9 +1,18 @@
-import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { ListBoundary } from "#/components/list-boundary";
+import { formatMoney } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useAction } from "convex/react";
+import { usePaginatedQuery, useAction } from "convex/react";
 import { AlertTriangle, RefreshCw, Send } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -25,7 +34,6 @@ import {
 } from "#/components/ui/dialog";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -81,7 +89,11 @@ export const Route = createFileRoute("/admin/payouts")({
     search.status === "reversed"
       ? { status: search.status }
       : {},
-  component: AdminPayoutsPage,
+  component: () => (
+    <ListBoundary label="transfers">
+      <AdminPayoutsPage />
+    </ListBoundary>
+  ),
   head: () => ({
     meta: [{ title: "Admin Transfers · Zevium" }],
   }),
@@ -92,42 +104,18 @@ function AdminPayoutsPage() {
   const { status } = Route.useSearch();
   const navigate = useNavigate();
   const filter: TransferFilter = status ?? "all";
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [rows, setRows] = useState<PublisherTransfer[]>([]);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
   const [retryTarget, setRetryTarget] = useState<PublisherTransfer | null>(
     null,
   );
-
-  const args = useMemo(
-    () => ({
-      paginationOpts: { numItems: PAGE_SIZE, cursor },
-      ...(filter === "all" ? {} : { status: filter }),
-    }),
-    [cursor, filter],
+  const {
+    results: rows,
+    status: paginationStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.admin.listPublisherTransfers,
+    filter === "all" ? {} : { status: filter },
+    { initialNumItems: PAGE_SIZE },
   );
-  const transfersQuery = useQuery(
-    convexQuery(api.admin.listPublisherTransfers, args),
-  );
-
-  useEffect(() => {
-    if (!transfersQuery.data || transfersQuery.isPending) return;
-    setRows((previous) => {
-      if (cursor === null) return transfersQuery.data.page;
-      const ids = new Set(previous.map((row) => row.id));
-      const next = [...previous];
-      for (const transfer of transfersQuery.data.page) {
-        if (!ids.has(transfer.id)) {
-          ids.add(transfer.id);
-          next.push(transfer);
-        }
-      }
-      return next;
-    });
-    setIsDone(transfersQuery.data.isDone);
-    setContinueCursor(transfersQuery.data.continueCursor);
-  }, [cursor, transfersQuery.data, transfersQuery.isPending]);
 
   const retryPublisherTransfer = useAction(api.admin.retryPublisherTransfer);
   const { mutate: retryTransfer, isPending: retryPending } = useMutation({
@@ -138,24 +126,15 @@ function AdminPayoutsPage() {
         "Transfer retry requested using the original transfer reference.",
       );
       setRetryTarget(null);
-      setCursor(null);
-      setRows([]);
-      setIsDone(false);
-      setContinueCursor(null);
-      void transfersQuery.refetch();
     },
     onError: (error: unknown) => {
       toast.error(humanError(error, "Could not retry this Stripe transfer."));
     },
   });
 
-  const firstPagePending = transfersQuery.isPending && cursor === null;
-  const loadMorePending = transfersQuery.isPending && cursor !== null;
-  const canLoadMore =
-    !isDone &&
-    continueCursor !== null &&
-    !transfersQuery.isPending &&
-    !transfersQuery.isError;
+  const firstPagePending = paginationStatus === "LoadingFirstPage";
+  const loadMorePending = paginationStatus === "LoadingMore";
+  const canLoadMore = paginationStatus === "CanLoadMore";
 
   function selectFilter(nextFilter: TransferFilter) {
     if (nextFilter === filter) return;
@@ -163,10 +142,6 @@ function AdminPayoutsPage() {
       to: "/admin/payouts",
       search: nextFilter === "all" ? {} : { status: nextFilter },
     });
-    setCursor(null);
-    setRows([]);
-    setIsDone(false);
-    setContinueCursor(null);
   }
 
   return (
@@ -207,27 +182,6 @@ function AdminPayoutsPage() {
         <CardContent>
           {firstPagePending ? (
             <TransferTableSkeleton />
-          ) : transfersQuery.isError && rows.length === 0 ? (
-            <Empty className="border border-dashed py-8">
-              <EmptyHeader>
-                <EmptyTitle>Could not load transfers</EmptyTitle>
-                <EmptyDescription>
-                  {humanError(
-                    transfersQuery.error,
-                    "Publisher transfers are temporarily unavailable.",
-                  )}
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void transfersQuery.refetch()}
-                >
-                  Retry
-                </Button>
-              </EmptyContent>
-            </Empty>
           ) : rows.length === 0 ? (
             <Empty className="py-8">
               <EmptyHeader>
@@ -254,30 +208,9 @@ function AdminPayoutsPage() {
                 variant="outline"
                 size="sm"
                 disabled={loadMorePending || !canLoadMore}
-                onClick={() => {
-                  if (continueCursor !== null) setCursor(continueCursor);
-                }}
+                onClick={() => loadMore(PAGE_SIZE)}
               >
                 {loadMorePending ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          ) : null}
-          {transfersQuery.isError && rows.length > 0 ? (
-            <div
-              className="mt-4 flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
-              role="alert"
-            >
-              <p className="text-sm text-destructive">
-                More transfers could not be loaded. Existing rows are still
-                available.
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void transfersQuery.refetch()}
-              >
-                Retry page
               </Button>
             </div>
           ) : null}
@@ -307,36 +240,36 @@ function TransferTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-muted-foreground">
-            <th scope="col" className="px-2 py-2 font-medium">
+      <Table className="w-full text-sm">
+        <TableHeader>
+          <TableRow className="border-b text-left text-muted-foreground">
+            <TableHead scope="col" className="px-2 py-2 font-medium">
               Publisher organization
-            </th>
-            <th scope="col" className="px-2 py-2 font-medium">
+            </TableHead>
+            <TableHead scope="col" className="px-2 py-2 font-medium">
               Status
-            </th>
-            <th scope="col" className="px-2 py-2 font-medium text-right">
+            </TableHead>
+            <TableHead scope="col" className="px-2 py-2 font-medium text-right">
               Amount
-            </th>
-            <th
+            </TableHead>
+            <TableHead
               scope="col"
               className="hidden px-2 py-2 font-medium lg:table-cell"
             >
               Stripe transfer
-            </th>
-            <th
+            </TableHead>
+            <TableHead
               scope="col"
               className="hidden px-2 py-2 font-medium md:table-cell"
             >
               Details
-            </th>
-            <th scope="col" className="px-2 py-2 font-medium text-right">
+            </TableHead>
+            <TableHead scope="col" className="px-2 py-2 font-medium text-right">
               Action
-            </th>
-          </tr>
-        </thead>
-        <tbody>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {rows.map((transfer) => {
             const retry = operatorTransferAction(transfer.status);
             const failure = moneyMovementFailure(
@@ -344,8 +277,8 @@ function TransferTable({
               transfer.failureReason,
             );
             return (
-              <tr key={transfer.id} className="border-b last:border-0">
-                <td className="max-w-52 px-2 py-2.5">
+              <TableRow key={transfer.id} className="border-b last:border-0">
+                <TableCell className="max-w-52 px-2 py-2.5">
                   <span className="block truncate font-medium">
                     {transfer.publisherOrganizationName}
                   </span>
@@ -353,22 +286,22 @@ function TransferTable({
                     {transfer.publisherOrganizationSlug ??
                       transfer.publisherOrganizationId}
                   </span>
-                </td>
-                <td className="px-2 py-2.5">
+                </TableCell>
+                <TableCell className="px-2 py-2.5">
                   <Badge variant={moneyMovementStatusVariant(transfer.status)}>
                     {moneyMovementStatusLabel(transfer.status)}
                   </Badge>
-                </td>
-                <td className="px-2 py-2.5 text-right tabular-nums">
+                </TableCell>
+                <TableCell className="px-2 py-2.5 text-right tabular-nums">
                   {formatMoney(transfer.amount, transfer.currency)}
-                </td>
-                <td className="hidden max-w-48 truncate px-2 py-2.5 font-mono text-xs text-muted-foreground lg:table-cell">
+                </TableCell>
+                <TableCell className="hidden max-w-48 truncate px-2 py-2.5 font-mono text-xs text-muted-foreground lg:table-cell">
                   {transfer.stripeTransferId ?? "—"}
-                </td>
-                <td className="hidden max-w-64 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
+                </TableCell>
+                <TableCell className="hidden max-w-64 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
                   {failure ?? "—"}
-                </td>
-                <td className="px-2 py-2.5 text-right">
+                </TableCell>
+                <TableCell className="px-2 py-2.5 text-right">
                   {retry.action && retry.label ? (
                     <Button
                       size="xs"
@@ -382,12 +315,12 @@ function TransferTable({
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -472,11 +405,4 @@ function PayoutsSkeleton() {
       </Card>
     </div>
   );
-}
-
-function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(amount / 100);
 }

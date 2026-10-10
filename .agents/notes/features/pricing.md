@@ -1,6 +1,6 @@
 # Pricing
 
-> Status: partial (per-call `x-zevium-cost` + daily free tier built; tiered, per-token, outcome pricing planned) · Updated: 2026-10-10
+> Status: partial (per-call `x-zevium-cost` + daily free tier + signup credit #317 built; tiered, per-token, outcome pricing planned) · Updated: 2026-10-10
 > Code: `packages/shared/src/openapi.ts`, `packages/shared/src/pricing.ts`, `packages/shared/src/validate.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/wallet.ts` (`consumeFreeTier`), `apps/gateway/src/discovery.ts`, `convex/accounting.ts`
 > Related: [publishing-specs](publishing-specs.md), [wallet-billing](wallet-billing.md), [earnings-payouts](earnings-payouts.md), [gateway](gateway.md), [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: LLM per-token pricing (proposed)](../decisions/2026-10-10-llm-per-token-pricing.md)
 
@@ -87,6 +87,7 @@ Pricing has no screen of its own; it surfaces in other features:
 - Both extensions must be finite safe non-negative integers. `MAX_ENDPOINT_COST_CREDITS = 1_000_000` (no call above a $100 pack); `MAX_DAILY_FREE_TIER_CALLS = 1_000_000`
 - Free tier is enforced in the wallet DO (`consumeFreeTier`): counter keyed by consumer org × project × method × path template × UTC day. Free-tier calls are rejected `insufficient_credits` when wallet balance ≤ 0
 - `cost === 0` operations skip reservation but still run key authorization (`authorizeKey`)
+- Signup credit uses the existing promotion funding path and advances the edge wallet checkpoint; see [wallet-billing](wallet-billing.md#implementation-notes).
 - `convex/accounting.ts`: `CREDITS_PER_USD = 10_000`, `PLATFORM_FEE_BASIS_POINTS = 500`
 - `apps/gateway/src/discovery.ts` exposes `freeTier` per endpoint in discovery output
 
@@ -94,11 +95,11 @@ Pricing has no screen of its own; it surfaces in other features:
 
 - 2026-10-10 — Platform fee taken publisher-side: $10 top-up = $10 credits; Zevium keeps 5% of each call's spend, publisher 95%. Matches current code (flat packs, 500 bps fee). [decision](../decisions/2026-10-10-platform-fee-publisher-side.md)
 - 2026-10-10 — ACCEPTED: card processing fee passed through at cost as a separate, transparent line on top-ups (OpenCode Zen style); credits stay face value; no minimum-top-up floor. [decision](../decisions/2026-10-10-card-fee-passthrough.md)
-- 2026-10-10 — ACCEPTED: new orgs get ~$1 default promotional credit so free-tier and first calls work at signup. [decision](../decisions/2026-10-10-signup-credit.md)
+- 2026-10-10 — BUILT (#317): eligible orgs get $1 promotional credit, once per Clerk creator; see [wallet-billing](wallet-billing.md#implementation-notes) for delivery and verification limits. [decision](../decisions/2026-10-10-signup-credit.md)
 - 2026-10-10 — ACCEPTED (not built): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — ACCEPTED (not built): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 ## Open questions
 
 - Doc/code conflict: PRODUCT roadmap lists free tier enforcement as P1 (planned); code already enforces daily free tier per consumer org per endpoint. Code wins; roadmap needs update. Tiered pricing half of P1 #11 is not built
-- Doc/code conflict: FLOW consumer golden path tries the API via "mock mode or free tier" before top-up; code rejects free-tier calls when wallet balance ≤ 0, so a fresh unfunded org cannot use free tier. Confirm intended behavior Direction 2026-10-10: resolved by default signup credit ([decision](../decisions/2026-10-10-signup-credit.md)); not built.
+- Free-tier golden path now uses signup credit (#317), subject to trusted Clerk creator delivery; zero balance still blocks. See [wallet-billing](wallet-billing.md#implementation-notes).

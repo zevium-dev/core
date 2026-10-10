@@ -38,22 +38,6 @@ export function activitySinceMs(
   }
 }
 
-/** Coerce unknown search/UI value to a known range; default all. */
-export function parseActivityTimeRange(raw: unknown): ActivityTimeRange {
-  if (raw === "24h" || raw === "7d" || raw === "30d" || raw === "all") {
-    return raw;
-  }
-  return "all";
-}
-
-export type UsageRowIdentity = {
-  eventId: string | null;
-  at: number;
-  keyId: string;
-  endpoint: string;
-  method: string;
-};
-
 export type ActivityAttributionSearch = {
   key?: string;
   member?: string;
@@ -72,76 +56,6 @@ export function authorizedAttributionSearch(
     ...(search.endpoint ? { endpoint: search.endpoint } : {}),
     ...(search.method ? { method: search.method } : {}),
   };
-}
-
-function usageRowIdentity(row: UsageRowIdentity): string {
-  return (
-    row.eventId ??
-    `${row.at}:${row.keyId}:${row.method.toUpperCase()}:${row.endpoint}`
-  );
-}
-
-/**
- * Merge a fetched page into the accumulated list.
- * `replace` clears previous pages (filter reset / first page).
- * Dedupe by opaque public id so StrictMode double-effects don't double-append.
- */
-function mergePages<T>(
-  existing: readonly T[],
-  incoming: readonly T[],
-  replace: boolean,
-  identityFor: (row: T) => string,
-): T[] {
-  if (replace) {
-    return [...incoming];
-  }
-  if (incoming.length === 0) {
-    return [...existing];
-  }
-
-  const seen = new Set(existing.map(identityFor));
-  const next = [...existing];
-  for (const row of incoming) {
-    const identity = identityFor(row);
-    if (!seen.has(identity)) {
-      seen.add(identity);
-      next.push(row);
-    }
-  }
-  return next;
-}
-
-export function mergeUsagePages<T extends { _id: string }>(
-  existing: readonly T[],
-  incoming: readonly T[],
-  replace: boolean,
-): T[] {
-  return mergePages(existing, incoming, replace, (row) => row._id);
-}
-
-export function mergePublicUsagePages<T extends UsageRowIdentity>(
-  existing: readonly T[],
-  incoming: readonly T[],
-  replace: boolean,
-): T[] {
-  return mergePages(existing, incoming, replace, usageRowIdentity);
-}
-
-export function mergeHandlePages<T extends { handle: string }>(
-  existing: readonly T[],
-  incoming: readonly T[],
-  replace: boolean,
-): T[] {
-  if (replace) return [...incoming];
-  const seen = new Set(existing.map((row) => row.handle));
-  const next = [...existing];
-  for (const row of incoming) {
-    if (!seen.has(row.handle)) {
-      seen.add(row.handle);
-      next.push(row);
-    }
-  }
-  return next;
 }
 
 export const ACTIVITY_PAGE_SIZE = 25;
