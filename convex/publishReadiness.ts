@@ -16,7 +16,6 @@ export type ReadinessValidity =
         | "status_not_ok"
         | "expired"
         | "draft_changed"
-        /** Retained in public union for UI compatibility; credential-free probes never emit it. */
         | "credentials_changed";
     };
 
@@ -54,7 +53,8 @@ export async function credentialSetFingerprint(
   return await draftFingerprint(JSON.stringify(canonical));
 }
 
-function credentialRevision(
+/** Shared by readiness recording, its UI query, and the publication gate. */
+export function credentialRevision(
   rows: readonly { revision?: number; updatedAt: number }[],
 ): number {
   return rows.reduce(
@@ -64,7 +64,7 @@ function credentialRevision(
 }
 
 /**
- * A publish test is valid only for this exact saved draft.
+ * A publish test is valid only for this exact saved draft and credential set.
  * Keep this pure so the UI query and authoritative publish gate cannot drift.
  */
 export async function readinessValidity(

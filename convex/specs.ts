@@ -16,6 +16,7 @@ import {
 } from "./lib/credentialCrypto";
 
 import {
+  credentialRevision,
   credentialSetFingerprint,
   draftFingerprint,
   readinessValidity,
@@ -188,10 +189,7 @@ export const publish = mutation({
       .query("upstreamCredentials")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
-    const credentialRevision = credentialRows.reduce(
-      (latest, row) => Math.max(latest, row.updatedAt),
-      0,
-    );
+    const currentCredentialRevision = credentialRevision(credentialRows);
     const credentialFingerprint =
       await credentialSetFingerprint(credentialRows);
     const readiness = await ctx.db
@@ -201,7 +199,7 @@ export const publish = mutation({
     const readinessState = await readinessValidity(
       readiness,
       draftForReadiness?.draft ?? null,
-      credentialRevision,
+      currentCredentialRevision,
       credentialFingerprint,
     );
     if (!readinessState.current) {
