@@ -57,16 +57,18 @@ export function DocsPage({ title, description, children }: DocsPageProps) {
       <div className="w-full px-4 md:px-6">
         <div className="grid gap-8 py-8 md:grid-cols-[14rem_minmax(0,1fr)]">
           <DocsSidebar />
-          <article
+          <main
             id="main-content"
             style={{ viewTransitionName: "main-content" }}
             tabIndex={-1}
-            className={cn("content-enter min-w-0 outline-none", PROSE_CLASS)}
+            className="content-enter min-w-0 outline-none"
           >
-            <h1 className="mb-2">{title}</h1>
-            <p className="lead mb-8">{description}</p>
-            {children}
-          </article>
+            <article className={PROSE_CLASS}>
+              <h1 className="mb-2">{title}</h1>
+              <p className="lead mb-8">{description}</p>
+              {children}
+            </article>
+          </main>
         </div>
       </div>
     </div>

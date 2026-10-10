@@ -80,7 +80,9 @@ export function DetailsCard({ project }: { project: Doc<"projects"> }) {
     <Card>
       <form onSubmit={onSaveDetails} noValidate>
         <CardHeader>
-          <CardTitle>Project details</CardTitle>
+          <CardTitle role="heading" aria-level={2}>
+            Project details
+          </CardTitle>
           <CardDescription>
             Name, description, and catalogue tags. Slug is permanent.
           </CardDescription>
