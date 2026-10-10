@@ -1,4 +1,3 @@
-import { CopyButton } from "#/components/copy-button";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -7,7 +6,7 @@ import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
 import { Reveal } from "#/components/motion/reveal";
 import { PublicHeader } from "#/components/public-header";
-import { SyntaxCode } from "#/components/syntax-code";
+import { AgentInstall } from "#/components/agent-install";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -22,7 +21,6 @@ import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import {
-  buildMcpConfigSnippet,
   discoveryEndpointUrl,
   mcpEndpointUrl,
   pickLandingTeasers,
@@ -101,7 +99,6 @@ function LandingPage() {
   );
   const mcpUrl = mcpEndpointUrl(gatewayOrigin);
   const discoveryUrl = discoveryEndpointUrl(gatewayOrigin);
-  const mcpSnippet = buildMcpConfigSnippet(mcpUrl);
 
   return (
     <div className="min-h-screen bg-background">
@@ -302,7 +299,7 @@ function LandingPage() {
                 </p>
               </CardContent>
             </Card>
-            <McpConfigBlock snippet={mcpSnippet} />
+            <AgentInstall gatewayOrigin={gatewayOrigin} />
           </div>
         </Reveal>
 
@@ -448,32 +445,6 @@ function LandingPage() {
         </div>
       </footer>
     </div>
-  );
-}
-
-function McpConfigBlock({ snippet }: { snippet: string }) {
-  return (
-    <Card className="min-w-0">
-      <CardHeader>
-        <CardTitle>MCP config</CardTitle>
-        <CardAction>
-          <CopyButton text={snippet} aria-label="Copy MCP config" />
-        </CardAction>
-        <CardDescription>
-          Paste into your agent client. Replace YOUR_API_KEY with a Zevium key.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <pre
-          tabIndex={0}
-          role="region"
-          aria-label="MCP configuration"
-          className="max-h-56 min-w-0 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:whitespace-pre"
-        >
-          <SyntaxCode code={snippet} lang="json" />
-        </pre>
-      </CardContent>
-    </Card>
   );
 }
 

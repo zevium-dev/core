@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildMcpConfigSnippet,
+  buildClaudeCodeInstall,
+  buildCodexConfigSnippet,
+  buildCursorInstallUrl,
   discoveryEndpointUrl,
   mcpEndpointUrl,
   pickLandingTeasers,
@@ -111,5 +114,38 @@ describe("pickLandingTeasers", () => {
     };
     expect(pickLandingTeasers([item, item], 1)).toHaveLength(1);
     expect(pickLandingTeasers([item], -1)).toEqual([]);
+  });
+});
+
+describe("agent install formats", () => {
+  it("Cursor deeplink decodes to the same single-server config as the JSON fallback", () => {
+    const mcpUrl = "https://edge.example.test/mcp?label=café&test=1";
+    const link = new URL(buildCursorInstallUrl(mcpUrl));
+    expect(`${link.protocol}//${link.host}${link.pathname}`).toBe(
+      "cursor://anysphere.cursor-deeplink/mcp/install",
+    );
+    expect(link.searchParams.get("name")).toBe("zevium");
+    const decoded = JSON.parse(
+      Buffer.from(link.searchParams.get("config")!, "base64").toString("utf8"),
+    );
+    expect(decoded).toEqual(
+      JSON.parse(buildMcpConfigSnippet(mcpUrl)).mcpServers.zevium,
+    );
+    expect(decoded.headers.Authorization).toBe("Bearer ak_YOUR_API_KEY");
+  });
+
+  it("quotes the Claude Code endpoint as a literal shell argument", () => {
+    expect(buildClaudeCodeInstall("https://edge.example.test/mcp")).toBe(
+      "claude mcp add --transport http zevium 'https://edge.example.test/mcp' --header \"Authorization: Bearer ak_YOUR_API_KEY\"",
+    );
+    expect(
+      buildClaudeCodeInstall("https://edge.example.test/mcp?label='test'"),
+    ).toContain("'\\''test'\\''");
+  });
+
+  it("Codex uses the HTTP server and header table syntax", () => {
+    expect(buildCodexConfigSnippet("https://edge.example.test/mcp")).toBe(
+      '[mcp_servers.zevium]\nurl = "https://edge.example.test/mcp"\nhttp_headers = { "Authorization" = "Bearer ak_YOUR_API_KEY" }',
+    );
   });
 });
