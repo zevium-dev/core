@@ -221,6 +221,34 @@ afterEach(() => {
 });
 
 describe("GET /discovery", () => {
+  it.each([
+    "http://localhost:8787",
+    "http://127.0.0.1:9876",
+    "https://localhost:8787",
+    "https://gateway.zevium.dev",
+    "https://preview.example.com",
+  ])("derives gateway URLs from the serving origin %s", async (origin) => {
+    await installAgentFixtures({ clerkOrgId: "org_disc_origin" });
+    const ctx = createExecutionContext();
+    const response = await worker.fetch(
+      new Request(`${origin}/discovery`, {
+        headers: {
+          "x-forwarded-host": "untrusted.example",
+          "x-forwarded-proto": "http",
+        },
+      }),
+      env as Env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      apis: [
+        { gatewayBaseUrl: `${origin}/gateway/${ORG_SLUG}/${PROJECT_SLUG}` },
+      ],
+    });
+  });
+
   it("returns published APIs with per-endpoint pricing", async () => {
     await installAgentFixtures({ clerkOrgId: "org_disc_shape" });
 

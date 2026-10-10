@@ -10,7 +10,10 @@ const STRIP_HEADERS = [
 function sourceOrigin(raw: string | undefined): string | null {
   if (!raw) return null;
   try {
-    return new URL(raw).origin;
+    const url = new URL(raw);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.origin
+      : null;
   } catch {
     return null;
   }
@@ -47,7 +50,21 @@ export function buildWebContentSecurityPolicy(
     resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_URL),
   );
   const clerk = clerkFrontendOrigin(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
-  const websocket = convex === null ? null : convex.replace(/^https:/, "wss:");
+  let websocket: string | null = null;
+  if (convex !== null) {
+    const url = new URL(convex);
+    if (url.protocol === "https:") {
+      url.protocol = "wss:";
+      websocket = url.origin;
+    } else if (
+      import.meta.env.DEV &&
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+    ) {
+      url.protocol = "ws:";
+      websocket = url.origin;
+    }
+  }
   const connectSources = [
     "'self'",
     convex,

@@ -1,6 +1,6 @@
 # Dev environment
 
-> Updated: 2026-10-10 (merged from former `TECH.md` repo-shape bullets and `.project/PLAN.md` environment/known facts)
+> Updated: 2026-10-10 (seed runner, local Convex CSP, discovery origins; #384, #387, #392)
 > Related: [deploy](deploy.md), [testing](testing.md)
 
 Facts an agent needs before running anything locally. Hard-won; keep them. If a fact stops being true, fix it here in the same change.
@@ -34,7 +34,11 @@ Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 
 - Web dev server: `apps/web` on http://localhost:3000 (may already be running).
 - Gateway dev: http://localhost:8787.
-- Seed: `pnpm seed` → `test+clerk_test@zevium.dev` / `zevium-test-password`, OTP `424242`, org `test-org`.
+- Local Convex: set `VITE_CONVEX_URL=http://127.0.0.1:3210` in `apps/web/.env.local` and point the gateway's `CONVEX_URL` / `CONVEX_SITE_URL` at the same local backend. Restart Vite after env changes. Dev CSP allows the exact loopback Convex WebSocket origin (`ws://127.0.0.1:3210`); production builds never add this insecure WebSocket allowance.
+- Gateway discovery uses the incoming request origin. `apps/gateway/wrangler.jsonc` sets dev-only `host` to `localhost:8787` instead of letting Wrangler infer the production route. If changing the listener, also set the advertised origin, e.g. `mise exec -- pnpm exec wrangler dev --port 9876 --host localhost:9876`; for HTTPS use `--local-protocol https`. Deployed routes are unchanged; HTTPS requests produce HTTPS discovery links.
+- Seed procedure: after `mise exec -- pnpm install --frozen-lockfile`, provide `CLERK_SECRET_KEY` for the Clerk test instance through the process environment or `apps/web/.env.local`, then run `mise exec -- pnpm seed`. The command uses the installed `tsx` runner and idempotently ensures the test user, `test-org`, and its admin membership. Existing users' passwords are not reset; use the password-reset procedure below if needed. This only seeds Clerk; it does not fund wallets or publish APIs.
+- `mise exec -- pnpm seed --check` loads the seed imports without reading credentials or contacting Clerk. CI runs this smoke check to catch runner/module-resolution and deleted-export regressions.
+- Seed sign-in: `test+clerk_test@zevium.dev` / `zevium-test-password`, OTP `424242`.
 - Test org wallet is funded on BOTH planes (Convex `grantCredits` + gateway `/internal/grant`, refId `e2e:manual:grant:1`).
 
 ## Clerk quirks

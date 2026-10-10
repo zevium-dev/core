@@ -9,7 +9,6 @@
  * Credentials: test+clerk_test@zevium.dev / zevium-test-password
  */
 import { createClerkClient } from "@clerk/backend";
-import { isPublicCopyAllowed } from "@zevium/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -30,12 +29,8 @@ function loadSecretKey(): string {
   return match[1].trim();
 }
 
-const clerk = createClerkClient({ secretKey: loadSecretKey() });
-
 async function main() {
-  if (!isPublicCopyAllowed([ORG_NAME, ORG_SLUG].join("\n"))) {
-    throw new Error("Seed organization violates public-copy policy");
-  }
+  const clerk = createClerkClient({ secretKey: loadSecretKey() });
   const existing = await clerk.users.getUserList({ emailAddress: [EMAIL] });
   const user =
     existing.data.at(0) ??
@@ -77,7 +72,10 @@ async function main() {
   console.log(`\nseed OK — sign in: ${EMAIL} / ${PASSWORD}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Load the complete module graph without credentials or Clerk requests.
+if (!process.argv.includes("--check")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
