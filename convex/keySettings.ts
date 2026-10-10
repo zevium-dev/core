@@ -258,7 +258,7 @@ async function visibleKeys(ctx: DbCtx): Promise<Doc<"keySettings">[]> {
   }
   return await ctx.db
     .query("keySettings")
-    .withIndex("by_owner", (q) =>
+    .withIndex("by_owner_status", (q) =>
       q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
     )
     .collect();
@@ -458,7 +458,7 @@ export const registerVerified = mutation({
     // Disabled keys still occupy the member's slot until explicitly revoked.
     const owned = await ctx.db
       .query("keySettings")
-      .withIndex("by_owner", (q) =>
+      .withIndex("by_owner_status", (q) =>
         q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
       )
       .collect();
