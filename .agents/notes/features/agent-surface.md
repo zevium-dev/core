@@ -1,7 +1,7 @@
 # Agent surface (MCP + discovery)
 
-> Status: partial (P1 #9 — marketplace-wide MCP + discovery index built; per-API agent tooling planned; #361 buffered-result billing fixed; #395 parameters and #396 payment recovery fixed; #330 semantic discovery built) · Updated: 2026-10-10
-> Code: `apps/gateway/src/mcp.ts`, `apps/gateway/src/mcp-call-params.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/forward.ts` (`prepareResponse` hook), `apps/gateway/src/finalize.ts` (settlement/refund), `apps/gateway/test/discovery-mcp.test.ts`, `apps/gateway/src/mcp-api-docs.ts`, `apps/gateway/src/discovery.ts`, `apps/gateway/src/catalogue-source.ts`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/catalogue-detail.tsx` (`ConnectAgentPanel`), `apps/web/src/lib/landing.ts` (`buildMcpConfigSnippet`, `mcpEndpointUrl`, `discoveryEndpointUrl`), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`, `apps/gateway/src/catalogue-search.ts`, `convex/http.ts`, `/gateway-search`, `convex/search.ts`
+> Status: partial (P1 #9 — marketplace-wide MCP + discovery index built; per-API agent tooling planned; #361 buffered-result billing fixed; #395 parameters and #396 payment recovery fixed; #330 semantic discovery built; #392 local discovery origins fixed) · Updated: 2026-10-10
+> Code: `apps/gateway/src/mcp.ts`, `apps/gateway/src/mcp-call-params.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/forward.ts` (`prepareResponse` hook), `apps/gateway/src/finalize.ts` (settlement/refund), `apps/gateway/test/discovery-mcp.test.ts`, `apps/gateway/src/mcp-api-docs.ts`, `apps/gateway/src/discovery.ts`, `apps/gateway/wrangler.jsonc`, `apps/gateway/scripts/discovery-dev-origin.smoke.mjs`, `apps/gateway/src/catalogue-source.ts`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/catalogue-detail.tsx` (`ConnectAgentPanel`), `apps/web/src/lib/landing.ts` (`buildMcpConfigSnippet`, `mcpEndpointUrl`, `discoveryEndpointUrl`), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`, `apps/gateway/src/catalogue-search.ts`, `convex/http.ts`, `/gateway-search`, `convex/search.ts`
 > Related: [gateway](gateway.md), [machine-payments](machine-payments.md), [catalogue-search](catalogue-search.md), [quality-signals](quality-signals.md), [api-keys](api-keys.md), [mock-sandbox](mock-sandbox.md), [landing-docs](landing-docs.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 The differentiator: AI agents discover published APIs, evaluate per-endpoint cost before calling, read call docs, and execute through the same key-authenticated, credit-gated gateway as human traffic. Agents are a consumer type with the same billing model as human developers.
@@ -46,9 +46,11 @@ Item 4 (machine-native payments, x402): [machine-payments](machine-payments.md).
 
 ## Tech
 
+- **Discovery origins (#392)**: `index.ts` supplies the request URL's origin to `discovery.ts`; forwarded-host/proto headers are ignored. Wrangler's dev-only `host: "localhost:8787"` setting supplies the advertised local gateway host and port instead of inferring the production custom route; local HTTP/HTTPS follows the dev server protocol. Custom ports need a matching `--host` override (see dev-environment). Production HTTPS requests retain HTTPS URLs. Worker tests cover local/production/custom origins; a real Wrangler dev test with fixture listings covers the configured route rewrite boundary.
+
 **Dogfood — 2026-10-10**
 
-- **P1 #392:** local discovery/MCP metadata generates `http://gateway.zevium.dev/...` instead of the local gateway origin.
+- **P1 #392 (fixed):** local discovery/MCP metadata previously generated `http://gateway.zevium.dev/...` instead of the local gateway origin.
 - **P1 #395:** `call_api` treats a query-bearing path as the operation pathname and returns 404; the equivalent direct request succeeds.
 - **P1 #396:** MCP 402 sanitization drops the direct gateway payment reason, required/available credits and recovery actions. Zero balance still blocks execution.
 - Initialization, tool listing, search/docs and a queryless paid call worked; Claude Code connected after adding the HTTP transport type to config (existing **#326**).

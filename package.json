@@ -21,10 +21,11 @@
     "quality:shell": "mise exec -- shellcheck --severity=warning e2e/*.sh",
     "quality:static": "pnpm quality:actions && pnpm quality:shell && pnpm quality:gitleaks",
     "routes:check": "pnpm exec convex codegen --typecheck disable && git diff --exit-code -- convex/_generated apps/web/src/routeTree.gen.ts",
-    "seed": "node --experimental-strip-types scripts/seed.ts",
-    "test": "CI=true turbo test --concurrency=1 -- --maxWorkers=2 && pnpm test:convex && pnpm test:worktree-setup",
+    "seed": "tsx scripts/seed.ts",
+    "test": "CI=true turbo test --concurrency=1 -- --maxWorkers=2 && pnpm test:convex && pnpm test:worktree-setup && pnpm test:seed && pnpm --filter @zevium/gateway test:dev-origin",
     "test:convex": "vitest run --allowOnly=false --maxWorkers=2 --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
+    "test:seed": "node --test scripts/seed.test.mjs",
     "test:worktree-setup": "node --test scripts/copy-worktree-env.test.mjs"
   },
   "devDependencies": {

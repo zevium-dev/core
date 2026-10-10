@@ -7,6 +7,9 @@
   // boundary. URL policy below remains defense in depth.
   "compatibility_flags": ["global_fetch_strictly_public"],
   "routes": [{ "pattern": "gateway.zevium.dev", "custom_domain": true }],
+  // Dev-only origin for generated discovery links; otherwise Wrangler infers
+  // the production route above. Override --host too when changing --port.
+  "dev": { "host": "localhost:8787" },
   "vars": {
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
     // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage

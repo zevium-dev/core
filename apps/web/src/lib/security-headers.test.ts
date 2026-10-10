@@ -18,6 +18,55 @@ const REQUIRED_HEADERS = [
 afterEach(() => vi.unstubAllEnvs());
 
 describe("outer web security headers", () => {
+  it.each([
+    ["http://127.0.0.1:3210", "ws://127.0.0.1:3210"],
+    ["http://localhost:4321/path", "ws://localhost:4321"],
+    ["http://[::1]:3210", "ws://[::1]:3210"],
+  ])(
+    "allows only the configured local Convex socket in dev (%s)",
+    (convex, socket) => {
+      vi.stubEnv("DEV", true);
+      vi.stubEnv("VITE_CONVEX_URL", convex);
+      const policy = buildWebContentSecurityPolicy("test");
+      expect(
+        policy
+          .split("; ")
+          .find((value) => value.startsWith("connect-src "))
+          ?.split(" "),
+      ).toContain(socket);
+      expect(policy).not.toContain("ws://*");
+      expect(policy).not.toContain("ws: ");
+    },
+  );
+
+  it.each([false, true])("preserves secure Convex sockets (dev=%s)", (dev) => {
+    vi.stubEnv("DEV", dev);
+    vi.stubEnv("VITE_CONVEX_URL", "https://example.convex.cloud/path");
+    const policy = buildWebContentSecurityPolicy("test");
+    expect(policy).toContain(
+      "https://example.convex.cloud wss://example.convex.cloud",
+    );
+    expect(policy).not.toContain(" ws:");
+  });
+
+  it.each([
+    [false, "http://127.0.0.1:3210"],
+    [false, "http://localhost:3210"],
+    [false, "http://[::1]:3210"],
+    [true, "http://remote.example.com:3210"],
+    [true, "invalid-url"],
+    [true, "data:text/plain,invalid"],
+    [true, "file:///invalid"],
+    [true, undefined],
+  ])("does not broaden WebSocket policy (dev=%s, convex=%s)", (dev, convex) => {
+    vi.stubEnv("DEV", dev);
+    vi.stubEnv("VITE_CONVEX_URL", convex);
+    const policy = buildWebContentSecurityPolicy("test");
+    expect(policy).not.toContain(" ws:");
+    expect(policy).not.toContain("'unsafe-eval'");
+    expect(policy).toContain("'strict-dynamic'");
+  });
+
   it.each([undefined, "", "  "])(
     "allows playground requests to the default local gateway (%s)",
     (gateway) => {
