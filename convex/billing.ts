@@ -32,7 +32,6 @@ import {
   recordPositiveFundingSource,
   requireVerifiedWalletFunding,
 } from "./lib/funding";
-import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 import {
   paymentStatusForProjection,
   terminalDisputeStatus,
@@ -252,7 +251,6 @@ export const prepareCheckoutIntent = internalMutation({
     stripePriceId: v.string(),
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const organization = await getOrgByClerkId(ctx, args.clerkOrgId);
     if (organization === null)
       throw new Error("Active organization is not provisioned");
@@ -301,7 +299,6 @@ export const setStripeCustomer = internalMutation({
     stripeCustomerId: v.string(),
   },
   handler: async (ctx, args): Promise<string> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     const profile = await ctx.db
@@ -331,7 +328,6 @@ export const attachCheckoutSession = internalMutation({
     stripeCheckoutSessionId: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     if (
@@ -354,7 +350,6 @@ export const markCheckoutIntentTerminal = internalMutation({
     status: v.union(v.literal("failed"), v.literal("expired")),
   },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db
       .query("checkoutIntents")
       .withIndex("by_checkout_session", (q) =>
@@ -565,10 +560,6 @@ export const receiveStripeEvent = internalMutation({
     ctx,
     args,
   ): Promise<{ isNew: boolean; scheduled: boolean }> => {
-    // Migration must either see an accepted receipt or reject its transaction
-    // so Stripe retries it later. Never admit a post-fence row that cannot be
-    // included in the stable global watermark.
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (
       args.stripeEventId.trim() === "" ||
       args.stripeAccount.trim() === "" ||
@@ -923,7 +914,6 @@ export const upsertPaidPayment = internalMutation({
     stripeChargeId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db
       .query("checkoutIntents")
       .withIndex("by_checkout_session", (q) =>
@@ -988,7 +978,6 @@ export const upsertPaidPayment = internalMutation({
       walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
       reversalSequence: 0,
-      financeMigrationStatus: "verified",
       status: "paid",
       createdAt: now,
       updatedAt: now,
@@ -1009,7 +998,6 @@ export const upsertPaidPayment = internalMutation({
 export const markPaymentGrantRecorded = internalMutation({
   args: { paymentId: v.id("payments") },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db.get(args.paymentId);
     if (payment === null) throw new Error("Payment not found");
     if (payment.status === "pending") {
@@ -1050,15 +1038,13 @@ function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
   reversalSequence: number;
 } {
   if (
-    payment.financeMigrationStatus !== "verified" ||
-    payment.financeMigrationJobId !== undefined ||
     payment.refundedAmount === undefined ||
     payment.refundedCredits === undefined ||
     payment.walletReversedCredits === undefined ||
     payment.publisherClawbackTargetCredits === undefined ||
     payment.reversalSequence === undefined
   ) {
-    throw new Error("Payment finance migration is not verified");
+    throw new Error("Payment accounting fields are incomplete");
   }
   if (
     payment.refundedAmount < 0 ||
@@ -1170,7 +1156,6 @@ async function applyEffectivePaymentReversal(
       sourceAmount: args.sourceAmount,
       sourceAmountExact: true,
       sourceStatus: args.sourceStatus,
-      migrationBackfilled: false,
       requestedCredits: args.sourceRequestedCredits,
       effectiveCredits: 0,
       walletCredits: 0,
@@ -1201,7 +1186,6 @@ async function applyEffectivePaymentReversal(
     await ctx.db.patch(existingSource._id, {
       sourceAmount: args.sourceAmount,
       sourceAmountExact: true,
-      migrationBackfilled: false,
       sourceStatus: args.sourceStatus,
       requestedCredits: args.sourceRequestedCredits,
       active: args.sourceActive,
@@ -1426,7 +1410,6 @@ export const applyRefundProjection = internalMutation({
     status: stripeRefundStatus,
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db
       .query("payments")
       .withIndex("by_charge", (q) =>
@@ -1503,7 +1486,6 @@ export const applyDisputeProjection = internalMutation({
     movement: stripeDisputeMovement,
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
       throw new Error("Invalid Stripe dispute amount");
     }
@@ -1929,7 +1911,6 @@ export const getBillingState = query({
     checkoutIntentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const { access, org: organization } = await requireActiveOrg(ctx);
     const canManageBilling = access.capabilities.manageBilling;
     const wallet = await ctx.db
@@ -2031,7 +2012,6 @@ export function projectedCycleCredits(
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const { access, claims, org } = await requireOrgMemberBySlug(
       ctx,
       args.orgSlug,
@@ -2090,7 +2070,7 @@ export const cycleBreakdown = query({
       key.credits += event.credits;
       byKey.set(event.keyId, key);
       if (event.projectName === undefined || event.projectSlug === undefined) {
-        throw new Error("Billing cycle migration is not verified");
+        throw new Error("Billing cycle accounting fields are incomplete");
       }
       const project = byProject.get(event.projectId) ?? {
         name: event.projectName,
@@ -2224,7 +2204,6 @@ export const cycleBreakdown = query({
       scope: canViewOrgUsage ? ("organization" as const) : ("member" as const),
       cycleStart,
       cycleEnd,
-
       asOf,
       totalCalls: visibleEvents.length,
       totalCredits,

@@ -822,7 +822,6 @@ describe("Stripe Checkout control plane", () => {
         allocatedCredits: 0,
         reversedCredits: 0,
         sequence: 1,
-        migrationStatus: "verified",
         migrationWatermarkSequence: 1,
         updatedAt: 1,
       });
@@ -863,7 +862,7 @@ describe("Stripe Checkout control plane", () => {
       org_role: "org:admin",
     } as { subject: string; org_id: string; org_role: string });
     await expect(owner.query(api.billing.getBillingState, {})).rejects.toThrow(
-      "Payment finance migration is not verified",
+      "Payment accounting fields are incomplete",
     );
   });
 

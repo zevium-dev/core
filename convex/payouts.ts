@@ -35,10 +35,6 @@ import {
   releasePublisherEarning,
 } from "./lib/publisherLedger";
 import { stripeClient } from "./billing";
-import {
-  assertFinanceMigrationAllowsRuntime,
-  FINANCE_MIGRATION_KEY,
-} from "./lib/financeMigrationGate";
 
 export type ConnectProfileStatus =
   "not_started" | "incomplete" | "restricted" | "enabled";
@@ -666,7 +662,6 @@ function connectOnboardingClient(stripe: Stripe): ConnectOnboardingClient {
 export const getConnectProfileForActiveOrg = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const organization = await getOrgByClerkId(ctx, args.clerkOrgId);
 
     if (organization === null)
@@ -1253,7 +1248,6 @@ export const setConnectedAccount = internalMutation({
     expectedLivemode: v.boolean(),
   },
   handler: async (ctx, args): Promise<string> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const existing = await ctx.db
       .query("organizationPayments")
       .withIndex("by_organization", (q) =>
@@ -1315,7 +1309,6 @@ export const projectConnectedAccount = internalMutation({
     requirements: v.array(v.string()),
   },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const profile = await ctx.db
       .query("organizationPayments")
       .withIndex("by_connected_account", (q) =>
@@ -1797,7 +1790,6 @@ export const refreshOnboarding = action({
 export const releaseMatureEarnings = internalMutation({
   args: { publisherOrganizationId: v.id("organizations") },
   handler: async (ctx, args): Promise<{ released: number }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const now = Date.now();
     const pending = await ctx.db
       .query("publisherEarnings")
@@ -1824,7 +1816,6 @@ export const releaseMatureEarnings = internalMutation({
 export const releaseMatureEarningsGlobal = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ released: number }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const now = Date.now();
     const pending = await ctx.db
       .query("publisherEarnings")
@@ -1854,7 +1845,6 @@ export const preparePublisherTransfer = internalMutation({
     expectedLivemode: v.boolean(),
   },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!/^[0-9a-f]{64}$/.test(args.correlationNonce)) {
       throw new Error(
         "Transfer correlation nonce must contain 256 random bits",
@@ -2079,7 +2069,6 @@ export const preparePublisherTransfer = internalMutation({
 export const getPublisherTransfer = internalMutation({
   args: { transferId: v.id("publisherTransfers") },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
     return transfer;
@@ -2089,7 +2078,6 @@ export const getPublisherTransfer = internalMutation({
 export const getPublisherTransferReconciliation = internalMutation({
   args: { transferId: v.id("publisherTransfers") },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
     const dispatch = await ctx.db
@@ -2165,7 +2153,6 @@ async function requireTransferDispatchIntegrity(
 export const claimPublisherTransferDispatch = internalMutation({
   args: { transferId: v.id("publisherTransfers") },
   handler: async (ctx, args) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
     const dispatch = await ctx.db
@@ -2299,35 +2286,6 @@ export const blockPublisherTransferDispatch = internalMutation({
       failureReason: reason,
       updatedAt: Date.now(),
     });
-  },
-});
-
-/** Fence check must happen before admin action mutates Stripe metadata. */
-export const getLegacyPublisherTransferForRepair = internalMutation({
-  args: { transferId: v.id("publisherTransfers") },
-  handler: async (ctx, args) => {
-    const job = await ctx.db
-      .query("financialMigrationJobs")
-      .withIndex("by_migration_key", (q) =>
-        q.eq("migrationKey", FINANCE_MIGRATION_KEY),
-      )
-      .unique();
-    if (job === null || job.status === "verified") {
-      throw new Error("Legacy transfer repair requires active migration fence");
-    }
-    const transfer = await ctx.db.get(args.transferId);
-    if (
-      transfer === null ||
-      transfer.correlationState !== "provider_repair_required" ||
-      transfer.metadataRepairVersion !== 1 ||
-      transfer.providerCreateMetadataShape === undefined ||
-      transfer.correlationNonce === undefined ||
-      transfer.correlationHmac === undefined ||
-      transfer.platformAccountId === undefined
-    ) {
-      throw new Error("Legacy transfer does not require provider repair");
-    }
-    return transfer;
   },
 });
 
@@ -2609,7 +2567,6 @@ export const projectStripeTransfer = internalMutation({
     failureReason: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     let transfer = await ctx.db
       .query("publisherTransfers")
       .withIndex("by_stripe_transfer", (q) =>
@@ -2784,270 +2741,6 @@ export const recordDefinitivePublisherTransferFailure = internalMutation({
   },
 });
 
-/**
- * Provider-proof bridge used only while finance migration is fenced. It may
- * attest metadata already observed at Stripe, but cannot invent or move money.
- */
-export const verifyLegacyStripeTransferMetadataRepair = internalMutation({
-  args: {
-    transferId: v.id("publisherTransfers"),
-    stripeTransferId: v.string(),
-    amount: v.number(),
-    amountReversed: v.number(),
-    currency: v.string(),
-    destination: v.string(),
-    platformAccountId: v.string(),
-    correlationNonce: v.string(),
-    correlationHmac: v.string(),
-    metadataRepairVersion: v.number(),
-    requestFingerprint: v.string(),
-  },
-  handler: async (ctx, args): Promise<void> => {
-    const job = await ctx.db
-      .query("financialMigrationJobs")
-      .withIndex("by_migration_key", (q) =>
-        q.eq("migrationKey", FINANCE_MIGRATION_KEY),
-      )
-      .unique();
-    if (job === null || job.status === "verified") {
-      throw new Error("Legacy transfer repair requires active migration fence");
-    }
-    const transfer = await ctx.db.get(args.transferId);
-    if (
-      transfer === null ||
-      transfer.correlationState !== "provider_repair_required" ||
-      transfer.providerCreateMetadataShape === undefined
-    ) {
-      throw new Error("Legacy transfer does not require provider repair");
-    }
-    if (
-      transfer.correlationNonce === undefined ||
-      transfer.correlationHmac === undefined ||
-      transfer.platformAccountId === undefined ||
-      !Number.isSafeInteger(args.amount) ||
-      !Number.isSafeInteger(args.amountReversed) ||
-      args.amount !== transfer.amount ||
-      args.amountReversed < 0 ||
-      args.amountReversed > args.amount ||
-      args.currency.toLowerCase() !== transfer.currency.toLowerCase() ||
-      args.destination !== transfer.stripeConnectedAccountId ||
-      args.platformAccountId !== transfer.platformAccountId ||
-      args.correlationNonce !== transfer.correlationNonce ||
-      args.correlationHmac !== transfer.correlationHmac ||
-      args.metadataRepairVersion !== 2 ||
-      (transfer.stripeTransferId !== undefined &&
-        transfer.stripeTransferId !== args.stripeTransferId) ||
-      !(await verifyTransferCorrelation(
-        transferCorrelationSecret(),
-        {
-          publisherTransferId: transfer._id,
-          nonce: transfer.correlationNonce,
-          platformAccountId: transfer.platformAccountId,
-          destination: transfer.stripeConnectedAccountId,
-          currency: transfer.currency,
-          amount: transfer.amount,
-        },
-        args.correlationHmac,
-      ))
-    ) {
-      throw new Error("Legacy Stripe transfer provider proof is invalid");
-    }
-    const requestFingerprint = await transferRequestFingerprint({
-      publisherTransferId: transfer._id,
-      publisherOrganizationId: transfer.publisherOrganizationId,
-      destination: transfer.stripeConnectedAccountId,
-      amount: transfer.amount,
-      currency: transfer.currency,
-      idempotencyKey: transfer.idempotencyKey,
-      correlationNonce: transfer.correlationNonce,
-      correlationHmac: transfer.correlationHmac,
-      platformAccountId: transfer.platformAccountId,
-    });
-    if (args.requestFingerprint !== requestFingerprint) {
-      throw new Error("Legacy Stripe transfer fingerprint is invalid");
-    }
-    if (transfer.reversedAmount === undefined) {
-      throw new Error("Migrated transfer reversal snapshot is missing");
-    }
-    const balance = await ctx.db
-      .query("publisherBalances")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", transfer.publisherOrganizationId),
-      )
-      .unique();
-    if (balance === null) {
-      throw new Error("Legacy transfer publisher balance is missing");
-    }
-    const entries = await ctx.db
-      .query("publisherSettlementEntries")
-      .withIndex("by_transfer_sequence", (q) =>
-        q.eq("transferId", transfer._id),
-      )
-      .order("asc")
-      .take(101);
-    if (entries.length > 100) {
-      throw new Error("Legacy transfer exceeds bounded ledger source cap");
-    }
-    const allocations = entries.filter(
-      (entry) => entry.kind === "transfer_allocation",
-    );
-    const successes = entries.filter(
-      (entry) => entry.kind === "transfer_succeeded",
-    );
-    const reversals = entries.filter(
-      (entry) => entry.kind === "transfer_reversal",
-    );
-    if (
-      allocations.length !== 1 ||
-      allocations[0]!.publisherBalanceId !== balance._id ||
-      allocations[0]!.publisherOrganizationId !==
-        transfer.publisherOrganizationId ||
-      allocations[0]!.availableDeltaAtoms !== -transfer.amountAtoms ||
-      allocations[0]!.allocatedDeltaAtoms !== transfer.amountAtoms ||
-      allocations[0]!.paidDeltaAtoms !== 0 ||
-      successes.length > 1 ||
-      successes.some(
-        (entry) =>
-          entry.publisherBalanceId !== balance._id ||
-          entry.publisherOrganizationId !== transfer.publisherOrganizationId ||
-          entry.availableDeltaAtoms !== 0 ||
-          entry.allocatedDeltaAtoms !== -transfer.amountAtoms ||
-          entry.paidDeltaAtoms !== transfer.amountAtoms,
-      ) ||
-      reversals.some(
-        (entry) =>
-          entry.publisherBalanceId !== balance._id ||
-          entry.publisherOrganizationId !== transfer.publisherOrganizationId ||
-          entry.availableDeltaAtoms !== -entry.paidDeltaAtoms ||
-          entry.allocatedDeltaAtoms !== 0 ||
-          entry.paidDeltaAtoms >= 0,
-      )
-    ) {
-      throw new Error("Legacy transfer ledger provenance is invalid");
-    }
-    const ledgerReversedAtoms = reversals.reduce(
-      (sum, entry) => sum - entry.paidDeltaAtoms,
-      0,
-    );
-    const providerReversedAtoms =
-      args.amountReversed * ACCOUNTING_ATOMS_PER_USD_CENT;
-    if (
-      !Number.isSafeInteger(ledgerReversedAtoms) ||
-      providerReversedAtoms < ledgerReversedAtoms ||
-      providerReversedAtoms > transfer.amountAtoms
-    ) {
-      throw new Error(
-        "Stripe reversal snapshot conflicts with migrated transfer ledger",
-      );
-    }
-
-    let currentBalance = balance;
-    let writes = 1;
-    if (successes.length === 0) {
-      const succeeded = await appendPublisherSettlementEntry(ctx, {
-        balance: currentBalance,
-        kind: "transfer_succeeded",
-        availableDeltaAtoms: 0,
-        allocatedDeltaAtoms: -transfer.amountAtoms,
-        paidDeltaAtoms: transfer.amountAtoms,
-        refId: `publisher:transfer:${transfer._id}:succeeded`,
-        transferId: transfer._id,
-        migrationJobId: job._id,
-      });
-      currentBalance = succeeded.balance;
-      writes += 2;
-    }
-    if (transfer.status === "failed") {
-      currentBalance = await adjustPublisherBalanceAggregates(
-        ctx,
-        currentBalance,
-        { failedAtoms: -transfer.amountAtoms },
-        job._id,
-      );
-      writes += 1;
-    }
-    const reversalDeltaAtoms = providerReversedAtoms - ledgerReversedAtoms;
-    if (reversalDeltaAtoms > 0) {
-      const reversed = await appendPublisherSettlementEntry(ctx, {
-        balance: currentBalance,
-        kind: "transfer_reversal",
-        availableDeltaAtoms: reversalDeltaAtoms,
-        allocatedDeltaAtoms: 0,
-        paidDeltaAtoms: -reversalDeltaAtoms,
-        refId: `publisher:transfer:${transfer._id}:reversed:${args.amountReversed}`,
-        transferId: transfer._id,
-        migrationJobId: job._id,
-      });
-      currentBalance = reversed.balance;
-      writes += 2;
-    }
-    await ctx.db.patch(transfer._id, {
-      stripeTransferId: args.stripeTransferId,
-      reversedAmount: args.amountReversed,
-      status:
-        args.amountReversed === transfer.amount ? "reversed" : "succeeded",
-      failureReason: undefined,
-      correlationState: "provider_verified",
-      providerMetadataVerifiedAt: Date.now(),
-      metadataRepairVersion: 2,
-      requestFingerprint,
-      updatedAt: Date.now(),
-    });
-    const firstAttemptAt = transfer.attemptedAt ?? transfer.createdAt;
-    const existingDispatch = await ctx.db
-      .query("publisherTransferDispatches")
-      .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
-      .unique();
-    const dispatchPayload = {
-      publisherOrganizationId: transfer.publisherOrganizationId,
-      stripeConnectedAccountId: transfer.stripeConnectedAccountId,
-      idempotencyKey: transfer.idempotencyKey,
-      requestFingerprint,
-      state: "provider_verified" as const,
-      attemptCount: Math.max(existingDispatch?.attemptCount ?? 0, 1),
-      firstAttemptAt,
-      lastAttemptAt: existingDispatch?.lastAttemptAt ?? firstAttemptAt,
-      safeRetryUntil: firstAttemptAt + STRIPE_TRANSFER_SAFE_RETRY_MS,
-      leaseToken: undefined,
-      leaseExpiresAt: undefined,
-      stripeTransferId: args.stripeTransferId,
-      reconciliationReason: undefined,
-      reconciliationPasses: 2,
-      updatedAt: Date.now(),
-    };
-    if (existingDispatch === null) {
-      await ctx.db.insert("publisherTransferDispatches", {
-        transferId: transfer._id,
-        ...dispatchPayload,
-        createdAt: Date.now(),
-      });
-    } else {
-      await ctx.db.patch(existingDispatch._id, dispatchPayload);
-    }
-    await ctx.db.insert("financialMigrationAudits", {
-      migrationJobId: job._id,
-      phase: "transfers",
-      scopeRef: transfer._id,
-      result: "checkpoint",
-      facts: JSON.stringify({
-        providerMetadata: "verified",
-        stripeTransferId: args.stripeTransferId,
-        providerReversedAmount: args.amountReversed,
-        appendedSuccess: successes.length === 0,
-        appendedReversalAtoms: reversalDeltaAtoms,
-      }),
-      createdAt: Date.now(),
-    });
-    await ctx.db.patch(job._id, {
-      rowsWritten: job.rowsWritten + writes + 1,
-      // Provider truth may append publisher money after final verification
-      // already visited that balance. Force independent conservation replay.
-      verificationState: undefined,
-      updatedAt: Date.now(),
-    });
-  },
-});
-
 export const projectConnectedPayout = internalMutation({
   args: {
     stripeConnectedAccountId: v.string(),
@@ -3064,7 +2757,6 @@ export const projectConnectedPayout = internalMutation({
     arrivalDate: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<{ owned: boolean }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const profile = await ctx.db
       .query("organizationPayments")
       .withIndex("by_connected_account", (q) =>
@@ -3101,11 +2793,6 @@ export type StripeTransferClient = {
   create: Stripe["transfers"]["create"];
   retrieve: Stripe["transfers"]["retrieve"];
   list: Stripe["transfers"]["list"];
-};
-
-export type StripeTransferRepairClient = StripeTransferClient & {
-  update: Stripe["transfers"]["update"];
-  listCandidates?: (destination: string) => Promise<Stripe.Transfer[]>;
 };
 
 function transferDestination(transfer: Stripe.Transfer): string {
@@ -3294,132 +2981,6 @@ export async function reconcileStripeTransferProvider(
     };
   }
   return { kind: "exact", snapshot, pages };
-}
-
-function assertLegacyTransferSnapshot(
-  local: Doc<"publisherTransfers">,
-  snapshot: Stripe.Transfer,
-): void {
-  if (
-    snapshot.amount !== local.amount ||
-    snapshot.currency.toLowerCase() !== local.currency.toLowerCase() ||
-    transferDestination(snapshot) !== local.stripeConnectedAccountId ||
-    snapshot.metadata.publisherTransferId !== local._id
-  ) {
-    throw new Error(
-      "Stripe legacy transfer snapshot does not match allocation",
-    );
-  }
-}
-
-/**
- * Provider repair never creates money. It retrieves a persisted provider id or
- * requires one stable exact match from two complete bounded listing passes,
- * then updates metadata. Local HMAC is not proof until final retrieval agrees.
- */
-export async function repairAndRetrieveStripeTransferMetadata(
-  stripe: StripeTransferRepairClient,
-  transfer: Doc<"publisherTransfers">,
-): Promise<Stripe.Transfer> {
-  if (
-    transfer.correlationState !== "provider_repair_required" ||
-    transfer.providerCreateMetadataShape === undefined ||
-    transfer.correlationNonce === undefined ||
-    transfer.correlationHmac === undefined ||
-    transfer.platformAccountId === undefined
-  ) {
-    throw new Error("Transfer does not require provider metadata repair");
-  }
-  let snapshot: Stripe.Transfer;
-  if (transfer.stripeTransferId === undefined) {
-    const passIds: string[][] = [];
-    for (let pass = 0; pass < 2; pass += 1) {
-      const listed = await listTransferWindow(stripe, {
-        destination: transfer.stripeConnectedAccountId,
-        firstAttemptAt: transfer.attemptedAt ?? transfer.createdAt,
-        observedThrough: Date.now(),
-      });
-      if (listed.truncated) {
-        throw new Error(
-          "Legacy Stripe transfer listing requires provider reconciliation",
-        );
-      }
-      const matches = listed.rows
-        .filter(
-          (row) =>
-            row.metadata.publisherTransferId === transfer._id &&
-            row.amount === transfer.amount &&
-            row.currency.toLowerCase() === transfer.currency.toLowerCase() &&
-            transferDestination(row) === transfer.stripeConnectedAccountId,
-        )
-        .map((row) => row.id)
-        .sort();
-      passIds.push([...new Set(matches)]);
-    }
-    if (
-      JSON.stringify(passIds[0]) !== JSON.stringify(passIds[1]) ||
-      passIds[0]?.length !== 1
-    ) {
-      throw new Error(
-        "Legacy Stripe transfer requires explicit provider reconciliation",
-      );
-    }
-    snapshot = await stripe.retrieve(passIds[0]![0]!);
-  } else {
-    snapshot = await stripe.retrieve(transfer.stripeTransferId);
-  }
-  assertLegacyTransferSnapshot(transfer, snapshot);
-
-  const requestFingerprint = await transferRequestFingerprint({
-    publisherTransferId: transfer._id,
-    publisherOrganizationId: transfer.publisherOrganizationId,
-    destination: transfer.stripeConnectedAccountId,
-    amount: transfer.amount,
-    currency: transfer.currency,
-    idempotencyKey: transfer.idempotencyKey,
-    correlationNonce: transfer.correlationNonce,
-    correlationHmac: transfer.correlationHmac,
-    platformAccountId: transfer.platformAccountId,
-  });
-  const expected = {
-    publisherTransferId: String(transfer._id),
-    correlationNonce: transfer.correlationNonce,
-    correlationHmac: transfer.correlationHmac,
-    platformAccountId: transfer.platformAccountId,
-    metadataRepairVersion: "2",
-    requestFingerprint,
-  };
-  const conflicts = Object.entries(expected).some(
-    ([key, value]) =>
-      snapshot.metadata[key] !== undefined && snapshot.metadata[key] !== value,
-  );
-  if (conflicts) {
-    throw new Error(
-      "Stripe transfer contains conflicting correlation metadata",
-    );
-  }
-  const complete = Object.entries(expected).every(
-    ([key, value]) => snapshot.metadata[key] === value,
-  );
-  if (!complete) {
-    await stripe.update(
-      snapshot.id,
-      { metadata: expected },
-      {
-        idempotencyKey: `publisher-transfer-metadata-repair:v2:${snapshot.id}`,
-      },
-    );
-    snapshot = await stripe.retrieve(snapshot.id);
-  }
-  assertLegacyTransferSnapshot(transfer, snapshot);
-  if (
-    Object.entries(expected).some(
-      ([key, value]) => snapshot.metadata[key] !== value,
-    )
-  ) {
-    throw new Error("Stripe transfer metadata repair was not observed");
-  }
-  return snapshot;
 }
 
 export async function createAndRetrieveStripeTransfer(
@@ -3686,7 +3247,6 @@ export const initiatePublisherTransfer = action({
 export const getPayoutState = query({
   args: {},
   handler: async (ctx) => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined)
       throw new Error("Active organization required");
@@ -3717,7 +3277,7 @@ export const getPayoutState = query({
       .unique();
     if (publisherBalance === null) {
       if (earnings.length > 0) {
-        throw new Error("Publisher finance migration is not verified");
+        throw new Error("Publisher balance accounting fields are invalid");
       }
     } else {
       assertPublisherBalanceReady(publisherBalance);
@@ -3730,7 +3290,7 @@ export const getPayoutState = query({
       .order("desc")
       .take(100);
     if (publisherBalance === null && transfers.length > 0) {
-      throw new Error("Publisher finance migration is not verified");
+      throw new Error("Publisher balance accounting fields are invalid");
     }
     for (const transfer of transfers) {
       const dispatch = await ctx.db

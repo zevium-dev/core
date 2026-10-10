@@ -32,9 +32,9 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 - `/admin` (overview): `platformStats` — org count, projects total + draft/published, calls this month (`usageEvents` `by_at` from UTC month start, capped `USAGE_STATS_CAP = 50_000`); `recentUsage` feed + summed recent credits.
 - `/admin/orgs`: `listOrgs` paginated (handle, name, slug, wallet balance).
 - `/admin/projects`: `listProjects` with status/visibility filters; `setProjectVisibility` forces private/public, notifies owning org and fires `project.visibility_changed` webhook.
-- `/admin/payouts`: `listPublisherTransfers`, `retryPublisherTransfer`, `reconcilePublisherTransfer`, `repairLegacyPublisherTransfer`, finance reconciliation cases (`listFinanceReconciliationCases`, `getFinanceReconciliationCase`, `resolvePublisherTransferReconciliation`, `resolveConnectAccountReconciliation`) — details in [earnings-payouts](earnings-payouts.md).
+- `/admin/payouts`: `listPublisherTransfers`, `retryPublisherTransfer`, `reconcilePublisherTransfer`, finance reconciliation cases (`listFinanceReconciliationCases`, `getFinanceReconciliationCase`, `resolvePublisherTransferReconciliation`, `resolveConnectAccountReconciliation`) — details in [earnings-payouts](earnings-payouts.md).
 - `/admin/reviews`: review moderation, hide/restore requires a recorded reason — details in [reviews](reviews.md).
-- Operator migrations behind `requireAdmin`: `migrateRegistryRollout`, `getRegistryRollout`, `securityRolloutPreflight`, `migrateSecurityRollout` — runbooks in [upstream-credentials](upstream-credentials.md) and [registry v2](../architecture/registry-v2.md).
+- Migration/rollout and legacy transfer repair operators were deleted for fresh deployments (#354). Runtime payout reconciliation and retry operators remain.
 
 ### Runbook
 

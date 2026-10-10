@@ -18,7 +18,6 @@ import { isOrganizationPublicSurfaceAllowed } from "./lib/publicSurface";
 import { isValidSlug } from "./lib/validate";
 import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
 import { availablePublicHandle } from "./lib/publicRoutes";
-import { initializeUntouchedWalletFunding } from "./lib/funding";
 
 function trustedOrganizationSlug(raw: string | undefined): string {
   const slug = raw?.trim().toLowerCase();
@@ -48,8 +47,6 @@ async function requireAvailableOrganizationSlug(
   }
 }
 
-import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
-
 async function ensureWallet(
   ctx: MutationCtx,
   organizationId: Id<"organizations">,
@@ -59,7 +56,6 @@ async function ensureWallet(
     .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
     .unique();
   if (existing !== null) {
-    await initializeUntouchedWalletFunding(ctx, existing);
     return existing._id;
   }
   const organization = await ctx.db.get(organizationId);
@@ -80,7 +76,6 @@ async function ensureWallet(
     allocatedCredits: 0,
     reversedCredits: 0,
     sequence: 0,
-    migrationStatus: "verified",
     migrationWatermarkSequence: 0,
     updatedAt: Date.now(),
   });
@@ -183,7 +178,6 @@ export const upsertFromClerk = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"organizations"> | null> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const slug = trustedOrganizationSlug(args.slug);
     const existing = await ctx.db
       .query("organizations")
@@ -431,15 +425,6 @@ async function assertArchivable(
   ctx: MutationCtx,
   organizationId: Id<"organizations">,
 ): Promise<void> {
-  const migration = await ctx.db
-    .query("financialMigrationJobs")
-    .withIndex("by_migration_key", (q) =>
-      q.eq("migrationKey", "finance-v2-universal-funding-v2"),
-    )
-    .unique();
-  if (migration !== null && migration.status !== "verified") {
-    throw new Error("Organization archive blocked by finance migration");
-  }
   for (const status of ["pending", "disputed"] as const) {
     const payment = await ctx.db
       .query("payments")
@@ -526,7 +511,6 @@ async function assertArchivable(
 export const archiveFromClerk = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<void> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const now = Date.now();
     const tombstone = await ctx.db
       .query("organizationTombstones")
@@ -629,7 +613,6 @@ export const ensureOrganization = mutation({
     clerkOrgId: v.string(),
   },
   handler: async (ctx, args): Promise<Doc<"organizations">> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");

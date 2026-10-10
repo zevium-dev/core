@@ -26,6 +26,8 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 ### Implementation notes
 
+- **Fresh deployment (#354)**: removed legacy secret migration pages and security-rollout generation writes. Secret reveal, rotation/grace, encrypted storage, and delivery leases remain.
+
 - **Publisher webhook egress**: delivery-time validation is authoritative. Node HTTPS resolves every hop, rejects any non-public address in the complete DNS answer, and pins the TLS socket to one validated address while retaining the URL hostname for SNI, certificate verification, and `Host`. Same-origin redirects resolve and pin again; cross-origin redirects are rejected before forwarding signed payload. Connect/header/body/overall deadlines and bounded response draining prevent slow or oversized receivers from consuming unbounded action resources.
 - **Publisher webhooks**: HMAC-SHA256 signed (`x-zevium-signature` header, hex digest over the raw body), delivered with up to 3 attempts and backoff of 60s then 300s between retries before marking a delivery failed
 

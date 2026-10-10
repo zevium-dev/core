@@ -208,7 +208,6 @@ describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
         allocatedCredits: 0,
         reversedCredits: 0,
         sequence: 1,
-        migrationStatus: "verified",
         migrationWatermarkSequence: 1,
         updatedAt: 1,
       });

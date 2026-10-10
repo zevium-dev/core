@@ -1,6 +1,5 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { assertFinanceMigrationAllowsRuntime } from "./financeMigrationGate";
 
 /** One debit stays bounded; batches additionally budget total projected writes. */
 export const MAX_FUNDING_LOTS_PER_DEBIT = 24;
@@ -19,91 +18,6 @@ export class FundingInvariantError extends Error {
 }
 
 type FundingSourceKind = Doc<"walletFundingLots">["sourceKind"];
-
-/** Bootstrap only a provably untouched legacy wallet. Historical scopes still
- * require the full reconciled migration; zero balance alone is insufficient. */
-export async function initializeUntouchedWalletFunding(
-  ctx: MutationCtx,
-  wallet: Doc<"wallets">,
-): Promise<void> {
-  await assertFinanceMigrationAllowsRuntime(ctx);
-  if (
-    wallet.balance !== 0 ||
-    wallet.sequence !== 0 ||
-    (wallet.debtCredits ?? 0) !== 0 ||
-    (await getFundingState(ctx, wallet._id)) !== null
-  )
-    return;
-
-  const organization = await ctx.db.get(wallet.organizationId);
-  if (organization === null || organization.archivedAt !== undefined) return;
-  const tombstone = await ctx.db
-    .query("organizationTombstones")
-    .withIndex("by_clerk_org", (q) =>
-      q.eq("clerkOrgId", organization.clerkOrgId),
-    )
-    .unique();
-  if (tombstone !== null) return;
-
-  const [entry, lot, allocation, reversal, component, payment, legacyLot] =
-    await Promise.all([
-      ctx.db
-        .query("walletEntries")
-        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
-        .first(),
-      ctx.db
-        .query("walletFundingLots")
-        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
-        .first(),
-      ctx.db
-        .query("walletFundingAllocations")
-        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
-        .first(),
-      ctx.db
-        .query("walletFundingReversals")
-        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
-        .first(),
-      ctx.db
-        .query("walletFundingLotComponents")
-        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
-        .first(),
-      ctx.db
-        .query("payments")
-        .withIndex("by_organization", (q) =>
-          q.eq("organizationId", wallet.organizationId),
-        )
-        .first(),
-      ctx.db
-        .query("paymentFundingLots")
-        .withIndex("by_org_state_created", (q) =>
-          q.eq("organizationId", wallet.organizationId),
-        )
-        .first(),
-    ]);
-  if (
-    entry ||
-    lot ||
-    allocation ||
-    reversal ||
-    component ||
-    payment ||
-    legacyLot
-  )
-    return;
-
-  await ctx.db.insert("walletFundingStates", {
-    walletId: wallet._id,
-    organizationId: wallet.organizationId,
-    nonrefundableAvailableCredits: 0,
-    refundableAvailableCredits: 0,
-    allocatedCredits: 0,
-    reversedCredits: 0,
-    sequence: 0,
-    migrationStatus: "verified",
-    migrationWatermarkSequence: 0,
-    updatedAt: Date.now(),
-  });
-}
 
 export type FundingProvenanceSlice = {
   sourceRef: string;
@@ -214,15 +128,12 @@ export async function requireVerifiedWalletFunding(
   ctx: MutationCtx | QueryCtx,
   wallet: Doc<"wallets">,
 ): Promise<Doc<"walletFundingStates">> {
-  await assertFinanceMigrationAllowsRuntime(ctx);
   const state = await getFundingState(ctx, wallet._id);
   const availableCredits =
     (state?.nonrefundableAvailableCredits ?? -1) +
     (state?.refundableAvailableCredits ?? -1);
   if (
     state === null ||
-    state.migrationStatus !== "verified" ||
-    state.migrationJobId !== undefined ||
     state.migrationWatermarkSequence !== wallet.sequence ||
     !Number.isSafeInteger(availableCredits) ||
     availableCredits !== wallet.balance ||
@@ -238,49 +149,6 @@ export async function requireVerifiedWalletFunding(
       true,
     );
   }
-  return state;
-}
-
-function assertFundingStateReady(
-  state: Doc<"walletFundingStates">,
-  migrationJobId?: Id<"financialMigrationJobs">,
-): void {
-  if (migrationJobId !== undefined) {
-    if (
-      state.migrationStatus !== "building" ||
-      state.migrationJobId !== migrationJobId
-    ) {
-      throw new FundingInvariantError(
-        "Wallet funding migration fence changed",
-        true,
-      );
-    }
-    return;
-  }
-  if (state.migrationStatus !== "verified") {
-    throw new FundingInvariantError(
-      "Wallet funding migration has not completed",
-      true,
-    );
-  }
-}
-
-async function requireFundingState(
-  ctx: MutationCtx,
-  wallet: Doc<"wallets">,
-  migrationJobId?: Id<"financialMigrationJobs">,
-): Promise<Doc<"walletFundingStates">> {
-  if (migrationJobId === undefined) {
-    return await requireVerifiedWalletFunding(ctx, wallet);
-  }
-  const state = await getFundingState(ctx, wallet._id);
-  if (state === null) {
-    throw new FundingInvariantError(
-      "Wallet funding migration has not completed",
-      true,
-    );
-  }
-  assertFundingStateReady(state, migrationJobId);
   return state;
 }
 
@@ -378,17 +246,12 @@ export async function compactFundingInventory(
   ctx: MutationCtx,
   args: {
     wallet: Doc<"wallets">;
-    migrationJobId?: Id<"financialMigrationJobs">;
     paymentId?: Id<"payments">;
     refundable: boolean;
     now: number;
   },
 ): Promise<boolean> {
-  const state = await requireFundingState(
-    ctx,
-    args.wallet,
-    args.migrationJobId,
-  );
+  const state = await requireVerifiedWalletFunding(ctx, args.wallet);
   const lots = await ctx.db
     .query("walletFundingLots")
     .withIndex("by_org_priority_state_created", (q) =>
@@ -406,8 +269,7 @@ export async function compactFundingInventory(
 
 /**
  * Create exactly one root lot for a positive immutable ledger source. New
- * wallets become verified atomically with their first source. Historical
- * wallets require the explicit fenced migration.
+ * wallets record their funding checkpoint atomically with their first source.
  */
 export async function recordPositiveFundingSource(
   ctx: MutationCtx,
@@ -419,12 +281,8 @@ export async function recordPositiveFundingSource(
     refundable: boolean;
     paymentId?: Id<"payments">;
     createdAt: number;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<Doc<"walletFundingLots">> {
-  if (args.migrationJobId === undefined) {
-    await assertFinanceMigrationAllowsRuntime(ctx);
-  }
   if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
     throw new FundingInvariantError(
       "Funding source must be a positive integer",
@@ -463,15 +321,15 @@ export async function recordPositiveFundingSource(
               ],
       });
     }
-    await requireFundingState(ctx, args.wallet, args.migrationJobId);
+    await requireVerifiedWalletFunding(ctx, args.wallet);
     return existing;
   }
 
   let state = await getFundingState(ctx, args.wallet._id);
   if (state === null) {
-    if (args.migrationJobId !== undefined || args.wallet.sequence !== 1) {
+    if (args.wallet.sequence !== 1) {
       throw new FundingInvariantError(
-        "Historical wallet requires ordered funding migration",
+        "Wallet funding checkpoint is missing",
         true,
       );
     }
@@ -483,7 +341,6 @@ export async function recordPositiveFundingSource(
       allocatedCredits: 0,
       reversedCredits: 0,
       sequence: 0,
-      migrationStatus: "verified",
       migrationWatermarkSequence: 0,
       updatedAt: args.createdAt,
     });
@@ -492,16 +349,14 @@ export async function recordPositiveFundingSource(
       throw new FundingInvariantError("Funding state creation failed", true);
     }
   }
-  assertFundingStateReady(state, args.migrationJobId);
+
   if (
-    args.migrationJobId === undefined &&
-    (state.migrationJobId !== undefined ||
-      args.wallet.sequence <= 0 ||
-      state.migrationWatermarkSequence !== args.wallet.sequence - 1 ||
-      state.nonrefundableAvailableCredits + state.refundableAvailableCredits !==
-        args.wallet.balance - args.amount ||
-      args.wallet.balance - args.amount < 0 ||
-      (args.wallet.debtCredits ?? 0) !== 0)
+    args.wallet.sequence <= 0 ||
+    state.migrationWatermarkSequence !== args.wallet.sequence - 1 ||
+    state.nonrefundableAvailableCredits + state.refundableAvailableCredits !==
+      args.wallet.balance - args.amount ||
+    args.wallet.balance - args.amount < 0 ||
+    (args.wallet.debtCredits ?? 0) !== 0
   ) {
     throw new FundingInvariantError(
       "Positive funding source cannot repair an unverified checkpoint",
@@ -539,10 +394,7 @@ export async function recordPositiveFundingSource(
     refundableAvailableCredits:
       state.refundableAvailableCredits + (args.refundable ? args.amount : 0),
     sequence: state.sequence + 1,
-    migrationWatermarkSequence:
-      args.migrationJobId === undefined
-        ? args.wallet.sequence
-        : state.migrationWatermarkSequence,
+    migrationWatermarkSequence: args.wallet.sequence,
     updatedAt: args.createdAt,
   };
   await ctx.db.patch(state._id, {
@@ -554,7 +406,6 @@ export async function recordPositiveFundingSource(
   });
   await compactFundingInventory(ctx, {
     wallet: args.wallet,
-    migrationJobId: args.migrationJobId,
     paymentId: args.paymentId,
     refundable: args.refundable,
     now: args.createdAt,
@@ -595,14 +446,9 @@ export async function preflightPaymentReversal(
     wallet: Doc<"wallets">;
     paymentId: Id<"payments">;
     requestedCredits: number;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<PaymentReversalPlan> {
-  const state = await requireFundingState(
-    ctx,
-    args.wallet,
-    args.migrationJobId,
-  );
+  const state = await requireVerifiedWalletFunding(ctx, args.wallet);
   const lots = await ctx.db
     .query("walletFundingLots")
     .withIndex("by_org_priority_state_created", (q) =>
@@ -658,10 +504,8 @@ export async function commitPaymentReversal(
     plan: PaymentReversalPlan;
     walletSequence: number;
     now: number;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<FundingProvenanceSlice[]> {
-  assertFundingStateReady(args.plan.state, args.migrationJobId);
   let refundableDelta = 0;
   const reversedProvenance: FundingProvenanceSlice[] = [];
   for (const item of args.plan.items) {
@@ -701,10 +545,7 @@ export async function commitPaymentReversal(
       args.plan.state.refundableAvailableCredits - refundableDelta,
     reversedCredits: args.plan.state.reversedCredits + args.plan.walletCredits,
     sequence: args.plan.state.sequence + 1,
-    migrationWatermarkSequence:
-      args.migrationJobId === undefined
-        ? args.walletSequence
-        : args.plan.state.migrationWatermarkSequence,
+    migrationWatermarkSequence: args.walletSequence,
     updatedAt: args.now,
   });
   return reversedProvenance;
@@ -735,7 +576,6 @@ export async function preflightFundingAllocation(
   args: {
     wallet: Doc<"wallets">;
     credits: number;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<FundingPlan> {
   if (!Number.isSafeInteger(args.credits) || args.credits < 0) {
@@ -744,11 +584,7 @@ export async function preflightFundingAllocation(
       false,
     );
   }
-  const state = await requireFundingState(
-    ctx,
-    args.wallet,
-    args.migrationJobId,
-  );
+  const state = await requireVerifiedWalletFunding(ctx, args.wallet);
   if (args.credits === 0) {
     return {
       state,
@@ -857,10 +693,8 @@ export async function commitFundingAllocation(
     earningId?: Id<"publisherEarnings">;
     publisherOrganizationId?: Id<"organizations">;
     createdAt: number;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<void> {
-  assertFundingStateReady(args.plan.state, args.migrationJobId);
   const existing = await ctx.db
     .query("walletFundingAllocations")
     .withIndex("by_wallet_entry", (q) =>
@@ -959,10 +793,7 @@ export async function commitFundingAllocation(
       args.plan.state.refundableAvailableCredits - args.plan.refundableCredits,
     allocatedCredits: args.plan.state.allocatedCredits + committed,
     sequence: args.plan.state.sequence + 1,
-    migrationWatermarkSequence:
-      args.migrationJobId === undefined
-        ? args.walletSequence
-        : args.plan.state.migrationWatermarkSequence,
+    migrationWatermarkSequence: args.walletSequence,
     updatedAt: args.createdAt,
   });
 }

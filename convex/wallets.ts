@@ -24,14 +24,12 @@ import {
 import {
   commitFundingAllocation,
   FundingInvariantError,
-  initializeUntouchedWalletFunding,
   MAX_FUNDING_WRITE_UNITS_PER_BATCH,
   preflightFundingAllocation,
   recordPositiveFundingSource,
   requireVerifiedWalletFunding,
   type FundingPlan,
 } from "./lib/funding";
-import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 import { settlementIdentityFingerprint } from "./lib/settlementIdentity";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
@@ -73,7 +71,6 @@ export async function getOrCreateWallet(
     .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
     .unique();
   if (existing !== null) {
-    await initializeUntouchedWalletFunding(ctx, existing);
     return existing;
   }
   const organization = await ctx.db.get(organizationId);
@@ -95,7 +92,6 @@ export async function getOrCreateWallet(
     allocatedCredits: 0,
     reversedCredits: 0,
     sequence: 0,
-    migrationStatus: "verified",
     migrationWatermarkSequence: 0,
     updatedAt: Date.now(),
   });
@@ -229,7 +225,6 @@ export const grantPaymentCredits = internalMutation({
     ctx,
     args,
   ): Promise<WalletCheckpoint & { applied: boolean }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
       throw new Error("Payment grant must be a positive integer");
     }
@@ -242,13 +237,11 @@ export const grantPaymentCredits = internalMutation({
     if (
       payment === null ||
       payment.organizationId !== organization._id ||
-      payment.financeMigrationStatus !== "verified" ||
-      payment.financeMigrationJobId !== undefined ||
       payment.walletReversedCredits === undefined ||
       payment.publisherClawbackTargetCredits === undefined ||
       payment.reversalSequence === undefined
     ) {
-      throw new Error("Payment finance migration is not verified");
+      throw new Error("Payment accounting fields are incomplete");
     }
     if (
       payment.stripePaymentIntentId === undefined ||
@@ -280,7 +273,7 @@ export const grantPaymentCredits = internalMutation({
       });
     } else {
       // Duplicate grant must bind to an already-built exact source. This fails
-      // closed for legacy rows until fenced migration finishes.
+      // closed when stored accounting fields are incomplete.
       await recordPositiveFundingSource(ctx, {
         wallet: result.wallet,
         sourceKind: "stripe_payment",
@@ -309,7 +302,6 @@ export const applyAdminAdjustment = internalMutation({
     ctx,
     args,
   ): Promise<WalletCheckpoint & { applied: boolean }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!Number.isSafeInteger(args.amount) || args.amount === 0) {
       throw new Error("Admin adjustment must be a non-zero integer");
     }
@@ -444,7 +436,6 @@ export type GatewayWalletView = {
 export const getGatewayWallet = internalQuery({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<GatewayWalletView> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const organization = await getOrganizationByClerkId(ctx, args.clerkOrgId);
     const archived =
       organization?.archivedAt !== undefined ||
@@ -470,7 +461,6 @@ export const getGatewayWallet = internalQuery({
         wallet === null || archived
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
           : checkpoint(args.clerkOrgId, wallet),
-
       keySettings: settings.map((setting) => ({
         ...toGatewayRow(setting),
         disabled: archived || setting.disabled,
@@ -663,7 +653,6 @@ async function walletView(
   ctx: QueryCtx | MutationCtx,
   organizationId: Id<"organizations">,
 ): Promise<WalletView> {
-  await assertFinanceMigrationAllowsRuntime(ctx);
   const wallet = await getWalletForOrg(ctx, organizationId);
   if (wallet === null) {
     return { balance: 0, sequence: 0, entries: [] };
@@ -943,7 +932,6 @@ export const recordUsage = internalMutation({
     ctx,
     args,
   ): Promise<{ results: SettlementResult[]; wallet: WalletCheckpoint }> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (args.events.length === 0) {
       throw new Error("At least one settlement is required");
     }
@@ -989,7 +977,7 @@ export const recordUsage = internalMutation({
         results: args.events.map((event) => ({
           refId: event.settleRefId,
           status: "rejected" as const,
-          reason: "wallet finance migration is not verified",
+          reason: "wallet funding checkpoint is not verified",
           retryable: true,
         })),
         wallet: checkpoint(clerkOrgId, wallet),
@@ -1143,7 +1131,6 @@ export const recordUsage = internalMutation({
         results.push({
           refId: event.settleRefId,
           status: "rejected",
-
           reason: "reservation checkpoint is stale after ledger debit",
           retryable: false,
         });
@@ -1212,7 +1199,6 @@ export const recordUsage = internalMutation({
         status: event.status,
         latencyMs: event.latencyMs,
         keyId: event.keyId,
-
         keyFamilyId: event.keyFamilyId,
         monthlyCapCredits: event.monthlyCapCredits,
         budgetPeriod: event.budgetPeriod,

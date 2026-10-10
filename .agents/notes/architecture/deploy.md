@@ -67,39 +67,16 @@ without changing their preconfigured routes. Tags use
 `production-<git-sha>-<run-id>-<attempt>` so retry uploads have unique tags,
 and gateway `ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
 
-## Initial Registry Migration
+## Fresh Convex deployments
 
-Legacy published projects require the existing initial rollout to reserve
-their permanent public routes. A rendered empty catalogue is not proof that
-this migration completed. After backing up Convex and configuring the
-transport keyring, an authenticated production operator runs:
+Finance, registry, and security migration/rollout operators were deleted in
+#354. This schema targets fresh deployments; disposable development data may
+need resetting when removed fields no longer validate. No migration audit or
+rollout command gates runtime writes.
 
-```bash
-pnpm exec convex run registryRollout:startOrResume '{}' --prod
-pnpm exec convex run registryRollout:get '{}' --prod
-```
-
-If credential rows still contain legacy plaintext, first run the bounded
-security audit through internal `securityRollout:startAuditOperator` and
-`securityRollout:auditPageOperator`. Require a completed zero-corruption audit
-for the current generation, then pass its `auditId` to the internal
-`upstreamCredentials:migrateLegacyPlaintext` and
-`webhooks:migrateLegacyPlaintext` pages. Run a fresh complete audit afterward;
-require zero old, plaintext, corrupt, and broken rows. These operator entry
-points require deployment credentials and grant no user an application role.
-Keep the backup and both encryption key versions for rollback compatibility.
-Legacy API keys whose one-time secret hash cannot be recovered are disabled
-by the existing registry rollout and need replacement; never invent a hash.
-
-The scheduled bounded job must report `status: "complete"` with matching
-production and verification counts/digests. If interrupted, resume the same
-job; do not remove its source receipts. Verify an existing published project
-through public catalogue/detail reads and compare its immutable spec and
-original wallet/earning records against the backup.
-
-This restores the current Convex-backed public read path. The registry-v2
-edge receiver remains pending as documented in [registry-v2.md](registry-v2.md); rollout completion
-does not claim delivery acknowledgements or change the gateway to that path.
+Normal publish/enqueue operations reserve permanent public routes. The
+registry outbox and key identity proof remain until #353; the registry-v2
+receiver is still pending as documented in [registry-v2.md](registry-v2.md).
 
 ## Failure Handling
 

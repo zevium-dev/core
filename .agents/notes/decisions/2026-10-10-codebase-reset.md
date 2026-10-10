@@ -17,3 +17,5 @@ Order: tooling prune and Convex deletion first (cheap, unblock everything), then
 ## Already done (2026-10-10)
 
 Publisher-copy claims filter and compliance doc deleted ([repo cleanup](2026-10-10-repo-cleanup.md)); all tests green after.
+
+- 2026-10-10 — #354: deleted Convex finance migration/recovery, registry/security rollout, legacy settlement/transfer repair, associated tests, and runtime migration gates; removed 14 dead tables and unused indexes. Preserved money-core invariants, registry identity/reservation seams, and audit-listed tables with verified live references.
