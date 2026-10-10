@@ -14,12 +14,12 @@ import { cn } from "#/lib/utils";
 type MagneticProps = {
   children: ReactNode;
   className?: string;
-  /** Pull strength 0–1; agents/notes/design/design-system.md caps ≤0.3. */
+  /** Pull strength 0–1; .agents/notes/design/design-system.md caps ≤0.3. */
   strength?: number;
 };
 
 /**
- * Landing-only magnetic cursor-pull (agents/notes/design/design-system.md delight budget).
+ * Landing-only magnetic cursor-pull (.agents/notes/design/design-system.md delight budget).
  * Off for reduced-motion + coarse pointers (touch).
  */
 export function Magnetic({

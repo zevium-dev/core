@@ -35,17 +35,17 @@ Good:
 
 Agent-first, per-call API marketplace. Publishers list APIs via OpenAPI specs; consumers (human devs + AI agents) prepay org-scoped credits and pay per call through a metered edge gateway. Platform takes 5%, publishers keep 95%.
 
-**Agent memory: [`agents/notes/`](agents/notes/README.md) — read its README before building anything.** All development docs live there, structured feature-wise: product direction, every feature (Product / Flow / Tech / Decisions / Open questions), architecture, design system, decision log, research, session logs, findings. Agents write it, agents read it; it is committed memory.
+**Agent memory: [`.agents/notes/`](.agents/notes/README.md) — read its README before building anything.** All development docs live there, structured feature-wise: product direction, every feature (Product / Flow / Tech / Decisions / Open questions), architecture, design system, decision log, research, session logs, findings. Agents write it, agents read it; it is committed memory.
 
-| Start here                                                        | Owns                                                               |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [agents/notes/README.md](agents/notes/README.md)                  | Map of all notes + how to read/write them                          |
-| [product/overview.md](agents/notes/product/overview.md)           | What Zevium is, personas, revenue model, positioning, golden paths |
-| [product/roadmap.md](agents/notes/product/roadmap.md)             | Priority (P0/P1/P2), launch blockers, backlog                      |
-| [features/](agents/notes/features/)                               | One file per feature — the place to look before touching its code  |
-| [architecture/overview.md](agents/notes/architecture/overview.md) | Cross-cutting architecture + vendor decisions                      |
-| [design/design-system.md](agents/notes/design/design-system.md)   | Visual + motion language                                           |
-| [decisions/](agents/notes/decisions/README.md)                    | Dated decision log                                                 |
+| Start here                                                         | Owns                                                               |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| [.agents/notes/README.md](.agents/notes/README.md)                 | Map of all notes + how to read/write them                          |
+| [product/overview.md](.agents/notes/product/overview.md)           | What Zevium is, personas, revenue model, positioning, golden paths |
+| [product/roadmap.md](.agents/notes/product/roadmap.md)             | Priority (P0/P1/P2), launch blockers, backlog                      |
+| [features/](.agents/notes/features/)                               | One file per feature — the place to look before touching its code  |
+| [architecture/overview.md](.agents/notes/architecture/overview.md) | Cross-cutting architecture + vendor decisions                      |
+| [design/design-system.md](.agents/notes/design/design-system.md)   | Visual + motion language                                           |
+| [decisions/](.agents/notes/decisions/README.md)                    | Dated decision log                                                 |
 
 Doc discipline: in every feature note, product language in Product/Flow, implementation only in Tech.
 
@@ -55,9 +55,9 @@ The greenfield rebuild is done. Legacy implementation (tRPC + Drizzle/Turso + Be
 
 When a note and the code disagree, the code wins — fix the note in the same change.
 
-## Target stack (summary; [architecture/overview.md](agents/notes/architecture/overview.md) is authoritative)
+## Target stack (summary; [architecture/overview.md](.agents/notes/architecture/overview.md) is authoritative)
 
-- **Frontend**: React 19, TanStack Start + Router, shadcn/ui (stock, latest, `new-york`/neutral), Motion — motion tokens + rules in [design-system.md](agents/notes/design/design-system.md)
+- **Frontend**: React 19, TanStack Start + Router, shadcn/ui (stock, latest, `new-york`/neutral), Motion — motion tokens + rules in [design-system.md](.agents/notes/design/design-system.md)
 - **Control plane**: Convex — DB, functions, realtime sync, vector search, cron. Credit ledger source of truth
 - **Data plane**: Cloudflare Worker — `/gateway` metered proxy + agent-tool endpoint. Durable Object per org wallet (edge credit gate). Isolated on purpose; nothing else imports from it
 - **Auth**: Clerk — sessions, orgs (prebuilt UI), machine API keys. Convex integration via JWT
@@ -71,7 +71,7 @@ apps/web/        # TanStack Start app (all screens)
 apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
-agents/notes/    # committed agent memory (docs, decisions, research, sessions)
+.agents/notes/    # committed agent memory (docs, decisions, research, sessions)
 ```
 
 ## Rules
@@ -79,7 +79,7 @@ agents/notes/    # committed agent memory (docs, decisions, research, sessions)
 ### Product rules (never violate)
 
 - Zero wallet balance **blocks** the call. Never surprise-overage
-- No unmetered execution paths — every gateway/agent call is authenticated (API key, or — planned, [decided 2026-10-10](agents/notes/decisions/2026-10-10-dual-rail-keys-and-x402.md) — a verified x402 wallet session) and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
+- No unmetered execution paths — every gateway/agent call is authenticated (API key, or — planned, [decided 2026-10-10](.agents/notes/decisions/2026-10-10-dual-rail-keys-and-x402.md) — a verified x402 wallet session) and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
 - The OpenAPI spec is the source of truth: upstream URL, endpoints, pricing (`x-zevium-cost`), free tier (`x-zevium-free-tier`). No parallel pricing tables
 - Published spec versions are immutable
 
@@ -92,7 +92,7 @@ agents/notes/    # committed agent memory (docs, decisions, research, sessions)
 - Prefer deleting dead code over commenting it out
 - Idempotent mutations where feasible; return canonical post-write state
 
-### UI rules ([design-system.md](agents/notes/design/design-system.md) is authoritative; highlights)
+### UI rules ([design-system.md](.agents/notes/design/design-system.md) is authoritative; highlights)
 
 - Stock shadcn components, unmodified. Semantic color tokens only (`bg-primary`, `text-muted-foreground`) — raw Tailwind colors (`bg-red-500`, `text-gray-900`) are a review reject
 - All animation values from `src/lib/motion.ts` / CSS vars (`--ease`, `--dur-*`). Hardcoded `duration-300 ease-in-out` is a review reject
@@ -124,16 +124,16 @@ pnpm format         # prettier + eslint fix
 ```
 
 - Dev server expected on http://localhost:3000
-- Seed, env files, local services, Clerk/agent-browser quirks: [dev-environment.md](agents/notes/architecture/dev-environment.md)
+- Seed, env files, local services, Clerk/agent-browser quirks: [dev-environment.md](.agents/notes/architecture/dev-environment.md)
 
 ## Keeping agent memory current
 
-Mandatory, every task. Full conventions: [agents/notes/README.md](agents/notes/README.md).
+Mandatory, every task. Full conventions: [.agents/notes/README.md](.agents/notes/README.md).
 
-- Before touching a feature, read its `agents/notes/features/<name>.md`
+- Before touching a feature, read its `.agents/notes/features/<name>.md`
 - Changed behavior → update that note (Status, Updated date, Tech, Code pointers) in the same change
-- User makes a decision → new `agents/notes/decisions/YYYY-MM-DD-slug.md` + index row + feature Decisions bullet
-- Substantial discussion or research with the user → `agents/notes/sessions/YYYY-MM-DD-slug.md`; research output → `agents/notes/research/`
+- User makes a decision → new `.agents/notes/decisions/YYYY-MM-DD-slug.md` + index row + feature Decisions bullet
+- Substantial discussion or research with the user → `.agents/notes/sessions/YYYY-MM-DD-slug.md`; research output → `.agents/notes/research/`
 - New work decided → GitHub issue in `zevium-dev/core` (`P0`/`P1`/`P2` + `area:*` labels), `#N` in roadmap + feature note
 - Never put secrets, tokens, or raw customer data in notes
 

@@ -47,12 +47,12 @@ apps/gateway/    # CF Worker: metered proxy, wallet DO, mock, MCP, discovery
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # OpenAPI parsing, x-zevium-* pricing, validation
 e2e/             # agent-browser end-to-end suite (auth, publisher, consumer)
-agents/notes/    # committed agent memory: product, features, architecture, decisions, research
+.agents/notes/    # committed agent memory: product, features, architecture, decisions, research
 ```
 
-Docs: everything lives in [agents/notes/](agents/notes/README.md) — start with the
-[product overview](agents/notes/product/overview.md), [roadmap](agents/notes/product/roadmap.md),
-[features](agents/notes/features/), and [architecture](agents/notes/architecture/overview.md).
+Docs: everything lives in [.agents/notes/](.agents/notes/README.md) — start with the
+[product overview](.agents/notes/product/overview.md), [roadmap](.agents/notes/product/roadmap.md),
+[features](.agents/notes/features/), and [architecture](.agents/notes/architecture/overview.md).
 
 Security policy: [SECURITY.md](SECURITY.md)
 

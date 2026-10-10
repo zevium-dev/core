@@ -8,7 +8,7 @@
 1. Compare Zevium with treg.to; "take Zevium to the next level", be bold.
 2. Research more competitors beyond treg.
 3. Settle fee side, LLM endpoints, keyless x402.
-4. Set anonymous wallet expiry; move all docs to `agents/notes/` as committed agent memory.
+4. Set anonymous wallet expiry; move all docs to `.agents/notes/` as committed agent memory.
 
 ## Findings (short)
 
@@ -22,7 +22,7 @@
 - Fee from publisher side; consumer pays face value. → [decision](../decisions/2026-10-10-platform-fee-publisher-side.md)
 - Both rails: keys for enterprise, keyless x402 for individuals/agents. → [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 - Anonymous wallet balance expires in one year, revisitable. → [decision](../decisions/2026-10-10-anonymous-wallet-expiry.md)
-- Docs restructure into `agents/notes/`. → [decision](../decisions/2026-10-10-agents-notes-docs.md)
+- Docs restructure into `.agents/notes/`. → [decision](../decisions/2026-10-10-agents-notes-docs.md)
 - Delete junk tooling/files; keep `t3.json`. → [decision](../decisions/2026-10-10-repo-cleanup.md)
 
 ### Later the same session

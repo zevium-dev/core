@@ -342,7 +342,7 @@ function NotificationRow({
     className?: string;
     "aria-hidden"?: boolean | "true" | "false";
   }>;
-  // Cap stagger so long lists don't string out past 400ms (agents/notes/design/design-system.md).
+  // Cap stagger so long lists don't string out past 400ms (.agents/notes/design/design-system.md).
   const delay = Math.min(index * STAGGER, DUR.page - DUR.fast);
   const skip = reduce || vtState.active || index >= 8;
 

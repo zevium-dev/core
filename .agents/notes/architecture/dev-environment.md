@@ -28,7 +28,7 @@ pnpm for everything. Never npm/yarn.
 - **Local web secrets**: `REGISTRY_KEY_PROJECTION_HMAC_SECRET` belongs in `apps/web/.dev.vars`. Match it to the Convex development deployment. Include Clerk bindings in this file too: Wrangler uses `.dev.vars` instead of dotenv files when it exists. Keep public Vite configuration in `.env.local`. Local `.dev.vars` files are ignored at every workspace depth.
 - Gateway: `npx wrangler dev --port 8787` in `apps/gateway`; env in `apps/gateway/.dev.vars` (gitignored): `CLERK_SECRET_KEY`, `CONVEX_URL`, `GATEWAY_INTERNAL_SECRET=dev-internal-secret-1`.
 - Full variable contract: `.env.example`.
-- E2E API key lives in `.project/e2e-key.env` (gitignored). Never commit secrets into `agents/notes/`.
+- E2E API key lives in `.project/e2e-key.env` (gitignored). Never commit secrets into `.agents/notes/`.
 
 ## Local services
 

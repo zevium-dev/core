@@ -26,7 +26,7 @@ export const DOCS_SECTIONS = [
 
 /**
  * Prose tuned to semantic tokens so dark+light both read first-class.
- * No raw Tailwind colors leak (agents/notes/design/design-system.md); @tailwindcss/typography modifiers
+ * No raw Tailwind colors leak (.agents/notes/design/design-system.md); @tailwindcss/typography modifiers
  * remap every typography var onto the shadcn token scale.
  */
 const PROSE_CLASS = cn(

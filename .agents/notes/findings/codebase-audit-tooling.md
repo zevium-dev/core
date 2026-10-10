@@ -118,13 +118,13 @@ The journeys (`00`–`03`) total ~440 LOC. The machinery around them is about 20
 
 ## 6. Stale references to deleted paths
 
-- `agents/notes/architecture/deploy.md` "Pipeline notes" still says gateway and web "converge with the exact compliance scan at the smoke job". The scan and the `exact-compliance-surface` job are deleted.
-- `agents/notes/architecture/dev-environment.md`: "E2E API key lives in `.project/e2e-key.env`". `.project/` is now an empty dir.
+- `.agents/notes/architecture/deploy.md` "Pipeline notes" still says gateway and web "converge with the exact compliance scan at the smoke job". The scan and the `exact-compliance-surface` job are deleted.
+- `.agents/notes/architecture/dev-environment.md`: "E2E API key lives in `.project/e2e-key.env`". `.project/` is now an empty dir.
 - `scripts/quality/source-inventory.mjs:46,619`: `.project`, `apps/deploy-broker`.
 - `.gitignore:54`: `/.project/e2e-key.env`. Also `/apps/deploy-broker/*`.
 - `e2e/lib.sh:24`: comment about a nonexistent "workflow supply-chain audit".
 - `.agents/skills/pr-description-generator/scripts/generate_pr_description.mjs:105`: `drizzle/`.
-- No remaining references to `PRODUCT.md`, `TECH.md`, `FLOW.md`, `DESIGN.md`, `compliance-claims`, `COPYING`, or `paseo` in code, CI or config (only in `agents/notes/history`, which is fine).
+- No remaining references to `PRODUCT.md`, `TECH.md`, `FLOW.md`, `DESIGN.md`, `compliance-claims`, `COPYING`, or `paseo` in code, CI or config (only in `.agents/notes/history`, which is fine).
 
 ## 7. Real bugs (ranked)
 

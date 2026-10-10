@@ -51,7 +51,7 @@ apps/web/        # TanStack Start app (all screens)
 apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
-agents/notes/    # agent memory: product, features, architecture, decisions, research
+.agents/notes/    # agent memory: product, features, architecture, decisions, research
 ```
 
 Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`). Local setup: [dev-environment](dev-environment.md). Web app internals: [web-app](web-app.md).
