@@ -52,7 +52,9 @@ export function DangerZone({ project }: { project: Doc<"projects"> }) {
   return (
     <Card className="border-destructive/40">
       <CardHeader>
-        <CardTitle className="text-destructive">Danger zone</CardTitle>
+        <CardTitle role="heading" aria-level={2} className="text-destructive">
+          Danger zone
+        </CardTitle>
         <CardDescription>
           {project.status === "draft"
             ? "Remove this draft project from your workspace. Its API URL cannot be reused."

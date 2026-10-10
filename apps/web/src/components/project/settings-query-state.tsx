@@ -17,7 +17,9 @@ export function SettingsCardSkeleton({
   return (
     <Card aria-label={`${title} loading`}>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          {title}
+        </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -40,7 +42,9 @@ export function SettingsQueryErrorCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          {title}
+        </CardTitle>
         <CardDescription>{message}</CardDescription>
       </CardHeader>
       <CardContent>

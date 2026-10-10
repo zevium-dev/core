@@ -1,7 +1,7 @@
 # Landing & docs
 
-> Status: partial · Updated: 2026-10-10
-> Code: `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl)
+> Status: partial (docs main landmark #386 fixed) · Updated: 2026-10-10
+> Code: `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl)
 > Related: [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [mock-sandbox](mock-sandbox.md), [gateway](gateway.md), [accounts-orgs](accounts-orgs.md), [webhooks-notifications](webhooks-notifications.md), [design system](../design/design-system.md), [roadmap](../product/roadmap.md)
 
 Public front door and integration help. Landing page pitches the agent-first marketplace and teases live catalogue listings; `/docs` is an in-app guide section (quickstart, consuming, publishing, agents). Integrate covers copy-paste snippets for leaving the app; generated SDKs are P2.
@@ -33,6 +33,8 @@ Public front door and integration help. Landing page pitches the agent-first mar
 - Existing **#326** also covers client-specific config friction: Claude Code rejected the generic URL/headers JSON; adding `"type": "http"` connected to local MCP. Production `/llms.txt` remains 404 (**#322**).
 
 Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
+- **Docs landmark (#386)**: `DocsPage` wraps its article in the page’s single `<main id="main-content" tabIndex={-1}>`; the public-header skip link targets this focusable landmark. Shared layout applies to desktop and mobile. Component tests cover all four guides.
 
 ### Code map (observed)
 

@@ -1,7 +1,7 @@
 # Publishing specs
 
-> Status: #399 fixed; built (editor/settings correctness #362 fixed; P2 rollback not built) · Updated: 2026-10-10
-> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`
+> Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -64,6 +64,7 @@ Sign up → Create org → Create project
 Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 - **Inline correction (#399)**: pricing inputs keep invalid text local and show an accessible validation message through blur. Only safe non-negative integers within the shared cost/free-tier limits enter the draft. Invalid input therefore cannot disable its own control or sibling controls; correction clears the field error.
+- **Settings headings (#397)**: project page supplies the level 1 heading; each settings `CardTitle` receives `role="heading" aria-level={2}` at its usage site, including loading, error, and admin-access notices. Webhook delivery history is level 3 under Webhooks. Stock shadcn components remain unchanged. Component tests cover complete heading order and query/access states.
 
 From [architecture overview](../architecture/overview.md):
 
