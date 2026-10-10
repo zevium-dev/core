@@ -267,6 +267,14 @@ describe("anonymous x402 wallet rail", () => {
     expect(
       (await stub.getState()).inFlight.later?.machineFunding?.lots,
     ).toEqual([{ sourceRef: second.sourceRef, credits: 10_000 }]);
+    expect(
+      await stub.reserve("oversize-token", 6000, {
+        keyId: walletId,
+        clerkOrgId: walletId,
+        nowMs: first.expiresAt,
+        tokenPricing: true,
+      }),
+    ).toMatchObject({ status: "rejected", reason: "weight_exceeds_budget" });
     await stub.settle("hold");
     await stub.refund("later");
     expect(
@@ -287,6 +295,94 @@ describe("anonymous x402 wallet rail", () => {
           .toArray()
           .map((row) => JSON.parse(row.data).remaining),
       ).toEqual([4000, 10_000]);
+    });
+  });
+  it("settles actual token costs from reserved lots and records free/refunded usage", async () => {
+    const f = setup(0);
+    const first = await call({
+      "PAYMENT-SIGNATURE": paymentHeader({ id: "one" }),
+    });
+    expect(first.status).toBe(200);
+    const token = first.headers.get("x-zevium-wallet-session")!;
+    const walletId = machineWalletId(network, payer);
+    const stub = env.WALLET.get(env.WALLET.idFromName(walletId));
+    expect(
+      (await stub.getState()).pendingSettlements[0]?.usage?.machineFunding
+        ?.lots,
+    ).toEqual([]);
+    const published = (await f.specs.getPublishedSpec("acme", "api"))!;
+    const spec = JSON.parse(published.spec);
+    spec.paths["/echo"] = {
+      post: {
+        "x-zevium-cost": {
+          per: "token",
+          input: 1000000,
+          output: 1000000,
+          maxPerCall: 1000,
+        },
+      },
+    };
+    f.specs.set("acme", "api", {
+      ...published,
+      spec: JSON.stringify(spec),
+      specVersionId: "token-version",
+    });
+    async function tokenCall() {
+      const ctx = createExecutionContext();
+      const response = await worker.fetch(
+        new Request(url, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ messages: [], max_tokens: 100 }),
+        }),
+        env as unknown as Env,
+        ctx,
+      );
+      await response.text();
+      await waitOnExecutionContext(ctx);
+      return response;
+    }
+    f.upstream.mockImplementation(async () =>
+      Response.json({ usage: { prompt_tokens: 10, completion_tokens: 20 } }),
+    );
+    const paid = await tokenCall();
+    expect(paid.status).toBe(200);
+    expect(Number(paid.headers.get("x-zevium-hold"))).toBeGreaterThan(30);
+    let state = await stub.getState();
+    expect(state.balance).toBe(9970);
+    expect(state.available).toBe(9970);
+    expect(state.pendingSettlements.at(-1)).toMatchObject({
+      cost: 30,
+      usage: {
+        machineFunding: { lots: [{ sourceRef: "x402:pi_one", credits: 30 }] },
+      },
+    });
+    f.upstream.mockImplementation(async () => Response.json({ choices: [] }));
+    expect((await tokenCall()).status).toBe(200);
+    state = await stub.getState();
+    expect(state.available).toBe(9970);
+    expect(state.pendingSettlements.at(-1)).toMatchObject({
+      cost: 0,
+      usage: { machineFunding: { lots: [] } },
+    });
+    f.upstream.mockImplementation(
+      async () => new Response("upstream failed", { status: 500 }),
+    );
+    expect((await tokenCall()).status).toBe(500);
+    state = await stub.getState();
+    expect(state.available).toBe(9970);
+    expect(state.pendingSettlements.at(-1)).toMatchObject({
+      cost: 0,
+      usage: { machineFunding: { lots: [] } },
+    });
+    await runInDurableObject(stub, async (_instance, storage) => {
+      const row = storage.storage.sql
+        .exec<{ data: string }>("SELECT data FROM machine_lots")
+        .one();
+      expect(JSON.parse(row.data).remaining).toBe(9970);
     });
   });
   it("uses a wallet session for MCP call_api and returns a payable offer without credentials", async () => {

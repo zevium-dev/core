@@ -956,8 +956,16 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       }
 
       const available = this.#available(now);
-      if (opts.tokenPricing && this.#balance > 0) {
-        const budget = Math.min(Math.floor(this.#balance / 2), 100_000);
+      const spendableBalance = this.#machineLots.length
+        ? this.#machineLots.reduce(
+            (sum, lot) =>
+              sum +
+              (lot.createdAt <= now && lot.expiresAt > now ? lot.remaining : 0),
+            0,
+          )
+        : this.#balance;
+      if (opts.tokenPricing && spendableBalance > 0) {
+        const budget = Math.min(Math.floor(spendableBalance / 2), 100_000);
         if (cost > budget)
           return { status: "rejected", reason: "weight_exceeds_budget" };
         if (sumInFlight(this.#inFlight) + cost > budget)
@@ -1043,6 +1051,17 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
           reason: "Settlement cost must be within the reservation",
         };
       }
+      // Actual token cost consumes only the oldest slices of the original hold.
+      // Released slices keep their original expiry; settlement cannot renew them.
+      let remainingCost = cost;
+      const machineFunding = entry.machineFunding && {
+        admittedAt: entry.machineFunding.admittedAt,
+        lots: entry.machineFunding.lots.flatMap((slice) => {
+          const credits = Math.min(remainingCost, slice.credits);
+          remainingCost -= credits;
+          return credits > 0 ? [{ ...slice, credits }] : [];
+        }),
+      };
       let authoritativeUsage = usage;
       if (usage !== undefined) {
         if (entry.keyBudget === undefined) {
@@ -1051,9 +1070,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         const budget = entry.keyBudget;
         authoritativeUsage = {
           ...usage,
-          ...(entry.machineFunding
-            ? { machineFunding: entry.machineFunding }
-            : {}),
+          ...(machineFunding ? { machineFunding } : {}),
           keyId: budget.keyId,
           keyFamilyId: budget.keyFamilyId,
           monthlyCapCredits: budget.monthlyCapCredits,
@@ -1064,7 +1081,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         };
       }
 
-      for (const slice of entry.machineFunding?.lots ?? []) {
+      for (const slice of machineFunding?.lots ?? []) {
         const lot = this.#machineLots.find(
           (l) => l.sourceRef === slice.sourceRef,
         );
@@ -1162,7 +1179,15 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
           reservationId,
           cost: 0,
           settledAt: Date.now(),
-          usage,
+          usage: entry.machineFunding
+            ? {
+                ...usage,
+                machineFunding: {
+                  admittedAt: entry.machineFunding.admittedAt,
+                  lots: [],
+                },
+              }
+            : usage,
         });
       }
 
@@ -1366,7 +1391,9 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
         reservationId,
         cost: 0,
         settledAt,
-        usage,
+        usage: this.#machineLots.length
+          ? { ...usage, machineFunding: { admittedAt: settledAt, lots: [] } }
+          : usage,
       });
 
       await this.#persist({

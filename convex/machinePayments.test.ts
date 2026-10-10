@@ -128,6 +128,47 @@ describe("anonymous wallet ledger", () => {
     expect(state.entries).toHaveLength(1);
     expect(state.promotions).toHaveLength(0);
   });
+  it("accepts actual token charges and empty allocations for zero-charge usage", async () => {
+    const { t, usage } = await fixture();
+    const grant = await t.mutation(internal.machinePayments.fund, payment(1));
+    const paid = {
+      ...usage("token", grant.sourceRef, grant.createdAt, 30),
+      pricingDecision: "token_usage" as const,
+      listedCostCredits: 100,
+      budgetReservationCredits: 100,
+    };
+    const free = {
+      ...usage("zero", grant.sourceRef, grant.createdAt, 0),
+      billingOutcome: "free" as const,
+      pricingDecision: "zero_price" as const,
+      machineFunding: { admittedAt: grant.createdAt, lots: [] },
+    };
+    const refunded = {
+      ...free,
+      reservationId: "refund",
+      settleRefId: "settle:refund",
+      billingOutcome: "refunded" as const,
+      status: 500,
+      qualityOutcome: "server_error" as const,
+    };
+    expect(
+      (
+        await t.mutation(internal.wallets.recordUsage, {
+          events: [paid, free, refunded],
+        })
+      ).results,
+    ).toMatchObject([
+      { status: "applied" },
+      { status: "applied" },
+      { status: "applied" },
+    ]);
+    const state = await t.run(async (ctx) => ({
+      wallet: await ctx.db.query("wallets").first(),
+      lot: await ctx.db.query("walletFundingLots").first(),
+    }));
+    expect(state.wallet?.balance).toBe(9970);
+    expect(state.lot?.availableCredits).toBe(9970);
+  });
   it("preserves 95/5 earnings and exact lot attribution across out-of-order delivery and expiry", async () => {
     const { t, usage } = await fixture();
     const now = Date.now();
