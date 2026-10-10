@@ -1,4 +1,8 @@
 import {
+  InternalHttpCatalogueSearch,
+  type CatalogueSearchSource,
+} from "../src/catalogue-search";
+import {
   createExecutionContext,
   env,
   waitOnExecutionContext,
@@ -61,6 +65,7 @@ const LISTING: CatalogueListing = {
   orgName: "Acme Corp",
   publisherHandle: ORG_SLUG,
   publishedAt: 1_700_000_000_000,
+  pricing: { minCost: 2, maxCost: 3, endpointCount: 2, hasFreeTier: true },
 };
 
 class TwoPageCatalogueSource implements CatalogueSource {
@@ -101,6 +106,7 @@ async function installAgentFixtures(opts: {
   credits?: number;
   listings?: CatalogueListing[];
   catalogueSource?: CatalogueSource;
+  searchSource?: CatalogueSearchSource;
   version?: string;
   spec?: string;
 }) {
@@ -130,6 +136,7 @@ async function installAgentFixtures(opts: {
     specSource: specs,
     publicSpecSource: specs,
     catalogueSource: catalogue,
+    searchSource: opts.searchSource,
     fetchImpl:
       opts.fetchImpl ?? (async () => new Response("ok", { status: 200 })),
     idGenerator: () => `req_${crypto.randomUUID()}`,
@@ -481,10 +488,12 @@ describe("MCP /mcp", () => {
     if (!isRecord(first)) return;
     expect(first.slug).toBe(PROJECT_SLUG);
     expect(first.publisherHandle).toBe(ORG_SLUG);
-    expect(Array.isArray(first.endpoints)).toBe(true);
+    expect(first.pricing).toEqual(LISTING.pricing);
+    expect(first).not.toHaveProperty("endpoints");
+    expect(parsed).toMatchObject({ degraded: true, searchMode: "keyword" });
   });
 
-  it("search_apis returns matches from every catalogue page", async () => {
+  it("search_apis bounds blank-query browsing to the first catalogue page", async () => {
     const second = {
       ...LISTING,
       name: "Second API",
@@ -515,8 +524,126 @@ describe("MCP /mcp", () => {
     if (!Array.isArray(matches)) return;
     expect(matches.map((api) => isRecord(api) && api.slug)).toEqual([
       PROJECT_SLUG,
-      "second",
     ]);
+  });
+
+  it.each(["will I need an umbrella tomorrow", "predict rain this weekend"])(
+    "search_apis preserves semantic rank for paraphrase: %s",
+    async (query) => {
+      const { fetchImpl, calls } = makeFetchMock(() =>
+        Response.json({
+          items: [
+            { ...LISTING, score: 0.98 },
+            { ...LISTING, slug: "other", score: 0.7 },
+          ],
+          degraded: false,
+        }),
+      );
+      const fixtures = await installAgentFixtures({
+        clerkOrgId: "org_semantic",
+        searchSource: new InternalHttpCatalogueSearch({
+          siteUrl: "https://control.test",
+          internalSecret: "test-internal",
+          fetchImpl,
+        }),
+      });
+      const specRead = vi.spyOn(fixtures.specs, "getPublishedSpec");
+      const catalogueRead = vi.spyOn(fixtures.catalogue, "listPublic");
+      const result = JSON.parse(
+        toolText(
+          await mcpCall(
+            "tools/call",
+            {
+              name: "search_apis",
+              arguments: { query, orgId: "spoofed", keyId: "spoofed" },
+            },
+            { headers: { Authorization: `Bearer ${KEY_SECRET}` } },
+          ),
+        ),
+      );
+      expect(result).toMatchObject({
+        degraded: false,
+        searchMode: "semantic",
+        publisherData: {
+          matches: [
+            { slug: PROJECT_SLUG, score: 0.98, pricing: LISTING.pricing },
+            { slug: "other", score: 0.7 },
+          ],
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("endpoints");
+      expect(calls[0]?.url).toBe("https://control.test/gateway-search");
+      expect(calls[0]?.headers.get("x-internal-secret")).toBe("test-internal");
+      expect(await calls[0]?.json()).toEqual({
+        query,
+        caller: { orgId: "org_semantic", keyId: KEY_ID },
+      });
+      expect(specRead).not.toHaveBeenCalled();
+      expect(catalogueRead).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["limited", "unavailable", "malformed", "timeout"])(
+    "flags keyword fallback when semantic search is %s",
+    async (failure) => {
+      const { fetchImpl } = makeFetchMock(() => {
+        if (failure === "timeout")
+          throw new DOMException("Timed out", "TimeoutError");
+        if (failure === "unavailable")
+          return new Response("private error", { status: 503 });
+        return Response.json(
+          failure === "limited"
+            ? { items: [], degraded: true }
+            : { wrong: true },
+        );
+      });
+      await installAgentFixtures({
+        clerkOrgId: "org_fallback",
+        searchSource: new InternalHttpCatalogueSearch({
+          siteUrl: "https://control.test",
+          internalSecret: "test-internal",
+          fetchImpl,
+        }),
+      });
+      const result = JSON.parse(
+        toolText(
+          await mcpCall("tools/call", {
+            name: "search_apis",
+            arguments: { query: "weather" },
+          }),
+        ),
+      );
+      expect(result).toMatchObject({
+        degraded: true,
+        searchMode: "keyword",
+        publisherData: { matches: [{ slug: PROJECT_SLUG, score: null }] },
+      });
+      expect(JSON.stringify(result)).not.toContain("private error");
+    },
+  );
+
+  it("rejects invalid keys and invalid queries before semantic search", async () => {
+    const search = vi.fn(async () => ({ items: [], degraded: false }));
+    await installAgentFixtures({
+      clerkOrgId: "org_validation",
+      searchSource: { search },
+    });
+    for (const query of [null, 3, "x".repeat(201)]) {
+      expect(
+        await mcpCall("tools/call", {
+          name: "search_apis",
+          arguments: { query },
+        }),
+      ).toMatchObject({ result: { isError: true } });
+    }
+    expect(
+      await mcpCall(
+        "tools/call",
+        { name: "search_apis", arguments: { query: "weather" } },
+        { headers: { Authorization: "Bearer invalid-key" } },
+      ),
+    ).toMatchObject({ result: { isError: true } });
+    expect(search).not.toHaveBeenCalled();
   });
 
   it("get_api_docs returns endpoints + usage notes", async () => {
@@ -1141,6 +1268,7 @@ describe("MCP /mcp", () => {
       const rpc = await mcpCall("tools/call", {
         name,
         arguments: {
+          query: name === "search_apis" ? "weather" : undefined,
           org: ORG_SLUG,
           project: PROJECT_SLUG,
           method: "POST",

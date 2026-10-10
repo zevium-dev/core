@@ -19,6 +19,7 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  type ActionCtx,
 } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
@@ -51,6 +52,18 @@ const EMBED_DIMENSIONS = 768;
 const QUERY_CACHE_TTL_MS = 24 * 60 * MINUTE;
 const QUERY_EMBED_LEASE_MS = 30_000;
 const searchRateLimiter = new RateLimiter(components.rateLimiter, {
+  gatewayOrgSearch: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
+  gatewayKeySearch: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
   signedInSearch: {
     kind: "token bucket",
     rate: 20,
@@ -81,20 +94,37 @@ type QueryEmbeddingAdmission =
       leaseToken: string;
     };
 
+const gatewayCaller = v.object({ orgId: v.string(), keyId: v.string() });
+type GatewayCaller = { orgId: string; keyId: string };
+
 /** Atomically rate-limit and claim cache misses, including concurrent searches. */
 export const prepareQueryEmbedding = internalMutation({
-  args: { query: v.string() },
+  args: { query: v.string(), gatewayCaller: v.optional(gatewayCaller) },
   handler: async (ctx, args): Promise<QueryEmbeddingAdmission> => {
     const identity = await ctx.auth.getUserIdentity();
     // Convex actions have no trusted client IP/session for anonymous callers.
     // A shared bucket cannot be bypassed by rotating a caller-supplied id.
-    const caller =
-      identity === null
-        ? await searchRateLimiter.limit(ctx, "anonymousSearch")
-        : await searchRateLimiter.limit(ctx, "signedInSearch", {
-            key: identity.tokenIdentifier,
-          });
-    if (!caller.ok) return { status: "limited" };
+    if (args.gatewayCaller !== undefined) {
+      const org = await searchRateLimiter.limit(ctx, "gatewayOrgSearch", {
+        key: args.gatewayCaller.orgId,
+      });
+      if (!org.ok) return { status: "limited" };
+      const key = await searchRateLimiter.limit(ctx, "gatewayKeySearch", {
+        key: JSON.stringify([
+          args.gatewayCaller.orgId,
+          args.gatewayCaller.keyId,
+        ]),
+      });
+      if (!key.ok) return { status: "limited" };
+    } else {
+      const caller =
+        identity === null
+          ? await searchRateLimiter.limit(ctx, "anonymousSearch")
+          : await searchRateLimiter.limit(ctx, "signedInSearch", {
+              key: identity.tokenIdentifier,
+            });
+      if (!caller.ok) return { status: "limited" };
+    }
     const budget = await searchRateLimiter.limit(ctx, "searchBudget");
     if (!budget.ok) return { status: "limited" };
 
@@ -423,7 +453,7 @@ export type SearchListing = PublicListing & {
  *
  * `ids` and `scores` are parallel arrays (same length, same order as the
  * vectorSearch result, which is already relevance-ranked). Output preserves
- * that order after exclusion.
+ * relevance order after exclusion, breaking ties with measured API quality.
  */
 export const fetchSearchListings = internalQuery({
   args: {
@@ -494,9 +524,34 @@ export const fetchSearchListings = internalQuery({
       });
     }
 
-    return out;
+    return out.sort(compareSearchListings);
   },
 });
+
+/** Relevance first; fresh, sufficient gateway measurements break exact ties. */
+export function compareSearchListings(
+  a: SearchListing,
+  b: SearchListing,
+): number {
+  const measured = (item: SearchListing) => {
+    const q = item.quality;
+    return q !== null &&
+      !q.insufficientApiData &&
+      q.freshness.status === "fresh"
+      ? q
+      : null;
+  };
+  const aq = measured(a);
+  const bq = measured(b);
+  return (
+    b.score - a.score ||
+    (bq?.apiSuccessRatePercent ?? -1) - (aq?.apiSuccessRatePercent ?? -1) ||
+    (aq?.apiLatencyP50Ms ?? Number.MAX_VALUE) -
+      (bq?.apiLatencyP50Ms ?? Number.MAX_VALUE) ||
+    a.publisherHandle.localeCompare(b.publisherHandle) ||
+    a.slug.localeCompare(b.slug)
+  );
+}
 
 export type SearchCatalogueResult = {
   items: SearchListing[];
@@ -511,60 +566,74 @@ export type SearchCatalogueResult = {
  * without ever reaching vectorSearch — callers must fall back to substring.
  */
 export const searchCatalogue = action({
+  args: { query: v.string(), limit: v.optional(v.number()) },
+  handler: (ctx, args): Promise<SearchCatalogueResult> =>
+    searchCatalogueForCaller(ctx, args),
+});
+
+/** Only the secret-authenticated gateway HTTP route can supply caller attribution. */
+export const searchCatalogueForGateway = internalAction({
   args: {
     query: v.string(),
     limit: v.optional(v.number()),
+    gatewayCaller: v.optional(gatewayCaller),
   },
-  handler: async (ctx, args): Promise<SearchCatalogueResult> => {
-    const trimmed = args.query.trim().slice(0, 200);
-    if (trimmed.length === 0) {
-      return { items: [], degraded: false };
-    }
+  handler: (ctx, args): Promise<SearchCatalogueResult> =>
+    searchCatalogueForCaller(ctx, args),
+});
 
-    const requestedLimit = args.limit ?? SEARCH_LIMIT_DEFAULT;
-    const limit = Number.isSafeInteger(requestedLimit)
-      ? Math.min(Math.max(requestedLimit, 1), SEARCH_LIMIT_MAX)
-      : SEARCH_LIMIT_DEFAULT;
+async function searchCatalogueForCaller(
+  ctx: ActionCtx,
+  args: { query: string; limit?: number; gatewayCaller?: GatewayCaller },
+): Promise<SearchCatalogueResult> {
+  const trimmed = args.query.trim().slice(0, 200);
+  if (trimmed.length === 0) {
+    return { items: [], degraded: false };
+  }
 
-    const admission = await ctx.runMutation(
-      internal.search.prepareQueryEmbedding,
-      { query: trimmed },
-    );
-    if (admission.status === "limited" || admission.status === "pending") {
-      return { items: [], degraded: true };
-    }
-    let queryEmbedding: number[];
-    if (admission.status === "cached") {
-      queryEmbedding = admission.embedding;
-    } else {
-      try {
-        queryEmbedding = await embedText(trimmed, {
-          taskType: "RETRIEVAL_QUERY",
-        });
-      } catch {
-        await ctx.runMutation(internal.search.finishQueryEmbedding, {
-          id: admission.id,
-          leaseToken: admission.leaseToken,
-        });
-        return { items: [], degraded: true };
-      }
+  const requestedLimit = args.limit ?? SEARCH_LIMIT_DEFAULT;
+  const limit = Number.isSafeInteger(requestedLimit)
+    ? Math.min(Math.max(requestedLimit, 1), SEARCH_LIMIT_MAX)
+    : SEARCH_LIMIT_DEFAULT;
+
+  const admission = await ctx.runMutation(
+    internal.search.prepareQueryEmbedding,
+    { query: trimmed, gatewayCaller: args.gatewayCaller },
+  );
+  if (admission.status === "limited" || admission.status === "pending") {
+    return { items: [], degraded: true };
+  }
+  let queryEmbedding: number[];
+  if (admission.status === "cached") {
+    queryEmbedding = admission.embedding;
+  } else {
+    try {
+      queryEmbedding = await embedText(trimmed, {
+        taskType: "RETRIEVAL_QUERY",
+      });
+    } catch {
       await ctx.runMutation(internal.search.finishQueryEmbedding, {
         id: admission.id,
         leaseToken: admission.leaseToken,
-        embedding: queryEmbedding,
       });
+      return { items: [], degraded: true };
     }
-
-    const results = await ctx.vectorSearch("specEmbeddings", "by_embedding", {
-      vector: queryEmbedding,
-      limit,
+    await ctx.runMutation(internal.search.finishQueryEmbedding, {
+      id: admission.id,
+      leaseToken: admission.leaseToken,
+      embedding: queryEmbedding,
     });
+  }
 
-    const items = await ctx.runQuery(internal.search.fetchSearchListings, {
-      ids: results.map((r) => r._id),
-      scores: results.map((r) => r._score),
-    });
+  const results = await ctx.vectorSearch("specEmbeddings", "by_embedding", {
+    vector: queryEmbedding,
+    limit: SEARCH_LIMIT_MAX,
+  });
 
-    return { items, degraded: false };
-  },
-});
+  const items = await ctx.runQuery(internal.search.fetchSearchListings, {
+    ids: results.map((r) => r._id),
+    scores: results.map((r) => r._score),
+  });
+
+  return { items: items.slice(0, limit), degraded: false };
+}

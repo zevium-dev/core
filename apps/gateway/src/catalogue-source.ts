@@ -16,6 +16,13 @@ export type CatalogueListing = {
   orgName: string;
   publisherHandle: string;
   publishedAt: number | null;
+  score?: number;
+  pricing?: {
+    minCost: number;
+    maxCost: number;
+    endpointCount: number;
+    hasFreeTier: boolean;
+  } | null;
 };
 
 export type CataloguePage = {
@@ -182,6 +189,31 @@ function parseListing(raw: unknown): CatalogueListing | null {
     orgName,
     publisherHandle,
     publishedAt: publishedAt === undefined ? null : publishedAt,
+    score:
+      typeof raw.score === "number" && Number.isFinite(raw.score)
+        ? raw.score
+        : undefined,
+    pricing: parsePricing(raw.pricing),
+  };
+}
+
+function parsePricing(raw: unknown): CatalogueListing["pricing"] {
+  if (!isRecord(raw)) return null;
+  if (
+    typeof raw.minCost !== "number" ||
+    !Number.isFinite(raw.minCost) ||
+    typeof raw.maxCost !== "number" ||
+    !Number.isFinite(raw.maxCost) ||
+    typeof raw.endpointCount !== "number" ||
+    !Number.isSafeInteger(raw.endpointCount) ||
+    typeof raw.hasFreeTier !== "boolean"
+  )
+    return null;
+  return {
+    minCost: raw.minCost,
+    maxCost: raw.maxCost,
+    endpointCount: raw.endpointCount,
+    hasFreeTier: raw.hasFreeTier,
   };
 }
 

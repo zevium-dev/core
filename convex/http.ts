@@ -851,4 +851,61 @@ http.route({
   }),
 });
 
+/** Discovery only: never used on the paid execution path. */
+http.route({
+  path: "/gateway-search",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (!secret || request.headers.get("x-internal-secret") !== secret) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "invalid search" }, 400);
+    }
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("query" in body) ||
+      typeof body.query !== "string" ||
+      body.query.length > 200
+    ) {
+      return json({ error: "invalid search" }, 400);
+    }
+    let gatewayCaller: { orgId: string; keyId: string } | undefined;
+    if ("caller" in body && body.caller !== undefined) {
+      const caller = body.caller;
+      if (
+        typeof caller !== "object" ||
+        caller === null ||
+        !("orgId" in caller) ||
+        typeof caller.orgId !== "string" ||
+        !caller.orgId.trim() ||
+        caller.orgId.length > 256 ||
+        !("keyId" in caller) ||
+        typeof caller.keyId !== "string" ||
+        !caller.keyId.trim() ||
+        caller.keyId.length > 256
+      ) {
+        return json({ error: "invalid caller" }, 400);
+      }
+      gatewayCaller = { orgId: caller.orgId, keyId: caller.keyId };
+    }
+    try {
+      return json(
+        await ctx.runAction(internal.search.searchCatalogueForGateway, {
+          query: body.query,
+          gatewayCaller,
+        }),
+        200,
+      );
+    } catch {
+      return json({ error: "search unavailable" }, 503);
+    }
+  }),
+});
+
 export default http;
