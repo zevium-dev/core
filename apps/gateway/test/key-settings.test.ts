@@ -527,3 +527,48 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
     expect(fetchCount).toBe(1);
   });
 });
+
+describe("per-key request bucket", () => {
+  it("persists across eviction, refills, isolates keys and makes no control-plane calls", async () => {
+    const stub = walletStub("rate-bucket");
+    await seed(stub, {
+      balance: 1000,
+      keySettings: [
+        { keyId: "k1", disabled: false },
+        { keyId: "k2", disabled: false },
+      ],
+    });
+    let networkCalls = 0;
+    __setTestGrantsFetcher(async () => {
+      networkCalls++;
+      throw new Error("network must not run");
+    });
+    const now = Date.now();
+    const burst = await Promise.all(
+      Array.from({ length: 60 }, () =>
+        stub.consumeKeyRateLimit("k1", ORG, now),
+      ),
+    );
+    expect(burst.every((r) => r.status === "allowed")).toBe(true);
+    await expect(stub.consumeKeyRateLimit("k1", ORG, now)).resolves.toEqual({
+      status: "rejected",
+      reason: "key_rate_limited",
+      retryAfterSeconds: 1,
+    });
+    await evictDurableObject(stub);
+    await expect(
+      stub.consumeKeyRateLimit("k1", ORG, now),
+    ).resolves.toMatchObject({ reason: "key_rate_limited" });
+    await expect(stub.consumeKeyRateLimit("k2", ORG, now)).resolves.toEqual({
+      status: "allowed",
+    });
+    await expect(
+      stub.consumeKeyRateLimit("k1", ORG, now + 1000),
+    ).resolves.toEqual({ status: "allowed" });
+    await expect(
+      stub.consumeKeyRateLimit("k1", ORG, now + 1000),
+    ).resolves.toMatchObject({ reason: "key_rate_limited" });
+    expect(networkCalls).toBe(0);
+    __setTestGrantsFetcher(null);
+  });
+});

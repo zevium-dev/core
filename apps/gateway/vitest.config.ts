@@ -11,7 +11,7 @@ export default defineConfig({
         bindings: {
           CLERK_SECRET_KEY: "",
           CONVEX_URL: "",
-          GATEWAY_INTERNAL_SECRET: "",
+          GATEWAY_INTERNAL_SECRET: "test-admission-secret",
         },
       },
     }),

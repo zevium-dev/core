@@ -790,3 +790,46 @@ describe("project retirement lifecycle", () => {
     expect(state.webhook).toBeNull();
   });
 });
+
+describe("gateway admission policy snapshots", () => {
+  it("freezes new consumers at admission while preserving existing consumers", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedWorld(t);
+    const get = (consumerClerkOrgId: string) =>
+      t.query(internal.specs.getPublishedForGatewayInternal, {
+        publisherHandle: "pub-co",
+        projectSlug: "dep-api",
+        consumerClerkOrgId,
+      });
+    expect((await get("org_stranger"))?.admission).toEqual({
+      mode: "open",
+      policyRevision: 1,
+      allowed: true,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        deprecationStartedAt: 20,
+        retirementRevision: 1,
+      });
+    });
+    expect((await get("org_stranger"))?.admission).toEqual({
+      mode: "entitled_only",
+      policyRevision: 2,
+      allowed: false,
+    });
+    expect((await get("org_pub"))?.admission.allowed).toBe(true);
+    await t.run(async (ctx) => {
+      const consumer = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", "org_stranger"))
+        .unique();
+      await ctx.db.insert("projectConsumerEntitlements", {
+        projectId,
+        consumerOrganizationId: consumer!._id,
+        firstUsedAt: 19,
+        createdAt: 21,
+      });
+    });
+    expect((await get("org_stranger"))?.admission.allowed).toBe(true);
+  });
+});

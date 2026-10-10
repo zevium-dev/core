@@ -547,21 +547,28 @@ async function handleCallApi(
     if (response.status === 402 && !receivedUpstreamResponse) {
       return paymentToolError(response);
     }
+    const platformRateLimited =
+      response.status === 429 && !receivedUpstreamResponse;
     // Never forward upstream error bodies, headers, or exception details.
     const message =
       response.status === 402
         ? "A valid API key or wallet session with sufficient credits is required."
         : response.status === 403
           ? "This API call is not permitted. Check your API key and spending limit."
-          : response.status === 404
-            ? "The API or endpoint is unavailable."
-            : "The API call failed. Please try again.";
+          : platformRateLimited
+            ? "Too many requests for this API key. Wait before retrying."
+            : response.status === 404
+              ? "The API or endpoint is unavailable."
+              : "The API call failed. Please try again.";
     return {
       ...textContent(
         JSON.stringify({
           status: response.status,
           requestId,
           cost: 0,
+          ...(platformRateLimited && response.headers.has("retry-after")
+            ? { retryAfterSeconds: Number(response.headers.get("retry-after")) }
+            : {}),
           message,
         }),
       ),

@@ -3,6 +3,7 @@ import {
   env,
   waitOnExecutionContext,
   runInDurableObject,
+  evictDurableObject,
 } from "cloudflare:test";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import worker, {
@@ -25,6 +26,7 @@ import {
 import { issueWalletSession, verifyWalletSession } from "../src/wallet-session";
 import {
   fundingExpiresAt,
+  verifyAdmissionProof,
   machineWalletId,
   type MachineGrant,
 } from "@zevium/shared";
@@ -133,6 +135,82 @@ async function call(headers: HeadersInit = {}, target = url) {
 }
 
 describe("anonymous x402 wallet rail", () => {
+  it("shares a durable rate bucket across payer sessions, isolates payers, and binds admission proofs to wallets", async () => {
+    const f = setup(1);
+    const first = await call({
+      "PAYMENT-SIGNATURE": paymentHeader({ id: "one" }),
+    });
+    expect(first.status).toBe(200);
+    const token = first.headers.get("x-zevium-wallet-session")!;
+    const walletId = machineWalletId(network, payer);
+    const stub = env.WALLET.get(env.WALLET.idFromName(walletId));
+    const event = (await stub.getState()).pendingSettlements[0]!;
+    const binding = {
+      reservationId: event.reservationId,
+      consumerClerkOrgId: walletId,
+      projectId: "project",
+      routeRevision: "version",
+    };
+    expect(
+      await verifyAdmissionProof(
+        "test-admission-secret",
+        event.usage!.admissionProof!,
+        binding,
+      ),
+    ).toMatchObject({ ...binding, mode: "open" });
+    expect(
+      await verifyAdmissionProof(
+        "test-admission-secret",
+        event.usage!.admissionProof!,
+        {
+          ...binding,
+          consumerClerkOrgId: machineWalletId(network, "0x" + "f".repeat(40)),
+        },
+      ),
+    ).toBeNull();
+
+    // Freeze only this bucket's refill clock; exercising HTTP calls uses real timers.
+    await runInDurableObject(stub, async (_wallet, state) => {
+      state.storage.sql.exec(
+        "UPDATE key_rate_buckets SET tokens = 1, updated_at = ? WHERE key_id = ?",
+        Date.now() + 60_000,
+        walletId,
+      );
+    });
+    const renewed = await issueWalletSession(
+      secret,
+      "https://gateway.test",
+      network,
+      payer,
+      Date.now() - 1000,
+    );
+    expect(renewed).not.toBe(token);
+    expect(
+      (
+        await call(
+          { authorization: `Bearer ${renewed}` },
+          url.replace("echo", "free"),
+        )
+      ).status,
+    ).toBe(200);
+    await evictDurableObject(stub);
+    for (const credential of [token, renewed]) {
+      const blocked = await call({ authorization: `Bearer ${credential}` });
+      expect(blocked.status).toBe(429);
+      expect(blocked.headers.get("Retry-After")).toBe("1");
+      expect(await blocked.json()).toMatchObject({ error: "key_rate_limited" });
+    }
+    expect(f.upstream).toHaveBeenCalledTimes(2);
+    const balance = (await stub.getState()).balance;
+    expect(balance).toBe(9999);
+    payer = "0x" + "f".repeat(40);
+    expect(
+      (await call({ "PAYMENT-SIGNATURE": paymentHeader({ id: "two" }) }))
+        .status,
+    ).toBe(200);
+    expect(f.grants).not.toHaveBeenCalled();
+    expect(f.clerk).not.toHaveBeenCalled();
+  });
   it("offers V2 + human recovery, pays once, spends to zero, refuses replay and keeps network off subsequent calls", async () => {
     const f = setup();
     const challenge = await call();

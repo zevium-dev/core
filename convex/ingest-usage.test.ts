@@ -1,3 +1,4 @@
+import { signAdmissionProof } from "@zevium/shared";
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -553,7 +554,7 @@ describe("wallet settlement ingest contract", () => {
     expect(result.wallet).toMatchObject({ balance: 100, sequence: 1 });
   });
 
-  it("freezes new consumers at deprecation while backfilling historical eligibility", async () => {
+  it("settles an open admission after deprecation and consumes its proof exactly once", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWallet(t);
     await t.mutation(internal.wallets.grantPaymentCredits, {
@@ -562,57 +563,59 @@ describe("wallet settlement ingest contract", () => {
       amount: 100,
       refId: "stripe:payment_intent:pi_test",
     });
+    const event = {
+      ...usageEvent(seed, "settle:admitted-before-freeze"),
+      at: 21,
+    };
+    const claims = {
+      reservationId: event.reservationId,
+      consumerClerkOrgId: event.consumerClerkOrgId,
+      projectId: event.projectId,
+      routeRevision: event.specVersionId,
+      policyRevision: 1,
+      mode: "open" as const,
+      admittedAt: 19,
+    };
+    const admissionProof = await signAdmissionProof(SECRET, claims);
     await t.run(async (ctx) => {
       await ctx.db.patch(seed.projectId, {
         deprecationStartedAt: 20,
+        retirementRevision: 2,
         sunsetAt: 20 + 7 * 24 * 60 * 60 * 1000,
         retirementState: "scheduled",
       });
     });
-
-    const blocked = await t.mutation(internal.wallets.recordUsage, {
-      events: [{ ...usageEvent(seed, "settle:new-after-freeze"), at: 20 }],
+    const settled = await t.mutation(internal.wallets.recordUsage, {
+      events: [{ ...event, admissionProof }],
     });
-    expect(blocked.results).toEqual([
-      {
-        refId: "settle:new-after-freeze",
-        status: "rejected",
-        reason: "consumer became eligible after retirement freeze",
-        retryable: false,
+    expect(settled.results).toEqual([
+      { refId: event.settleRefId, status: "applied" },
+    ]);
+    const replay = await t.mutation(internal.wallets.recordUsage, {
+      events: [{ ...event, admissionProof }],
+    });
+    expect(replay.results).toEqual([
+      { refId: event.settleRefId, status: "already_applied" },
+    ]);
+    expect(replay.wallet).toEqual(settled.wallet);
+    const changed = {
+      ...event,
+      reservationId: "stolen",
+      settleRefId: "settle:stolen",
+      admissionProof,
+    };
+    const rejected = await t.fetch("/ingest-usage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": SECRET,
       },
-    ]);
-
-    await t.run(async (ctx) => {
-      await ctx.db.insert("usageEvents", {
-        organizationId: seed.consumerOrganizationId,
-        projectId: seed.projectId,
-        endpoint: "/forecast",
-        method: "GET",
-        credits: 1,
-        status: 200,
-        latencyMs: 1,
-        keyId: "legacy-key",
-        at: 19,
-      });
+      body: JSON.stringify({ events: [changed] }),
     });
-    const grandfathered = await t.mutation(internal.wallets.recordUsage, {
-      events: [{ ...usageEvent(seed, "settle:historical-consumer"), at: 21 }],
+    expect(rejected.status).toBe(200);
+    expect(await rejected.json()).toMatchObject({
+      results: [{ status: "rejected", reason: "invalid admission proof" }],
     });
-    expect(grandfathered.results).toEqual([
-      { refId: "settle:historical-consumer", status: "applied" },
-    ]);
-    expect(
-      await t.run(async (ctx) =>
-        ctx.db
-          .query("projectConsumerEntitlements")
-          .withIndex("by_project_consumer", (q) =>
-            q
-              .eq("projectId", seed.projectId)
-              .eq("consumerOrganizationId", seed.consumerOrganizationId),
-          )
-          .unique(),
-      ),
-    ).toMatchObject({ firstUsedAt: 19 });
   });
 
   it("keeps materialized balance and sequence equal to the append-only ledger", async () => {

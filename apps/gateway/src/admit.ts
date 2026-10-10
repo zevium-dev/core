@@ -1,5 +1,9 @@
 import { isWalletSession, verifyWalletSession } from "./wallet-session";
-import { joinUpstreamUrl, matchOperation } from "@zevium/shared";
+import {
+  joinUpstreamUrl,
+  matchOperation,
+  signAdmissionProof,
+} from "@zevium/shared";
 import type { KeyBudgetSnapshot } from "./wallet";
 import { extractApiKey, type VerifyOutcome } from "./key-verifier";
 import { SpecSourceUnavailableError, getParsedSpec } from "./spec-source";
@@ -64,6 +68,37 @@ export async function admit(
     });
   }
   const verified = outcome.key;
+  // Wallet DO keyed by the CONSUMER's Clerk org id — the caller's org pays,
+  // never the publisher's, even when they differ (marketplace calls).
+  const walletId = env.WALLET.idFromName(verified.orgId);
+  const wallet = env.WALLET.get(walletId);
+  // Wallet sessions use the stable network/payer wallet ID as keyId, so
+  // session renewal and top-ups cannot reset the request bucket.
+  const rate = await wallet.consumeKeyRateLimit(verified.keyId, verified.orgId);
+  if (rate.status === "rejected") {
+    const status =
+      rate.reason === "key_rate_limited"
+        ? 429
+        : rate.reason === "wallet_unavailable"
+          ? 503
+          : 403;
+    const message =
+      rate.reason === "key_rate_limited"
+        ? isWalletSession(secret)
+          ? "Too many requests for this wallet. Try again shortly."
+          : "Too many requests for this API key. Try again shortly."
+        : rate.reason === "wallet_unavailable"
+          ? "Wallet temporarily unavailable"
+          : rate.reason === "organization_archived"
+            ? "Organization is archived"
+            : rate.reason === "key_untracked"
+              ? "API key is not managed by Zevium"
+              : "API key is disabled";
+    const response = jsonError(status, rate.reason, message, requestId);
+    if (rate.retryAfterSeconds !== undefined)
+      response.headers.set("Retry-After", String(rate.retryAfterSeconds));
+    return response;
+  }
 
   const releaseChallengeHeader = request.headers.get(
     "x-zevium-release-challenge",
@@ -96,6 +131,7 @@ export async function admit(
     published = await deps.specSource.getPublishedSpec(
       route.publisherHandle,
       route.projectSlug,
+      verified.orgId,
     );
   } catch (error) {
     if (error instanceof SpecSourceUnavailableError) {
@@ -135,6 +171,32 @@ export async function admit(
   ) {
     return jsonError(404, "project_not_found", "API not found", requestId);
   }
+
+  if (published.admission?.allowed === false) {
+    return jsonError(
+      403,
+      "consumer_not_entitled",
+      "This API is deprecated and no longer accepts new consumers",
+      requestId,
+    );
+  }
+  if (!env.GATEWAY_INTERNAL_SECRET) {
+    return jsonError(
+      503,
+      "gateway_unavailable",
+      "Gateway configuration is temporarily unavailable",
+      requestId,
+    );
+  }
+  const admissionProof = await signAdmissionProof(env.GATEWAY_INTERNAL_SECRET, {
+    reservationId: requestId,
+    consumerClerkOrgId: verified.orgId,
+    projectId: published.projectId,
+    routeRevision: published.specVersionId,
+    policyRevision: published.admission?.policyRevision ?? 1,
+    mode: published.admission?.mode ?? "open",
+    admittedAt: started,
+  });
 
   let parsed;
   try {
@@ -220,10 +282,6 @@ export async function admit(
   const freeTier = matched.pricing.freeTier;
   const reservationId = requestId;
 
-  // Wallet DO keyed by the CONSUMER's Clerk org id — the caller's org pays,
-  // never the publisher's, even when they differ (marketplace calls).
-  const walletId = env.WALLET.idFromName(verified.orgId);
-  const wallet = env.WALLET.get(walletId);
   const freeTierScope = {
     clerkOrgId: verified.orgId,
     projectId: published.projectId,
@@ -384,7 +442,7 @@ export async function admit(
         reserve.reason === "organization_archived")
     ) {
       return jsonError(
-        403,
+        reserve.reason === "key_cap_exceeded" ? 402 : 403,
         reserve.reason,
 
         reserve.reason === "key_disabled"
@@ -417,6 +475,7 @@ export async function admit(
     );
   }
   const immutableUsageIdentity = {
+    admissionProof,
     specVersionId: published.specVersionId,
     specVersion: published.version,
     operationId,

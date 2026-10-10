@@ -1,3 +1,4 @@
+import { verifyAdmissionProof } from "@zevium/shared";
 import {
   createExecutionContext,
   env,
@@ -194,6 +195,66 @@ afterEach(() => {
 });
 
 describe("gateway pipeline", () => {
+  it.each(["/stream", "/free", "/zero"])(
+    "rejects a burst with 429 before network dispatch on %s",
+    async (path) => {
+      const clerkOrgId = `org_rate_${path}`;
+      const { fetchImpl, calls } = makeFetchMock(() => new Response("ok"));
+      const { specs } = await installFixtures({
+        clerkOrgId,
+        credits: 1000,
+        fetchImpl,
+      });
+      const first = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}${path}`,
+      );
+      expect(first.status).toBe(200);
+      // Spend the rest of the bucket at a fixed future instant; no clock race in this test.
+      const now = Date.now() + 1000;
+      for (let i = 0; i < 60; i++)
+        await walletStub(clerkOrgId).consumeKeyRateLimit(
+          KEY_ID,
+          clerkOrgId,
+          now,
+        );
+      let specReads = 0;
+      specs.getPublishedSpec = async () => {
+        specReads++;
+        throw new Error("must not read route");
+      };
+      const rejected = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}${path}`,
+      );
+      expect(rejected.status).toBe(429);
+      expect(rejected.headers.get("Retry-After")).toBe("1");
+      expect(rejected.headers.get("access-control-expose-headers")).toContain(
+        "retry-after",
+      );
+      expect(await rejected.json()).toMatchObject({
+        error: "key_rate_limited",
+        message: "Too many requests for this API key. Try again shortly.",
+      });
+      expect(specReads).toBe(0);
+      expect(calls).toHaveLength(1);
+    },
+  );
+
+  it("returns 402 for a monthly spend cap without dispatch", async () => {
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    await installFixtures({
+      clerkOrgId: "org_cap_402",
+      credits: 100,
+      fetchImpl,
+      keySettings: [{ keyId: KEY_ID, disabled: false, monthlyCapCredits: 1 }],
+    });
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ error: "key_cap_exceeded" });
+    expect(calls).toHaveLength(0);
+  });
+
   it.each(["/stream", "/free", "/zero"])(
     "returns 503 for cold wallet control outage on %s",
     async (path) => {
@@ -1085,6 +1146,20 @@ describe("gateway pipeline", () => {
       (record) => record.organizationId === organizationId,
     );
     expect(organizationRecords).toHaveLength(2);
+    for (const record of organizationRecords) {
+      expect(
+        await verifyAdmissionProof(
+          "test-admission-secret",
+          record.admissionProof!,
+          {
+            reservationId: record.reservationId,
+            consumerClerkOrgId: clerkOrgId,
+            projectId: record.projectId,
+            routeRevision: record.specVersionId,
+          },
+        ),
+      ).toMatchObject({ mode: "open", policyRevision: 1 });
+    }
     expect(organizationRecords.map((record) => record.credits).sort()).toEqual([
       2, 3,
     ]);
@@ -1618,6 +1693,9 @@ describe("explicit operation pricing", () => {
           },
         }),
       });
+      // Request limiting loads key controls before route lookup. Start from
+      // that checkpoint so the assertion detects only execution/billing writes.
+      await walletStub(clerkOrgId).syncGrants(clerkOrgId);
       const before = await walletStub(clerkOrgId).getState();
       const res = await gatewayFetch(
         `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/priced`,

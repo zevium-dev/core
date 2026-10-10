@@ -14,6 +14,7 @@ import { finalize } from "./finalize";
 export type PipelineEnv = {
   WALLET: DurableObjectNamespace<WalletDO>;
   ZEVIUM_RELEASE?: string;
+  GATEWAY_INTERNAL_SECRET?: string;
 };
 
 export type PipelineDeps = {

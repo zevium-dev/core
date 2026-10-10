@@ -333,6 +333,7 @@ type IngestUsageEvent = {
   machineFunding?: MachineFunding;
   organizationId: string;
   projectId: string;
+  admissionProof?: string;
   specVersionId: string;
   specVersion: string;
   operationId: string;
@@ -504,6 +505,13 @@ export function parseIngestUsageBody(
     ) {
       return { ok: false, status: 400, error: "invalid release metadata" };
     }
+    if (
+      event.admissionProof !== undefined &&
+      (typeof event.admissionProof !== "string" ||
+        event.admissionProof.length > 4096)
+    ) {
+      return { ok: false, status: 400, error: "invalid admission proof" };
+    }
     const consumer = event.consumerClerkOrgId as string;
     if (consumerClerkOrgId !== null && consumerClerkOrgId !== consumer) {
       return { ok: false, status: 400, error: "mixed consumer organizations" };
@@ -524,6 +532,9 @@ export function parseIngestUsageBody(
         : { machineFunding: event.machineFunding as MachineFunding }),
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
+      ...(typeof event.admissionProof === "string"
+        ? { admissionProof: event.admissionProof }
+        : {}),
       specVersionId: event.specVersionId as string,
       specVersion: event.specVersion as string,
       operationId: event.operationId as string,
@@ -879,6 +890,8 @@ http.route({
         {
           publisherHandle,
           projectSlug,
+          consumerClerkOrgId:
+            url.searchParams.get("consumerClerkOrgId") ?? undefined,
         },
       );
       return json(payload, 200);

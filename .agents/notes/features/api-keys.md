@@ -1,6 +1,6 @@
 # API keys
 
-> Status: partial (P0 issuance blocked by #385; #364/#356 ownership and lifecycle fixes implemented; P1 #13 partial) · Updated: 2026-10-10
+> Status: partial (P0 issuance blocked by #385; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-10
 > Code: `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
 > Related: [gateway](gateway.md), [wallet-billing](wallet-billing.md), [accounts-orgs](accounts-orgs.md), [machine-payments](machine-payments.md), [registry-v2](../architecture/registry-v2.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -25,6 +25,11 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 
 ## Tech
 
+- x402 wallet sessions use the same request gate and admission proofs, scoped to the stable payer wallet; see [machine-payments](machine-payments.md).
+
+- **Request rate limit (#336)**: Wallet DO `consumeKeyRateLimit` uses the SQLite `key_rate_buckets` table. Each physical key starts with 60 tokens and refills one token/second (60/minute sustained); rotation keys have independent buckets. Paid, free-tier and zero-price attempts share the bucket, once per admission before route lookup. Disabled/untracked/archived controls win over rate rejection. Indexed idle cleanup discards fully refilled buckets after 60 seconds. Bucket transactions survive eviction and require no per-request Clerk/Convex call; key-control refresh keeps its existing 60s background cadence. Rate settings are not exposed per key yet.
+- **Error distinction (#336)**: request burst exhaustion is `429` with integer `Retry-After` seconds; monthly credit spend cap is `402` because it is a spending restriction, not request frequency. Cap recovery is an admin limit increase or the next UTC month, not a one-second retry. Explicitly disabled keys remain `403`.
+
 - **Schema integration repair**: `keySettings.by_owner` is retained alongside `by_owner_status`; the merged registration and member-list queries require the owner-only index, including disabled keys.
   **Dogfood — 2026-10-10**
 
@@ -46,7 +51,7 @@ Known facts (build plan): Clerk API keys use real prefix `ak_`; user-created key
 - **Realtime display** (#364): keys screen and dashboard use `keySettings.listKeys`; member reads use the org/owner prefix of `by_owner_status` (all statuses), admin/owner reads use `by_org`. DTOs contain display/policy metadata only, without secrets or secret hashes. Registration time comes from `_creationTime`; Clerk last-used metadata is not fetched on page loads. The dashboard counts only the signed-in member’s slot. Cap/status controls use TanStack mutation `isPending` and `.mutate()`; key-specific error copy requires `ConvexError` and an explicit allowlist.
 - **Rotation**: members rotate their own keys; admins/owners may rotate member keys without changing ownership. Begin/complete/fail operation IDs remain idempotent, failed IDs stay terminal, and replacements preserve family/budget/cap plus exactly 24h signed grace. Completion rejects keys disabled or revoked during rotation.
 
-Code facts: `createKey` requires an active org; `ROTATION_GRACE_MS = 24h`; Clerk outage on verify → `503 verification_unavailable` (never cached as invalid); invalid/missing key → `402` envelope ([gateway](gateway.md)); disabled/untracked/cap-exceeded → `403`.
+Code facts: `createKey` requires an active org; `ROTATION_GRACE_MS = 24h`; Clerk outage on verify → `503 verification_unavailable` (never cached as invalid); invalid/missing key → `402` envelope ([gateway](gateway.md)); disabled/untracked → `403`; monthly spending cap → `402 key_cap_exceeded`; request rate limit → `429 key_rate_limited` with `Retry-After`.
 
 ## Decisions
 
@@ -57,6 +62,6 @@ Code facts: `createKey` requires an active org; `ROTATION_GRACE_MS = 24h`; Clerk
 
 ## Open questions
 
-- Doc/code conflict: PRODUCT says keys are rate-limited. No per-key request rate limit found in `apps/gateway/src` (only the 1/60s grant-sync limit).
+- Per-key configurable request rates remain future work; launch uses one default for all physical keys.
 - Last-used and per-key usage projections remain absent; no Clerk request is made to fill them during listing.
 - P1 gaps: daily/weekly reset choices; programmatic key-management API (keys are created only through session-authed server fns).

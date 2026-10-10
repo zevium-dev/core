@@ -155,16 +155,25 @@ path    — endpoint path from the spec (e.g. /v1/summarize)`}
       <ul>
         <li>
           <code>402</code> — missing or invalid API key, or insufficient
-          credits. Read <code>detail</code> and <code>reason</code> to choose a
-          recovery action.
+          credits. Monthly key spending caps also return 402 with{" "}
+          <code>key_cap_exceeded</code>; ask an org admin to raise the cap or
+          wait for the next UTC month. Read <code>detail</code> and{" "}
+          <code>reason</code> to choose a recovery action.
         </li>
         <li>
           <code>404</code> — API not found or no endpoint matches the method and
           path.
         </li>
         <li>
-          <code>403</code> — key disabled, organization archived, or monthly key
-          spending limit reached.
+          <code>403</code> — key disabled, organization archived, or access to a
+          deprecated API denied.
+        </li>
+        <li>
+          <code>429</code> — too many requests for this API key. Default:
+          60-request burst, refilling at one request per second. Paid, free-tier
+          and zero-price calls share this limit. Wait for{" "}
+          <code>Retry-After</code> seconds before retrying. Rate limits do not
+          charge credits or call the publisher.
         </li>
       </ul>
     </DocsPage>

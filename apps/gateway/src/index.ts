@@ -284,7 +284,10 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
     searchSource: deps.searchSource,
     specSource: deps.publicSpecSource,
     pipeline: pipelineOnly(deps),
-    pipelineEnv: { WALLET: env.WALLET },
+    pipelineEnv: {
+      WALLET: env.WALLET,
+      GATEWAY_INTERNAL_SECRET: env.GATEWAY_INTERNAL_SECRET,
+    },
     gatewayOrigin: new URL(request.url).origin,
   };
 }

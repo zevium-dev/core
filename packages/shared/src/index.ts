@@ -161,3 +161,9 @@ export {
 
 export { synthesize } from "./mock.js";
 export * from "./machine-payments";
+
+export {
+  signAdmissionProof,
+  verifyAdmissionProof,
+  type AdmissionClaims,
+} from "./admission-proof.js";
