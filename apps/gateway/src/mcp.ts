@@ -15,6 +15,8 @@
 
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { apiDocsFromSpec } from "./mcp-api-docs";
+import { callParameterSchemas, callTarget } from "./mcp-call-params";
+import { paymentRequiredResponse } from "./payment-required";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
 import {
@@ -128,8 +130,10 @@ const TOOLS: ToolDef[] = [
         },
         path: {
           type: "string",
-          description: "Endpoint path, e.g. /v1/chat/completions",
+          description:
+            "Endpoint path or template, e.g. /things/{id}. May include an encoded query string. Use pathParams for placeholders and query for query parameters.",
         },
+        ...callParameterSchemas,
         body: {
           description: "Optional request body (string or JSON-serializable)",
         },
@@ -207,6 +211,28 @@ function toolError(message: string): {
   isError: true;
 } {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/** Only call for platform-generated 402s, never an upstream response. */
+async function paymentToolError(response: Response) {
+  const envelope: unknown = await response.json();
+  if (!isRecord(envelope)) return toolError("Payment is required.");
+  // Explicit allowlist: charged cost stays zero; the envelope's cost is the
+  // required price, which agents need to calculate the top-up shortfall.
+  return toolError(
+    JSON.stringify({
+      status: 402,
+      requestId: response.headers.get("x-zevium-request-id"),
+      cost: 0,
+      error: envelope.error,
+      reason: envelope.reason,
+      message: envelope.detail,
+      detail: envelope.detail,
+      actions: envelope.actions,
+      available: envelope.available,
+      requiredCredits: envelope.cost,
+    }),
+  );
 }
 
 async function readLimitedText(
@@ -357,7 +383,7 @@ async function handleGetApiDocs(
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
       "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec.",
       "Use search_apis to find a match, get_api_docs to read its reference, and call_api to execute an endpoint.",
-      "Substitute path parameters and encode query parameters in call_api path; send body with the documented Content-Type header.",
+      "Use call_api pathParams for documented {name} path placeholders and query for query parameters (scalars or arrays of repeated values). An encoded query string in path is also supported; query entries replace same-name inline values. For other serialization styles, pre-serialize per the reference. Send body with the documented Content-Type header.",
       "Local component refs use publisherData.components. External and non-component refs, security metadata, response links/headers, and content encoding metadata are omitted; no references are fetched.",
     ],
   };
@@ -388,20 +414,40 @@ async function handleCallApi(
     key = extractApiKey(mcpRequest) ?? undefined;
   }
   if (!key) {
-    return toolError(
-      "API key required: set Authorization: Bearer ak_…/zev_… on the MCP request, or pass key in tool arguments",
+    return paymentToolError(
+      paymentRequiredResponse(crypto.randomUUID(), "API key required", {
+        reason: "missing_api_key",
+      }),
     );
   }
   if (!key.startsWith("ak_") && !key.startsWith("zev_")) {
-    return toolError("API key must start with ak_ or zev_");
+    return paymentToolError(
+      paymentRequiredResponse(crypto.randomUUID(), "Invalid API key", {
+        reason: "invalid_api_key",
+      }),
+    );
   }
 
   const method = methodRaw.toUpperCase();
-  const remainderPath = pathRaw.startsWith("/") ? pathRaw : `/${pathRaw}`;
+  let target: ReturnType<typeof callTarget>;
+  try {
+    target = callTarget(
+      deps.gatewayOrigin,
+      org,
+      project,
+      pathRaw,
+      args.pathParams,
+      args.query,
+    );
+  } catch {
+    return toolError(
+      "Invalid endpoint path or parameters. Use a relative endpoint path, provide all pathParams, and supply query values as strings, numbers, booleans, or arrays of those values.",
+    );
+  }
   const route: GatewayRoute = {
     publisherHandle: org,
     projectSlug: project,
-    remainderPath,
+    remainderPath: target.remainderPath,
   };
 
   const headers = new Headers();
@@ -433,9 +479,6 @@ async function handleCallApi(
     }
   }
 
-  const origin = deps.gatewayOrigin.replace(/\/+$/, "");
-  const url = `${origin}/gateway/${org}/${project}${remainderPath === "/" ? "" : remainderPath}`;
-
   const init: RequestInit = {
     method,
     headers,
@@ -448,7 +491,8 @@ async function handleCallApi(
   // Buffer inside the pipeline's refund boundary, before any settlement.
   let responseText = "";
   let responseError: string | undefined;
-  const gatewayRequest = new Request(url, init);
+  let receivedUpstreamResponse = false;
+  const gatewayRequest = new Request(target.url, init);
   const response = await handleGatewayRequest(
     gatewayRequest,
     deps.pipelineEnv,
@@ -456,6 +500,7 @@ async function handleCallApi(
     ctx,
     route,
     async (upstream) => {
+      receivedUpstreamResponse = true;
       try {
         signal.throwIfAborted();
         if (contentLengthExceeds(upstream, MAX_RESPONSE_BODY_BYTES)) {
@@ -488,6 +533,11 @@ async function handleCallApi(
   if (responseError) return toolError(responseError);
   const requestId = response.headers.get("x-zevium-request-id");
   if (!response.ok) {
+    // Admission 402s come from payment-required.ts. An upstream can forge the
+    // same body and headers; provenance comes from the callback, not its data.
+    if (response.status === 402 && !receivedUpstreamResponse) {
+      return paymentToolError(response);
+    }
     // Never forward upstream error bodies, headers, or exception details.
     const message =
       response.status === 402
