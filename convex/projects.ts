@@ -20,11 +20,7 @@ import {
 } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
-import {
-  assertOrganizationCopyAllowed,
-  assertProjectCopyAllowed,
-  isPublishedSurfaceAllowed,
-} from "./lib/publicClaims";
+import { isOrganizationPublicSurfaceAllowed } from "./lib/publicSurface";
 import { isValidSlug } from "./lib/validate";
 import { syncCatalogueListing } from "./catalogue";
 import { isProjectRetired, retirePublicRoute } from "./lib/publicRoutes";
@@ -353,13 +349,6 @@ export const create = mutation({
     if (description !== undefined && description.length > 2000) {
       throw new Error("Description must be at most 2000 characters");
     }
-    assertProjectCopyAllowed({
-      name,
-      slug,
-      description: description === "" ? undefined : description,
-      tags: [],
-    });
-    assertOrganizationCopyAllowed(org);
 
     const existing = await ctx.db
       .query("projects")
@@ -490,22 +479,6 @@ export const update = mutation({
       tags = unique;
     }
 
-    const nextProject = {
-      ...current,
-      name,
-      description,
-      visibility,
-      tags,
-    };
-    const copyChanged =
-      args.patch.name !== undefined ||
-      args.patch.description !== undefined ||
-      args.patch.tags !== undefined;
-    const visibilityOnlyRemediation =
-      current.visibility === "public" &&
-      visibility === "private" &&
-      !copyChanged;
-    if (!visibilityOnlyRemediation) assertProjectCopyAllowed(nextProject);
     if (visibility === "public") {
       const org = await getActiveOrgById(ctx, current.organizationId);
       if (org === null) {
@@ -518,12 +491,9 @@ export const update = mutation({
         )
         .order("desc")
         .first();
-      if (
-        latest !== null &&
-        !isPublishedSurfaceAllowed(nextProject, org, latest)
-      ) {
+      if (latest !== null && !isOrganizationPublicSurfaceAllowed(org)) {
         throw new Error(
-          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+          "Project cannot be public until the publisher has a public handle",
         );
       }
     }

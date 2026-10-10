@@ -1,0 +1,76 @@
+# Catalogue and search
+
+> Status: built (P0 #7 semantic search built; FLOW gaps listed in Open questions) · Updated: 2026-10-10
+> Code: `convex/catalogue.ts`, `convex/search.ts`, `convex/catalogue.test.ts`, `convex/search.test.ts`, `apps/web/src/routes/catalogue.tsx`, `apps/web/src/routes/catalogue/index.tsx`, `apps/web/src/routes/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/routes/app/catalogue/index.tsx`, `apps/web/src/routes/app/catalogue/$publisherHandle.$projectSlug.tsx`, `apps/web/src/components/catalogue-browser.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `apps/web/src/components/catalogue-shell.tsx`, `apps/web/src/components/route-providers.tsx`, `apps/web/src/lib/catalogue-search.ts`
+> Related: [quality-signals](quality-signals.md), [reviews](reviews.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [pricing](pricing.md), [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [landing-docs](landing-docs.md), [web-app](../architecture/web-app.md)
+
+The public, no-auth catalogue of published APIs and each API's detail page. It is the SEO surface, the human evaluation surface, and the shared shell for the authenticated in-app catalogue. Discovery is semantic search plus tag filters; spec metadata drives every listing page.
+
+## Product
+
+- **Catalogue with quality signals** (search part; badges in [quality-signals](quality-signals.md)): semantic search + tag filters derived from spec metadata.
+- Roadmap P0 #7 — Catalogue quality signals (latency, success rate, freshness) + semantic search ([roadmap](../product/roadmap.md)).
+- Consumers (human developers) browse the catalogue, get a key, test in the playground, integrate ([product overview](../product/overview.md)).
+
+### Research ideas — not decided
+
+Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-landscape.md#trust-sell-your-agent-cannot-overspend-and-measured-quality).
+
+- **Require a "use when" line and an output schema on every listing.** Evidence: Coinbase x402 Bazaar showed 34,062 listings on 2026-10-09, 94% lacked a "use when" line; nobody else enforces it.
+
+## Flow
+
+### Public catalogue — `/catalogue`
+
+- **Public, no auth** — SEO surface + agents + zero-friction evaluation.
+- Search (semantic), tag filters, sort (relevance / popularity / recently updated), filters (price range, has-free-tier).
+- Listing cards: name, org, description, price range, quality badges (latency, success rate, freshness), agent-ready badge.
+- Any paid action (key, real playground call) gates to sign-up.
+
+### API detail page — `/catalogue/{org}/{api}` (public)
+
+The listing's product page — shareable URL, the API's landing page. Spec metadata drives everything.
+
+- Header: name, org, tags, quality badges (latency p50, success rate, uptime, freshness), agent-ready badge.
+- Pricing table: per-endpoint credits, free tier highlighted ([pricing](pricing.md)).
+- Docs: rendered from the published spec — three-column pattern (nav / prose / runnable code samples in curl/js/python), prose↔code hover-sync.
+- **Try it** panel and **Mock mode** → [mock-sandbox](mock-sandbox.md).
+- **Connect your agent** tab → [agent-surface](agent-surface.md).
+- Version picker: published versions, spec-diff changelog between versions (P2) ([listing-lifecycle](listing-lifecycle.md)).
+- Reviews/ratings (P2) → [reviews](reviews.md).
+
+### In-app catalogue — `/app/catalogue`
+
+- Browse actions open `/app/catalogue`; listing cards open `/app/catalogue/{org}/{api}`. Search, filters, API reference, playground, and back navigation keep the dashboard sidebar. Public catalogue URLs remain shareable outside the app.
+
+## Tech
+
+From [architecture overview](../architecture/overview.md):
+
+- **Catalogue routes**: public `/catalogue` and authenticated `/app/catalogue` adapters share catalogue and API-detail components. Each adapter owns typed route search and navigation; the app namespace inherits its sidebar and authenticated provider boundary. Cards, empty-state actions, and back links stay in their current namespace.
+- **Navigation providers**: the root public Convex provider follows committed route matches, so an outgoing catalogue keeps its context while an authenticated destination loads. Signed-in catalogue detail pages lazily add Clerk and Convex authentication for review eligibility and publisher responses; anonymous public pages keep the plain Convex provider. Protected browser loaders do not start Convex queries; app routes finish user/organization mirroring before mounting tenant query components. Provider organization slugs permit repeated hyphens and up to 256 characters; canonical publisher handles remain strict 64-character kebab case and are allocated separately. Project list clicks seed the exact project detail query from the already authorized list document, retaining the current principal/org query scope so cold list→detail navigation has a complete morph destination. Wallet query failures stay within the dashboard's balance card instead of replacing its usage and navigation. Clerk CSS is injected into the `components` cascade layer through `ClerkProvider.appearance`, allowing Tailwind utilities to style embedded profiles consistently.
+- **Semantic search**: embeddings come from `gemini-embedding-001` pinned to `outputDimensionality: 768` (matches the `specEmbeddings` `by_embedding` vectorIndex). Not `text-embedding-004` — that model was removed from the Gemini v1beta API (404) and `gemini-embedding-001` is its 768-dim replacement
+- `specEmbeddings` via `vectorIndex` (catalogue semantic search)
+
+Code facts (read from source 2026-10-10, not from TECH.md):
+
+- Browse: `catalogue.listPublic` (args `search`, `tag`, `cursor`, `sort` = `newest`|`name`|`cheapest`, `hasFreeTier`, `maxCost`; search ≤200 chars, tag ≤64) reads the `catalogueListings` projection maintained by `syncCatalogueListing`, returns items, total, tag facets, free-tier count. Detail: `catalogue.getPublicDetail` (project, org, latest version incl. deprecation fields, quality snapshot).
+- Semantic: `search.searchCatalogue` action (query ≤200 chars, limit default 10, max 20). Gemini failure returns `{ items: [], degraded: true }`, never throws. One embedding per project from name + description + tags + `METHOD path summary` per operation, rebuilt on publish (`specs.publish` schedules `search.embedProject`). `fetchSearchListings` re-checks public + published + active route before shaping cards. Ranking = vector score only.
+- Web: semantic mode is a URL search flag (`semantic`), separate from keyword `q` filtering; cards show relevance score on semantic hits. Card/detail share `data-transition-surface` for list→detail morph.
+- Detail tabs: `Try it`, `Reference`, `Connect your agent`; `QualityBadges`, deprecation banner and `ReviewSection` render on the page. Agent-ready badge shows when the published spec has ≥1 endpoint.
+
+## Decisions
+
+- None recorded beyond TECH.md bullets above.
+- 2026-10-10 — ACCEPTED (not built): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — House listings labeled "Operated by Zevium". [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
+
+## Open questions
+
+- FLOW sort "relevance / popularity / recently updated"; code sorts `newest`/`name`/`cheapest` (relevance only in semantic mode). No popularity sort.
+- FLOW filter "price range"; code has max cost only.
+- PRODUCT "tag filters derived from spec metadata"; code tags are admin-set project tags (`projects.update`, ≤32), not derived from the spec.
+- FLOW cards show quality + agent-ready badges; code cards show neither (detail page only).
+- FLOW docs "three-column, curl/js/python, hover-sync"; code detail shows a `Reference` tab and curl copy only. Verify against FLOW or fix doc.
+- Version picker on detail page absent; only latest version shown.
+- Research idea ("use when" line + output schema required) undecided.

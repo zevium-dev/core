@@ -620,7 +620,6 @@ export function attestIgnorePolicies(repository) {
     "/.dev.vars",
     "/apps/gateway/.dev.vars",
     "/apps/web/.dev.vars",
-    "/apps/gateway/.compliance-dist/",
   ]);
   assertExactIgnoreLines(root, "apps/web/.gitignore", [
     "/.DS_Store",

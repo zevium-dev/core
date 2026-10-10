@@ -1,5 +1,4 @@
 import { v } from "convex/values";
-import { isPublicCopyAllowed } from "@zevium/shared";
 import {
   internalMutation,
   mutation,
@@ -15,11 +14,7 @@ import {
   requireIdentity,
   requireOrgAdmin,
 } from "./lib/auth";
-import {
-  assertOrganizationCopyAllowed,
-  isOrganizationCopyAllowed,
-  isOrganizationPublicSurfaceAllowed,
-} from "./lib/publicClaims";
+import { isOrganizationPublicSurfaceAllowed } from "./lib/publicSurface";
 import { isValidSlug } from "./lib/validate";
 import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
 import { availablePublicHandle } from "./lib/publicRoutes";
@@ -128,7 +123,7 @@ export const checkPublicHandleAvailability = query({
     const claims = await requireIdentity(ctx);
     if (!claims.orgId) throw new Error("No active organization");
     const handle = args.handle.trim().toLowerCase();
-    if (!isValidSlug(handle) || !isPublicCopyAllowed(handle)) {
+    if (!isValidSlug(handle)) {
       return { available: false };
     }
     const current = await getOrgByClerkId(ctx, claims.orgId);
@@ -216,11 +211,6 @@ export const upsertFromClerk = internalMutation({
         slug,
         args.clerkOrgId,
       );
-      assertOrganizationCopyAllowed({
-        name: args.name,
-        slug,
-        publicHandle,
-      });
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
@@ -249,11 +239,6 @@ export const upsertFromClerk = internalMutation({
     const publicHandle =
       existing.publicHandle ??
       (await availablePublicHandle(ctx, slug, args.clerkOrgId, existing._id));
-    assertOrganizationCopyAllowed({
-      name: args.name,
-      slug,
-      publicHandle,
-    });
     await ctx.db.patch(existing._id, {
       name: args.name,
       slug,
@@ -388,12 +373,6 @@ export const applyOrganizationWebhook = internalMutation({
     }
 
     const slug = trustedOrganizationSlug(args.slug);
-    const publicHandle = existing?.publicHandle ?? slug;
-    assertOrganizationCopyAllowed({
-      name: args.name,
-      slug,
-      publicHandle,
-    });
 
     if (existing === null) {
       await requireAvailableOrganizationSlug(ctx, slug);
@@ -676,11 +655,6 @@ export const ensureOrganization = mutation({
         signedSlug,
         args.clerkOrgId,
       );
-      assertOrganizationCopyAllowed({
-        name: signedSlug,
-        slug: signedSlug,
-        publicHandle,
-      });
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: signedSlug,
@@ -713,11 +687,6 @@ export const setPublicHandle = mutation({
     const handle = args.handle.trim().toLowerCase();
     if (!isValidSlug(handle)) {
       throw new Error("Public handle must be kebab-case");
-    }
-    if (!isPublicCopyAllowed(handle)) {
-      throw new Error(
-        "Public handle contains an unsupported compliance or absolute security claim",
-      );
     }
     const organization = await getOrgByClerkId(ctx, claims.orgId);
     if (!organization) throw new Error("Organization not found");
@@ -777,10 +746,7 @@ export const backfillPublicHandles = internalMutation({
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
       const base = normalized || "publisher";
-      if (
-        !isValidSlug(base) ||
-        !isOrganizationCopyAllowed({ ...organization, publicHandle: base })
-      ) {
+      if (!isValidSlug(base)) {
         blocked += 1;
         continue;
       }
@@ -796,10 +762,7 @@ export const backfillPublicHandles = internalMutation({
           .toLowerCase()
           .replace(/[^a-z0-9]/g, "")}`;
       }
-      if (
-        !isValidSlug(handle) ||
-        !isOrganizationCopyAllowed({ ...organization, publicHandle: handle })
-      ) {
+      if (!isValidSlug(handle)) {
         blocked += 1;
         continue;
       }

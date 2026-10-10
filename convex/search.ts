@@ -11,6 +11,7 @@
  * before shaping a card — never leak private or draft projects, even if a
  * stale embedding lingers after a visibility/status flip.
  */
+import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
 import { parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import {
@@ -21,11 +22,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import {
-  isListingPublicCopyAllowed,
-  summarizePublishedPricing,
-  type PublicListing,
-} from "./catalogue";
+import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
 import { qualitySnapshotContract } from "./lib/qualityContract";
 import {
@@ -181,10 +178,7 @@ export const getProjectForEmbed = internalQuery({
       .order("desc")
       .first();
 
-    if (
-      latest === null ||
-      !isListingPublicCopyAllowed(project, organization, latest)
-    ) {
+    if (latest === null || !isPublishedSurfaceAllowed(organization, latest)) {
       return null;
     }
 
@@ -354,7 +348,7 @@ export const fetchSearchListings = internalQuery({
         .order("desc")
         .first();
 
-      if (!isListingPublicCopyAllowed(project, org, latest)) {
+      if (!isPublishedSurfaceAllowed(org, latest)) {
         continue;
       }
 

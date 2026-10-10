@@ -13,7 +13,7 @@
  * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
  */
 
-import { isPublicCopySetAllowed, parseSpec } from "@zevium/shared";
+import { parseSpec } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { apiDocsFromSpec } from "./mcp-api-docs";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
@@ -24,10 +24,7 @@ import {
   type PipelineDeps,
   type PipelineEnv,
 } from "./pipeline";
-import {
-  isPublishedSpecPublicCopyAllowed,
-  type PublicSpecSource,
-} from "./spec-source";
+import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "zevium-gateway", version: "0.1.0" } as const;
@@ -271,30 +268,11 @@ async function handleSearchApis(
   }> = [];
 
   for (const item of items) {
-    if (
-      !isPublicCopySetAllowed([
-        item.name,
-        item.slug,
-        item.description ?? "",
-        ...item.tags,
-        item.orgName,
-        item.publisherHandle,
-      ])
-    ) {
-      continue;
-    }
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,
     );
-    if (
-      published === null ||
-      !isPublishedSpecPublicCopyAllowed(
-        published,
-        item.publisherHandle,
-        item.slug,
-      )
-    ) {
+    if (published === null || !isPublishedSpecPublic(published)) {
       continue;
     }
     let endpoints: DiscoveryEndpoint[] = [];
@@ -341,7 +319,7 @@ async function handleGetApiDocs(
   if (!published) {
     return toolError("Unknown public API");
   }
-  if (!isPublishedSpecPublicCopyAllowed(published, org, project)) {
+  if (!isPublishedSpecPublic(published)) {
     return toolError("Published API unavailable");
   }
 

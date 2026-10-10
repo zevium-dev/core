@@ -10,11 +10,7 @@ import {
   type KeyVerifier,
   type VerifyOutcome,
 } from "./key-verifier";
-import {
-  isPublishedSpecCopyAllowed,
-  SpecSourceUnavailableError,
-  type SpecSource,
-} from "./spec-source";
+import { SpecSourceUnavailableError, type SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import { scopeUpstreamIdempotencyKey } from "./idempotency";
 import type { UsageSink } from "./usage";
@@ -191,15 +187,6 @@ export async function handleGatewayRequest(
     throw error;
   }
   if (!published) {
-    return jsonError(404, "project_not_found", "API not found", requestId);
-  }
-  if (
-    !isPublishedSpecCopyAllowed(
-      published,
-      route.publisherHandle,
-      route.projectSlug,
-    )
-  ) {
     return jsonError(404, "project_not_found", "API not found", requestId);
   }
 

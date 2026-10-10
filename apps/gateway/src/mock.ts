@@ -12,10 +12,7 @@ import {
   parseSpec,
 } from "@zevium/shared";
 import type { KeyVerifier } from "./key-verifier";
-import {
-  isPublishedSpecPublicCopyAllowed,
-  type PublicSpecSource,
-} from "./spec-source";
+import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
 import { jsonError } from "./errors";
 
 export type MockDeps = {
@@ -63,13 +60,7 @@ export async function handleMockRequest(
   if (!published) {
     return jsonError(404, "project_not_found", "API not found", requestId);
   }
-  if (
-    !isPublishedSpecPublicCopyAllowed(
-      published,
-      route.publisherHandle,
-      route.projectSlug,
-    )
-  ) {
+  if (!isPublishedSpecPublic(published)) {
     return jsonError(404, "project_not_found", "API not found", requestId);
   }
 
