@@ -21,7 +21,7 @@ Listing quality is measured and enforced. Catalogue listings carry evidence-base
 Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-landscape.md#trust-sell-your-agent-cannot-overspend-and-measured-quality).
 
 - **Quality measured at the gateway** as neutral grading: publish success rate, p95 latency, uptime, and **cost per successful call** per operation. Report contrast: Arcade+Smithery lost neutrality; Glama grades on stars/downloads.
-- **Rank `search_apis` results by those gateway quality grades** (ties into [catalogue-search](catalogue-search.md) and [agent-surface](agent-surface.md)). Current semantic ranking is vector score only.
+- **Search ranking (#330)** now breaks relevance ties with fresh, sufficient gateway API success/latency measurements; contract owned by [catalogue-search](catalogue-search.md). Broader grades remain research.
 - Report places "measured quality" in the "Now" horizon (trust is the product at zero users).
 
 ## Flow
@@ -62,4 +62,4 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - No admin quality dashboard or auto-delist toggle UI (admin can force project private via `admin.setProjectVisibility`).
 - No publisher-facing quality surface on project page; publisher learns status only via notifications.
 - `listPublicIncidents` and listing subscriptions have no web caller; per-API status pages (P2 #18) not built. Security scanning: no code.
-- Research ideas (gateway-graded ranking, cost per successful call) undecided.
+- Broader quality grades and cost per successful call remain undecided.

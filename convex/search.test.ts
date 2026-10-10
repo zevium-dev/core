@@ -5,7 +5,12 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import rateLimiterTest from "@convex-dev/rate-limiter/test";
-import { buildEmbedText } from "./search";
+import {
+  buildEmbedText,
+  compareSearchListings,
+  type SearchCatalogueResult,
+  type SearchListing,
+} from "./search";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -653,5 +658,233 @@ describe("semantic search cost controls", () => {
     ).toMatchObject({ degraded: false });
     expect(fetch).toHaveBeenCalledTimes(2);
     await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+});
+
+describe("MCP semantic discovery parity", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv("GATEWAY_INTERNAL_SECRET", "test-internal");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          embedding: { values: [1, ...Array<number>(767).fill(0)] },
+        }),
+      ),
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function setup() {
+    const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
+    return t;
+  }
+
+  async function gatewaySearch(
+    t: ReturnType<typeof convexTest>,
+    query: string,
+    caller = { orgId: "org_consumer", keyId: "key_consumer" },
+  ) {
+    const response = await t.fetch("/gateway-search", {
+      method: "POST",
+      headers: {
+        "x-internal-secret": "test-internal",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, caller }),
+    });
+    expect(response.status).toBe(200);
+    return (await response.json()) as SearchCatalogueResult;
+  }
+
+  it.each(["will I need an umbrella tomorrow", "predict rain this weekend"])(
+    "web and MCP route return Weather first for %s",
+    async (query) => {
+      const t = setup();
+      const seed = await seedSearchWorld(t);
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seed.publicEmbedId, {
+          embedding: [1, ...Array<number>(767).fill(0)],
+        });
+        // An unrelated public listing supplies a real ranking competitor.
+        await ctx.db.patch(seed.privateId, { visibility: "public" });
+        await ctx.db.patch(seed.privateEmbedId, {
+          embedding: [0, 1, ...Array<number>(766).fill(0)],
+        });
+      });
+      const keyword = await t.query(api.catalogue.listPublic, {
+        search: query,
+      });
+      expect(keyword.items).toEqual([]);
+      const web = await t.action(api.search.searchCatalogue, { query });
+      const mcp = await gatewaySearch(t, query);
+      expect(mcp).toEqual(web);
+      expect(mcp.degraded).toBe(false);
+      expect(mcp.items.map((item) => item.slug)).toEqual([
+        "weather",
+        "secret-billing",
+      ]);
+      expect(fetch).toHaveBeenCalledTimes(1); // web and MCP share the query cache
+      await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    },
+  );
+
+  it("isolates org/key admission, prevents rotation bypass, and shares the global budget with web", async () => {
+    const t = setup();
+    for (let index = 0; index < 20; index++) {
+      expect(await gatewaySearch(t, "weather")).toMatchObject({
+        degraded: false,
+      });
+    }
+    expect(await gatewaySearch(t, "weather")).toEqual({
+      items: [],
+      degraded: true,
+    });
+    expect(
+      await gatewaySearch(t, "weather", {
+        orgId: "org_consumer",
+        keyId: "rotated",
+      }),
+    ).toMatchObject({ degraded: true });
+    expect(
+      await gatewaySearch(t, "weather", {
+        orgId: "other_org",
+        keyId: "key_consumer",
+      }),
+    ).toMatchObject({ degraded: false });
+    // 21 gateway admissions + 99 distinct web admissions exhaust the common budget.
+    for (let index = 0; index < 99; index++) {
+      await t
+        .withIdentity({ subject: `web-${index}` })
+        .action(api.search.searchCatalogue, { query: "weather" });
+    }
+    expect(
+      await gatewaySearch(t, "weather", { orgId: "third_org", keyId: "key" }),
+    ).toMatchObject({ degraded: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await gatewaySearch(t, "weather")).toMatchObject({
+      degraded: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("flags embedding unavailability and retries instead of caching failure", async () => {
+    const t = setup();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("private provider error", { status: 503 }),
+    );
+    expect(await gatewaySearch(t, "weather")).toEqual({
+      items: [],
+      degraded: true,
+    });
+    expect(await gatewaySearch(t, "weather")).toMatchObject({
+      degraded: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("requires the internal secret and validates query/caller boundaries", async () => {
+    const t = setup();
+    expect(
+      (
+        await t.fetch("/gateway-search", {
+          method: "POST",
+          body: JSON.stringify({
+            query: "weather",
+            caller: { orgId: "spoofed", keyId: "spoofed" },
+          }),
+        })
+      ).status,
+    ).toBe(401);
+    for (const body of [
+      "{",
+      JSON.stringify({ query: 2 }),
+      JSON.stringify({ query: "x".repeat(201) }),
+      JSON.stringify({ query: "weather", caller: { orgId: "org" } }),
+      JSON.stringify({ query: "weather", caller: { orgId: "", keyId: "key" } }),
+    ]) {
+      expect(
+        (
+          await t.fetch("/gateway-search", {
+            method: "POST",
+            headers: { "x-internal-secret": "test-internal" },
+            body,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("semantic quality tie-break", () => {
+  const listing: SearchListing = {
+    name: "API",
+    slug: "api",
+    description: undefined,
+    tags: [],
+    orgName: "Org",
+    publisherHandle: "org",
+    publishedAt: 1,
+    pricing: null,
+    quality: null,
+    score: 0.9,
+  };
+  const quality: NonNullable<SearchListing["quality"]> = {
+    reachabilitySampleSize: 3,
+    reachabilityMinimumSampleSize: 3,
+    reachabilityPercent: 100,
+    reachabilityLatencyP50Ms: 1,
+    insufficientReachabilityData: false,
+    apiSampleSize: 20,
+    apiMinimumSampleSize: 20,
+    apiSuccessRatePercent: 95,
+    apiLatencyP50Ms: 50,
+    insufficientApiData: false,
+    lastProbeOutcome: "healthy",
+    lastProbedAt: 1,
+    freshness: { publishedAt: 1, measuredAt: 1, ageMs: 0, status: "fresh" },
+  };
+  it("ranks relevance before success rate, then lower latency", () => {
+    const best = { ...listing, slug: "best", quality };
+    const slow = {
+      ...best,
+      slug: "slow",
+      quality: { ...quality, apiLatencyP50Ms: 500 },
+    };
+    const failing = {
+      ...best,
+      slug: "failing",
+      quality: { ...quality, apiSuccessRatePercent: 80 },
+    };
+    const relevant = { ...listing, slug: "relevant", score: 0.99 };
+    expect(
+      [failing, slow, best, relevant, listing]
+        .sort(compareSearchListings)
+        .map((item) => item.slug),
+    ).toEqual(["relevant", "best", "slow", "failing", "api"]);
+  });
+  it("ignores stale and insufficient API measurements and reachability as API quality", () => {
+    for (const unmeasured of [
+      { ...quality, insufficientApiData: true },
+      {
+        ...quality,
+        freshness: { ...quality.freshness, status: "stale" as const },
+      },
+    ]) {
+      expect(
+        compareSearchListings({ ...listing, quality: unmeasured }, listing),
+      ).toBe(0);
+    }
   });
 });

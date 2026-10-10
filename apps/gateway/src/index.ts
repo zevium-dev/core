@@ -1,3 +1,7 @@
+import {
+  InternalHttpCatalogueSearch,
+  type CatalogueSearchSource,
+} from "./catalogue-search";
 import { WalletSqliteDO, type WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
@@ -57,6 +61,7 @@ export interface Env {
 /** Full worker deps: pipeline + catalogue for discovery/MCP. */
 export type WorkerDeps = PipelineDeps & {
   catalogueSource: CatalogueSource;
+  searchSource?: CatalogueSearchSource;
   /** Credential-free source for discovery, docs, and keyless mocks. */
   publicSpecSource: PublicSpecSource;
 };
@@ -172,6 +177,13 @@ function buildDeps(env: Env): WorkerDeps {
 
   const deps: WorkerDeps = {
     keyVerifier,
+    searchSource:
+      siteUrl && env.GATEWAY_INTERNAL_SECRET
+        ? new InternalHttpCatalogueSearch({
+            siteUrl,
+            internalSecret: env.GATEWAY_INTERNAL_SECRET,
+          })
+        : undefined,
     specSource: new CachedSpecSource({ inner: innerSpec }),
     publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
     catalogueSource: new CachedCatalogueSource({
@@ -213,6 +225,7 @@ function mockDeps(deps: WorkerDeps): MockDeps {
 function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
   return {
     catalogueSource: deps.catalogueSource,
+    searchSource: deps.searchSource,
     specSource: deps.publicSpecSource,
     pipeline: pipelineOnly(deps),
     pipelineEnv: { WALLET: env.WALLET },
