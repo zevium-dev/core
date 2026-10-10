@@ -1,3 +1,4 @@
+import { isWalletSession, verifyWalletSession } from "./wallet-session";
 import { joinUpstreamUrl, matchOperation } from "@zevium/shared";
 import type { KeyBudgetSnapshot } from "./wallet";
 import { extractApiKey, type VerifyOutcome } from "./key-verifier";
@@ -30,7 +31,18 @@ export async function admit(
     });
   }
 
-  const verifier = deps.keyVerifier;
+  const verifier = isWalletSession(secret)
+    ? {
+        verify: (token: string) =>
+          verifyWalletSession(
+            token,
+            deps.machinePayments?.signingSecret ?? "",
+            new URL(request.url).origin,
+            (deps.now ?? Date.now)(),
+          ),
+        verifyWithStatus: undefined,
+      }
+    : deps.keyVerifier;
   const outcome: VerifyOutcome = verifier.verifyWithStatus
     ? await verifier.verifyWithStatus(secret)
     : await verifier

@@ -1,3 +1,4 @@
+import type { MachineFunding } from "@zevium/shared";
 import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 
 /**
@@ -7,6 +8,7 @@ import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 
 /** Shape stored on pending settlements and sent to wallets:recordUsage. */
 export type ConvexUsageRecord = {
+  machineFunding?: MachineFunding;
   /** Publisher's Convex org id — kept for compatibility. */
   organizationId: string;
   /** Consumer's Clerk org id — recordUsage resolves this to the wallet debited. */
@@ -258,6 +260,7 @@ export function pendingToUsageRecord(input: {
   reservationId: string;
   cost: number;
   settledAt: number;
+  machineFunding?: MachineFunding;
   organizationId: string;
   consumerClerkOrgId: string;
   projectId: string;
@@ -287,6 +290,14 @@ export function pendingToUsageRecord(input: {
   gatewayRelease?: string;
 }): ConvexUsageRecord {
   return {
+    ...(input.consumerClerkOrgId.startsWith("x402:")
+      ? {
+          machineFunding:
+            input.cost > 0
+              ? input.machineFunding
+              : { admittedAt: input.settledAt, lots: [] },
+        }
+      : {}),
     organizationId: input.organizationId,
     consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,

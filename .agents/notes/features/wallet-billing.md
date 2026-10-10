@@ -1,7 +1,7 @@
 # Wallet & billing
 
-> Status: partial (P0 #5 + P1 #8 built; P1 #12 spend controls planned; #360 SQLite wallet storage built; real-money journey unproven) · Updated: 2026-10-10
-> Code: `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`, `apps/gateway/src/wallet-storage.ts`
+> Status: partial (P0 #5 + P1 #8 built; P1 #12 spend controls planned; #360 SQLite wallet storage built; #109 anonymous lots built behind configuration; real-money journey unproven) · Updated: 2026-10-10
+> Code: `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/machinePayments.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`, `apps/gateway/src/wallet-storage.ts`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
 > Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
@@ -10,14 +10,14 @@ Org-scoped prepaid credit wallet. Consumer organizations buy credits through one
 
 ## Product
 
-- Consumers (human devs and AI agents) pre-pay for credits — **org-scoped**: the organization owns the wallet, member keys draw from it, admins see per-member and per-key attribution. Solo devs get a personal org automatically; there is no separate personal-wallet model
+- Consumers (human devs and AI agents) pre-pay for credits — **org-scoped**: the organization owns the wallet, member keys draw from it, admins see per-member and per-key attribution. Solo devs get a personal org automatically; keyless payers use the anonymous wallet rail described below
 - Each call deducts credits based on the endpoint's price
 - **Zero balance blocks the call.** Never a surprise overage
 - **Exchange rate: $1 = 10,000 credits** (1 credit = $0.0001). Market per-call pricing of $0.002–$0.05 maps to 20–500 credits. Rate is a launch default, revisitable — but one global constant, never per-API
 - Credits are prepaid by consumer organizations via one-time top-up purchases
 - Signup grants $1 (10,000 credits) of non-refundable promotional credit to an eligible organization, once per creating account across its organizations. Promotional credit is spent first; it cannot be returned to a card. Anonymous wallets receive no grant.
 - **Platform fee is publisher-side (decided 2026-10-10)**: a consumer who tops up $10 gets $10 of credits — no top-up surcharge (unlike OpenRouter's 5.5%). Zevium keeps 5% of each call's spend; publisher gets 95%. Chosen to be consumer-friendly. See [decision](../decisions/2026-10-10-platform-fee-publisher-side.md) and [pricing](pricing.md)
-- **Two payment rails (decided 2026-10-10, not built)**: enterprises use API keys + org wallet + prepaid top-ups (this feature). Individuals/agents use keyless x402 funding an ephemeral wallet; zero balance still blocks; same 95/5. See [machine-payments](machine-payments.md)
+- **Two payment rails (#109 built behind configuration)**: enterprises use API keys + org wallet + prepaid top-ups (this feature). Individuals/agents use keyless x402 funding an ephemeral wallet; zero balance still blocks; same 95/5. See [machine-payments](machine-payments.md)
 - **Billing transparency**: usage dashboard with current-cycle consumption + projected cost, per-key and per-endpoint breakdown; spend alerts at 50/75/100% thresholds; budget webhooks
 - Consumers see: one gateway URL per API, one key, one wallet, itemized charges
 
@@ -55,6 +55,8 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Insufficient balance on `/gateway` returns `402` with machine-readable create-key / top-up / docs actions — see [gateway](gateway.md) and [machine-payments](machine-payments.md)
 
 ## Tech
+
+Anonymous wallets reuse organization ledger ownership with `walletKind: anonymous` and a payer/network namespace; no Clerk membership or signup credit. Each `machine_payment` lot has its own calendar-year expiry and cannot compact. The DO computes spendable inventory locally and reserves exact oldest-first lot slices. Token settlement consumes only actual-cost slices and releases the rest without extending expiry; token budgets exclude expired inventory. Free/refunded usage carries empty allocations; Convex settles those slices even if delivery occurs after expiry. Raw ledger balance retains expired inventory for audit and is not the spendable balance. Existing org wallets and publisher 95/5 earnings are unchanged. Setup, sandbox limits and code pointers live in [machine-payments](machine-payments.md).
 
 - **Email (#320)**: existing `low_balance` notifications now use the optional Resend delivery path. Planned 50/75/100% spend thresholds remain #12. Dormancy, recipients, and opt-out behavior: [webhooks-notifications](webhooks-notifications.md#transactional-email-320).
 - **Per-token pricing (#329)**: built for OpenAI-compatible JSON/SSE. Spec rates are exposed in catalogue references, editor, discovery, and MCP; admission holds an estimated maximum, an asynchronous tee observer settles actual usage, and wallet settlement releases the remainder. Missing usage charges zero. Wallet budget, whole-credit rounding, stream/parser limits, and `x-zevium-hold` are defined in the [pricing contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329). Code: `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `apps/gateway/src/{admit,finalize,wallet}.ts`, `convex/wallets.ts`. Unpriced operations are hidden; explicit zero-price calls remain available to funded wallets.
@@ -154,4 +156,4 @@ Key-verification bullet lives in [api-keys](api-keys.md).
 - P1 #12 spend controls (50/75/100% budget alerts, signed budget webhooks, hard-cap toggle) not built; only the undocumented low-balance cron (< 1,000 credits) exists
 - Billing route still `/app/billing`; FLOW target is `/app/organizations/{org}/billing`
 - Credit policy unsettled before production (from research doc): org-wallet credit expiry, refundability, promotional credits, abandoned/unclaimed balances, organization closure. Anonymous-wallet expiry is decided separately in [machine-payments](machine-payments.md)
-- Dual-rail decision adds a wallet keyed to payer address; PRODUCT still says "there is no separate personal-wallet model". Reconcile wording and ledger shape for ephemeral wallets
+- Anonymous machine-payment sandbox activation, refund policy and expiry accounting remain in [machine-payments](machine-payments.md).

@@ -1,3 +1,9 @@
+import {
+  type MachinePaymentDeps,
+  addPaymentOffer,
+  payForSession,
+  paymentHeader,
+} from "./machine-payments";
 import type { WalletDO } from "./wallet";
 import type { KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
@@ -11,6 +17,7 @@ export type PipelineEnv = {
 };
 
 export type PipelineDeps = {
+  machinePayments?: MachinePaymentDeps;
   keyVerifier: KeyVerifier;
   specSource: SpecSource;
   /** Upstream fetch — inject mock in tests. */
@@ -51,12 +58,46 @@ export async function handleGatewayRequest(
 ): Promise<Response> {
   const started = (deps.now ?? Date.now)();
   const requestId = deps.idGenerator?.() ?? crypto.randomUUID();
+  let paid:
+    | {
+        token: string;
+        payment: import("./machine-facilitator").VerifiedPayment;
+      }
+    | undefined;
+  const original = request;
+  if (request.headers.has("PAYMENT-SIGNATURE") && deps.machinePayments) {
+    const result = await payForSession(request, env, deps.machinePayments);
+    if (result instanceof Response)
+      return addPaymentOffer(result, request, deps.machinePayments);
+    paid = result;
+    const headers = new Headers(request.headers);
+    headers.set("authorization", `Bearer ${paid.token}`);
+    headers.delete("x-api-key");
+    headers.delete("PAYMENT-SIGNATURE");
+    request = new Request(request, { headers });
+  }
   const admission = await admit(request, env, deps, route, requestId, started);
-  if (admission instanceof Response) return admission;
-  return finalize(
-    admission,
-    await forward(request, admission, deps.fetchImpl, prepareResponse),
-    deps.now,
-    _ctx,
-  );
+  const response =
+    admission instanceof Response
+      ? admission
+      : await finalize(
+          admission,
+          await forward(request, admission, deps.fetchImpl, prepareResponse),
+          deps.now,
+          _ctx,
+        );
+  if (paid) {
+    response.headers.set("X-Zevium-Wallet-Session", paid.token);
+    response.headers.set(
+      "PAYMENT-RESPONSE",
+      paymentHeader({
+        success: true,
+        transaction: paid.payment.transaction,
+        network: paid.payment.network,
+        payer: paid.payment.payer,
+      }),
+    );
+    response.headers.set("cache-control", "no-store");
+  }
+  return addPaymentOffer(response, original, deps.machinePayments);
 }

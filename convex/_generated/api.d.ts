@@ -38,6 +38,7 @@ import type * as lib_stripePlatform from "../lib/stripePlatform.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
 import type * as lib_webhookTransport from "../lib/webhookTransport.js";
+import type * as machinePayments from "../machinePayments.js";
 import type * as notificationEmail from "../notificationEmail.js";
 import type * as notificationEmailAction from "../notificationEmailAction.js";
 import type * as notifications from "../notifications.js";
@@ -97,6 +98,7 @@ declare const fullApi: ApiFromModules<{
   "lib/validate": typeof lib_validate;
   "lib/webhookDelivery": typeof lib_webhookDelivery;
   "lib/webhookTransport": typeof lib_webhookTransport;
+  machinePayments: typeof machinePayments;
   notificationEmail: typeof notificationEmail;
   notificationEmailAction: typeof notificationEmailAction;
   notifications: typeof notifications;

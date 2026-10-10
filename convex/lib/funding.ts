@@ -1,3 +1,4 @@
+import { type MachineFunding, validMachineFunding } from "@zevium/shared";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 
@@ -262,7 +263,11 @@ export async function compactFundingInventory(
     )
     .order("asc")
     .take(FUNDING_COMPACTION_INPUTS);
-  if (lots.length < FUNDING_COMPACTION_INPUTS) return false;
+  if (
+    lots.length < FUNDING_COMPACTION_INPUTS ||
+    lots.some((lot) => lot.expiresAt !== undefined)
+  )
+    return false;
   await compactLots(ctx, state, lots, args.now);
   return true;
 }
@@ -281,6 +286,7 @@ export async function recordPositiveFundingSource(
     refundable: boolean;
     paymentId?: Id<"payments">;
     createdAt: number;
+    expiresAt?: number;
   },
 ): Promise<Doc<"walletFundingLots">> {
   if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
@@ -300,6 +306,7 @@ export async function recordPositiveFundingSource(
       existing.sourceKind !== args.sourceKind ||
       existing.paymentId !== args.paymentId ||
       existing.refundable !== args.refundable ||
+      existing.expiresAt !== args.expiresAt ||
       existing.grantedCredits !== args.amount
     ) {
       throw new FundingInvariantError(
@@ -368,6 +375,7 @@ export async function recordPositiveFundingSource(
     walletId: args.wallet._id,
     organizationId: args.wallet.organizationId,
     sourceKind: args.sourceKind,
+    expiresAt: args.expiresAt,
     sourceRef: args.sourceRef,
     paymentId: args.paymentId,
     refundable: args.refundable,
@@ -617,6 +625,11 @@ export async function preflightFundingAllocation(
   );
   for (const lot of nonrefundableLots) {
     if (remaining === 0 || items.length === MAX_FUNDING_LOTS_PER_DEBIT) break;
+    if (lot.expiresAt !== undefined)
+      throw new FundingInvariantError(
+        "Anonymous funding requires an edge allocation",
+        false,
+      );
     const grossCredits = Math.min(lot.availableCredits, remaining);
     if (grossCredits <= 0) continue;
     items.push({
@@ -638,6 +651,11 @@ export async function preflightFundingAllocation(
     );
     for (const lot of refundableLots) {
       if (remaining === 0 || items.length === MAX_FUNDING_LOTS_PER_DEBIT) break;
+      if (lot.expiresAt !== undefined)
+        throw new FundingInvariantError(
+          "Anonymous funding requires an edge allocation",
+          false,
+        );
       const grossCredits = Math.min(lot.availableCredits, remaining);
       if (grossCredits <= 0) continue;
       items.push({
@@ -796,4 +814,56 @@ export async function commitFundingAllocation(
     migrationWatermarkSequence: args.walletSequence,
     updatedAt: args.createdAt,
   });
+}
+
+/** Exact edge reservation attribution, independent of delivery order and flush time. */
+export async function preflightMachineFunding(
+  ctx: MutationCtx,
+  wallet: Doc<"wallets">,
+  credits: number,
+  funding: MachineFunding | undefined,
+): Promise<FundingPlan> {
+  if (
+    !validMachineFunding(funding) ||
+    funding.lots.reduce((sum, lot) => sum + lot.credits, 0) !== credits
+  )
+    throw new FundingInvariantError(
+      "Invalid anonymous funding allocation",
+      false,
+    );
+  const state = await requireVerifiedWalletFunding(ctx, wallet);
+  const items: FundingPlanItem[] = [];
+  for (const slice of funding.lots) {
+    const lot = await ctx.db
+      .query("walletFundingLots")
+      .withIndex("by_source_ref", (q) => q.eq("sourceRef", slice.sourceRef))
+      .unique();
+    if (
+      !lot ||
+      lot.walletId !== wallet._id ||
+      lot.sourceKind !== "machine_payment" ||
+      lot.expiresAt === undefined ||
+      funding.admittedAt < lot.createdAt ||
+      funding.admittedAt >= lot.expiresAt ||
+      slice.credits > lot.availableCredits
+    )
+      throw new FundingInvariantError(
+        "Anonymous funding is expired or unavailable",
+        false,
+      );
+    items.push({
+      lot,
+      grossCredits: slice.credits,
+      provenance: splitProvenance(availableProvenance(lot), slice.credits)
+        .consumed,
+    });
+  }
+  return {
+    state,
+    items,
+    credits,
+    nonrefundableCredits: credits,
+    refundableCredits: 0,
+    estimatedWriteUnits: items.length * 3 + 2,
+  };
 }

@@ -1,11 +1,4 @@
-/**
- * Generic payment-required envelope for /gateway and /mock.
- *
- * This is not x402: no payment requirements, signed-payment retry,
- * facilitator verification, or settlement exists in this tree. The envelope
- * only gives key/prepaid-credit users machine-readable recovery actions.
- */
-
+/** Human recovery envelope; configured machine rail adds x402 V2 requirements. */
 const ACTIONS = {
   createKey: "https://zevium.dev/app/settings/keys",
   topUp: "https://zevium.dev/app/billing",

@@ -160,3 +160,4 @@ export {
 } from "./registry-sync.js";
 
 export { synthesize } from "./mock.js";
+export * from "./machine-payments";
