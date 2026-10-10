@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { AgentInstall } from "#/components/agent-install";
 import { DocsCodeBlock } from "#/components/docs-code-block";
 import { DocsPage } from "#/components/docs-layout";
 import {
-  buildMcpConfigSnippet,
   discoveryEndpointUrl,
-  mcpEndpointUrl,
   resolveGatewayOrigin,
+  tryItBaseUrl,
 } from "#/lib/landing";
 
 export const Route = createFileRoute("/docs/agents")({
@@ -26,9 +26,7 @@ export const Route = createFileRoute("/docs/agents")({
 const GATEWAY = resolveGatewayOrigin(
   import.meta.env.VITE_GATEWAY_URL as string | undefined,
 );
-const MCP_URL = mcpEndpointUrl(GATEWAY);
 const DISCOVERY_URL = discoveryEndpointUrl(GATEWAY);
-const MCP_CONFIG = buildMcpConfigSnippet(MCP_URL);
 
 function DocsAgentsPage() {
   return (
@@ -42,11 +40,9 @@ function DocsAgentsPage() {
         Use a client that supports Streamable HTTP and authenticate with a
         Zevium API key:
       </p>
-      <DocsCodeBlock lang="json" code={MCP_CONFIG} />
+      <AgentInstall gatewayOrigin={GATEWAY} />
       <p>
-        The <code>url</code> above resolves from the gateway origin. Replace{" "}
-        <code>YOUR_API_KEY</code> with a key (prefix <code>ak_</code>) from{" "}
-        Settings → Keys.
+        <a href="/llms.txt">Agent-readable setup guide (llms.txt)</a>
       </p>
 
       <h2>Discovery index</h2>
@@ -113,7 +109,7 @@ function DocsAgentsPage() {
       </p>
       <DocsCodeBlock
         lang="text"
-        code={`${GATEWAY}/mock/{org}/{project}/{path}`}
+        code={`${tryItBaseUrl(GATEWAY, true)}/{org}/{project}/{path}`}
       />
       <p>
         Mock calls need no API key and cost <code>0</code> credits. Responses

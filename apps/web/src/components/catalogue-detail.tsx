@@ -11,7 +11,7 @@ import {
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useHydrated } from "@tanstack/react-router";
-import { PackageX, Terminal, TriangleAlert } from "lucide-react";
+import { PackageX, TriangleAlert } from "lucide-react";
 import {
   Suspense,
   useCallback,
@@ -22,6 +22,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { AgentInstall } from "#/components/agent-install";
+import { DocsCodeBlock } from "#/components/docs-code-block";
 import {
   CatalogueShell,
   useCatalogueLinks,
@@ -69,12 +71,7 @@ import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import type { ApiDetailSearch } from "#/lib/catalogue-detail-search";
 import { creditsLabel } from "#/lib/credits-label";
-import {
-  buildMcpConfigSnippet,
-  mcpEndpointUrl,
-  resolveGatewayOrigin,
-  tryItBaseUrl,
-} from "#/lib/landing";
+import { resolveGatewayOrigin, tryItBaseUrl } from "#/lib/landing";
 import {
   appendQueryParameters,
   buildRequestPath,
@@ -1316,8 +1313,6 @@ function ConnectAgentPanel({
   const gatewayOrigin = resolveGatewayOrigin(
     import.meta.env.VITE_GATEWAY_URL as string | undefined,
   );
-  const mcpUrl = mcpEndpointUrl(gatewayOrigin);
-  const snippet = buildMcpConfigSnippet(mcpUrl);
 
   const notes = `// Agent notes for ${publisherHandle}/${projectSlug}
 // 1. Search catalogue with tool search_apis({ query })
@@ -1327,24 +1322,7 @@ function ConnectAgentPanel({
 
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      <Card className="min-w-0">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Terminal className="size-4" />
-            MCP config
-          </CardTitle>
-          <CardDescription>
-            Paste into your agent client. Replace YOUR_API_KEY with a Zevium
-            key.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="min-w-0 space-y-3">
-          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
-            <SyntaxCode code={snippet} lang="json" />
-          </pre>
-          <CopyButton text={snippet} label="Copy config" />
-        </CardContent>
-      </Card>
+      <AgentInstall gatewayOrigin={gatewayOrigin} />
 
       <Card className="min-w-0">
         <CardHeader>
@@ -1354,10 +1332,7 @@ function ConnectAgentPanel({
           </CardDescription>
         </CardHeader>
         <CardContent className="min-w-0 space-y-3">
-          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
-            <SyntaxCode code={notes} lang="js" />
-          </pre>
-          <CopyButton text={notes} label="Copy notes" />
+          <DocsCodeBlock code={notes} lang="js" copyLabel="Copy notes" />
         </CardContent>
       </Card>
     </div>
