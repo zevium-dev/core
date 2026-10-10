@@ -210,7 +210,7 @@ describe("summarizePublishedPricing", () => {
     });
   });
 
-  it("defaults missing cost to 1 and empty paths to zeros", () => {
+  it("hides missing cost and summarizes empty paths as zeros", () => {
     expect(
       summarizePublishedPricing(
         openapiSpec({
@@ -218,9 +218,9 @@ describe("summarizePublishedPricing", () => {
         }),
       ),
     ).toEqual({
-      minCost: 1,
-      maxCost: 1,
-      endpointCount: 1,
+      minCost: 0,
+      maxCost: 0,
+      endpointCount: 0,
       hasFreeTier: false,
     });
 

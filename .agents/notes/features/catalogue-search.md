@@ -45,6 +45,8 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 ## Tech
 
+- **Per-token pricing (#329)**: built for OpenAI-compatible JSON/SSE. Spec rates are exposed in catalogue references, editor, discovery, and MCP; admission holds an estimated maximum, an asynchronous tee observer settles actual usage, and wallet settlement releases the remainder. Missing usage charges zero. Wallet budget, whole-credit rounding, stream/parser limits, and `x-zevium-hold` are defined in the [pricing contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329). Code: `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `apps/gateway/src/{admit,finalize,wallet}.ts`, `convex/wallets.ts`. Unpriced operations are hidden; explicit zero-price calls remain available to funded wallets.
+
 - **Realtime lists (#363)**: `CatalogueList` uses Convex `usePaginatedQuery` over `catalogue.listPublicPaginated`; every loaded page remains subscribed and filter arguments reset pagination during render. Empty filtered pages remain loadable. `listPublic` retains its cursor/items contract for landing and SSR callers; the new endpoint shares its indexed implementation and preserves Convex split/end cursors. `publicFacets` subscribes independently. Public catalogue reuses its dehydrated first page while the live hook starts.
 - **Detail fixes (#363)**: endpoints memoize on the immutable spec string; playground defaults reset only on selected endpoint id, preserving inputs/results during quality refreshes. Agent notes normalize the live `/gateway` base; key placeholder uses `ak_`; sign-in return paths follow the active catalogue namespace. Quality percentages require finite numeric evidence. Request/reference examples use shared `mock.ts` synthesis, including component refs.
 - **Shared presentation (#363)**: stock shadcn Table, `components/copy-button.tsx`, `lib/format.ts`, and local `ListBoundary` replace duplicate rendering/copy/error machinery. Public and in-app route adapters remain separate because their authentication/provider and SSR boundaries differ; their page components are shared.
@@ -68,7 +70,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 ## Decisions
 
 - None recorded beyond TECH.md bullets above.
-- 2026-10-10 — ACCEPTED (not built): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — House listings labeled "Operated by Zevium". [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
 
 ## Open questions

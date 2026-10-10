@@ -3,7 +3,12 @@
  * Spec is source of truth for upstream URL, routes, and x-zevium-* pricing.
  */
 
-import { MAX_ENDPOINT_COST_CREDITS, type EndpointPricing } from "./pricing.js";
+import {
+  MAX_ENDPOINT_COST_CREDITS,
+  type EndpointPricing,
+  type TokenPricing,
+  parseTokenPricing,
+} from "./pricing.js";
 
 export const MAX_OPENAPI_SPEC_BYTES = 393_216;
 
@@ -29,7 +34,7 @@ export type OpenApiOperation = {
   operationId?: string;
   summary?: string;
   /** Raw vendor extensions + standard fields we care about. */
-  "x-zevium-cost"?: number;
+  "x-zevium-cost"?: number | TokenPricing;
   "x-zevium-free-tier"?: number;
   [key: string]: unknown;
   /** Explicit opt-in for one credential-free, side-effect-free health probe. */
@@ -192,7 +197,11 @@ export function matchOperation(
     }
   }
 
-  if (selected === undefined) return null;
+  if (
+    selected === undefined ||
+    selected.operation["x-zevium-cost"] === undefined
+  )
+    return null;
   const op = selected.operation;
   return {
     operation: op,
@@ -243,11 +252,20 @@ export function parseCreditExtension(
 
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
   const costValue = op["x-zevium-cost"];
+  const token =
+    typeof costValue === "object" && costValue !== null
+      ? parseTokenPricing(costValue)
+      : undefined;
   let cost: number;
   if (costValue === undefined) {
-    // Unspecified → default credit cost. 0 is NOT defaulted — it is a valid
-    // free-tier cost (free endpoint, publisher-funded free tier aside).
-    cost = 1;
+    throw new Error(
+      "Operation is hidden until x-zevium-cost is explicitly set",
+    );
+  } else if (token) {
+    cost =
+      token.input === 0 && token.output === 0
+        ? 0
+        : (token.maxPerCall ?? MAX_ENDPOINT_COST_CREDITS);
   } else {
     cost = parseCreditExtension(costValue, "x-zevium-cost");
   }
@@ -260,7 +278,11 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
     freeTier = freeRaw > 0 ? freeRaw : undefined;
   }
 
-  return freeTier !== undefined ? { cost, freeTier } : { cost };
+  return {
+    cost,
+    ...(token ? { token } : {}),
+    ...(freeTier !== undefined ? { freeTier } : {}),
+  };
 }
 
 /** Remove trailing slashes in linear time, including for untrusted input. */

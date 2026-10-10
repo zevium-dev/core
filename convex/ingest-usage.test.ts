@@ -975,3 +975,69 @@ describe("one-time release proof", () => {
     ).resolves.toMatchObject({ requestId: SECOND_REQUEST_ID });
   });
 });
+
+describe("token usage settlement", () => {
+  it.each([18, 0])(
+    "ingests actual %i against a larger hold with exact 95/5 split and replay safety",
+    async (actual) => {
+      const t = convexTest(schema, modules);
+      const seed = await seedWallet(t);
+      await t.mutation(internal.wallets.grantPaymentCredits, {
+        organizationId: seed.consumerOrganizationId,
+        paymentId: seed.paymentId,
+        amount: 100,
+        refId: "stripe:payment_intent:pi_test",
+      });
+      const event = {
+        ...usageEvent(seed, "settle:token-usage", actual),
+        listedCostCredits: 100,
+        budgetReservationCredits: 100,
+        pricingDecision: "token_usage" as const,
+        billingOutcome: actual === 0 ? ("free" as const) : ("settled" as const),
+      };
+      expect(parseIngestUsageBody({ events: [event] }).ok).toBe(true);
+      const result = await t.mutation(internal.wallets.recordUsage, {
+        events: [event],
+      });
+      expect(result.results).toEqual([
+        { refId: event.settleRefId, status: "applied" },
+      ]);
+      expect(result.wallet?.balance).toBe(100 - actual);
+      const replay = await t.mutation(internal.wallets.recordUsage, {
+        events: [event],
+      });
+      expect(replay.results[0]?.status).toBe("already_applied");
+      await t.run(async (ctx) => {
+        const usage = await ctx.db.query("usageEvents").collect();
+        expect(usage).toHaveLength(1);
+        expect(usage[0]).toMatchObject({
+          credits: actual,
+          listedCostCredits: 100,
+          pricingDecision: "token_usage",
+        });
+        const earnings = await ctx.db.query("publisherEarnings").collect();
+        if (actual > 0)
+          expect(earnings[0]).toMatchObject({
+            grossCredits: actual,
+            platformFeeCredits: 0.9,
+            netCredits: 17.1,
+          });
+        else expect(earnings).toHaveLength(0);
+      });
+    },
+  );
+  it("rejects charges above hold", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    const event = {
+      ...usageEvent(seed, "settle:token-overcharge", 101),
+      listedCostCredits: 100,
+      budgetReservationCredits: 100,
+      pricingDecision: "token_usage" as const,
+    };
+    const result = await t.mutation(internal.wallets.recordUsage, {
+      events: [event],
+    });
+    expect(result.results[0]?.status).toBe("rejected");
+  });
+});

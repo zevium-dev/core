@@ -5,6 +5,8 @@ import { filterResponseHeaders } from "./headers";
 import { applyDeprecationHeaders } from "./deprecation";
 import { jsonError } from "./errors";
 
+import { readTokenCharge } from "./token-metering";
+
 function qualityOutcomeForStatus(
   status: number,
 ): SettlementUsage["qualityOutcome"] {
@@ -14,11 +16,12 @@ function qualityOutcomeForStatus(
   return "network_error";
 }
 
-/** Settle/refund through the durable wallet outbox, then return the body stream. */
+/** Token settlement follows stream observation asynchronously; scalar settlement is immediate. */
 export async function finalize(
   admission: Admission,
   result: ForwardResult,
   now: () => number = Date.now,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const {
     requestId,
@@ -62,7 +65,28 @@ export async function finalize(
     ...(upstreamRes && releaseChallenge ? { releaseChallenge } : {}),
     ...(upstreamRes && gatewayRelease ? { gatewayRelease } : {}),
   };
-  if (usedFree || unmetered) {
+  let responseBody = upstreamRes?.body ?? null;
+  if (success && !usedFree && !unmetered && matched.pricing.token) {
+    const branches = responseBody?.tee();
+    responseBody = branches?.[0] ?? null;
+    const settlement = readTokenCharge(
+      branches?.[1] ?? null,
+      upstreamRes?.headers.get("content-type") ?? "",
+      matched.pricing.token,
+      cost,
+    ).then(async (actual) => {
+      await wallet.settle(
+        reservationId,
+        {
+          ...usageMeta,
+          billingOutcome: actual === 0 ? "free" : "settled",
+          latencyMs: now() - started,
+        },
+        actual,
+      );
+    });
+    ctx.waitUntil(settlement);
+  } else if (usedFree || unmetered) {
     if (usedFree && !success)
       await wallet.refundFreeTier({ ...freeTierScope, nowMs: now() });
     await wallet.enqueueFreeUsage(reservationId, usageMeta);
@@ -83,10 +107,12 @@ export async function finalize(
   }
   const outHeaders = filterResponseHeaders(result.response.headers);
   outHeaders.set("x-zevium-request-id", requestId);
-  outHeaders.set("x-zevium-cost", String(usedFree ? 0 : cost));
+  if (matched.pricing.token && !usedFree && !unmetered)
+    outHeaders.set("x-zevium-hold", String(cost));
+  else outHeaders.set("x-zevium-cost", String(usedFree ? 0 : cost));
   if (usedFree) outHeaders.set("x-zevium-free-tier", "1");
   applyDeprecationHeaders(outHeaders, published, route);
-  return new Response(result.response.body, {
+  return new Response(responseBody, {
     status: result.response.status,
     statusText: result.response.statusText,
     headers: outHeaders,

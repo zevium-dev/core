@@ -49,6 +49,7 @@ import { WalletRows } from "./wallet-storage";
 
 export type InFlightEntry = {
   cost: number;
+  tokenPricing?: boolean;
   createdAt: number;
   /** Physical key retained for audit/debug compatibility. */
   keyId?: string;
@@ -82,7 +83,7 @@ export type SettlementUsage = {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   status: number;
   latencyMs: number;
   keyId: string;
@@ -150,6 +151,7 @@ export type ReserveResult =
   | { status: "rejected"; reason: string };
 
 export type SettleResult =
+  | { status: "rejected"; reason: string }
   | { status: "settled"; settlementId: string; balance: number }
   | { status: "already_settled"; settlementId: string }
   | { status: "already_refunded" }
@@ -249,6 +251,7 @@ export type KeySetting = {
 
 /** Optional key-context for a reservation (key enforcement). */
 export type ReserveOptions = {
+  tokenPricing?: boolean;
   keyId?: string;
   /** Clerk org id owning this wallet — used for lazy settings refresh. */
   clerkOrgId?: string;
@@ -832,6 +835,13 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       }
 
       const available = this.#available();
+      if (opts.tokenPricing && this.#balance > 0) {
+        const budget = Math.min(Math.floor(this.#balance / 2), 100_000);
+        if (cost > budget)
+          return { status: "rejected", reason: "weight_exceeds_budget" };
+        if (sumInFlight(this.#inFlight) + cost > budget)
+          return { status: "rejected", reason: "in_flight_budget_exhausted" };
+      }
       if (available < cost) {
         return { status: "insufficient", available, cost };
       }
@@ -850,6 +860,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
       };
       this.#inFlight[reservationId] = {
         cost,
+        ...(opts.tokenPricing ? { tokenPricing: true } : {}),
 
         createdAt: reservedAt,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
@@ -865,6 +876,7 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
   async settle(
     reservationId: string,
     usage?: SettlementUsage,
+    actualCost?: number,
   ): Promise<SettleResult> {
     if (!reservationId) return { status: "unknown" };
 
@@ -890,7 +902,18 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
 
       const settlementId = settlementIdFor(reservationId);
       const settledAt = Date.now();
-      const { cost } = entry;
+      if (actualCost !== undefined && !entry.tokenPricing)
+        return {
+          status: "rejected",
+          reason: "Partial settlement requires token pricing",
+        };
+      const cost = actualCost ?? entry.cost;
+      if (!Number.isSafeInteger(cost) || cost < 0 || cost > entry.cost) {
+        return {
+          status: "rejected",
+          reason: "Settlement cost must be within the reservation",
+        };
+      }
       let authoritativeUsage = usage;
       if (usage !== undefined) {
         if (entry.keyBudget === undefined) {

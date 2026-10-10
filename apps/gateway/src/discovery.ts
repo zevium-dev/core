@@ -4,6 +4,7 @@
  */
 
 import {
+  type TokenPricing,
   extractPricing,
   type HttpMethod,
   type ParsedOpenApiSpec,
@@ -29,7 +30,9 @@ const HTTP_METHODS: readonly HttpMethod[] = [
 export type DiscoveryEndpoint = {
   method: string;
   path: string;
-  credits: number;
+  credits?: number;
+  maxHoldCredits?: number;
+  tokenPricing?: TokenPricing;
   summary?: string;
   freeTier?: number;
 };
@@ -64,11 +67,15 @@ export function endpointsFromSpec(
     for (const method of HTTP_METHODS) {
       const op = pathItem[method];
       if (!op) continue;
+      if (op["x-zevium-cost"] === undefined) continue;
       const pricing = extractPricing(op);
       const endpoint: DiscoveryEndpoint = {
         method: method.toUpperCase(),
         path,
-        credits: pricing.cost,
+        ...(pricing.token
+          ? { maxHoldCredits: pricing.cost }
+          : { credits: pricing.cost }),
+        ...(pricing.token ? { tokenPricing: pricing.token } : {}),
       };
       if (typeof op.summary === "string" && op.summary.length > 0) {
         endpoint.summary = op.summary;

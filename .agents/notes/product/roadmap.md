@@ -87,7 +87,7 @@ Bigger P0 items (x402 rail, distribution, capability routing, house supply, LLM 
 | 18  | Security-scan + uptime badges as listing gates; per-API status pages                                                                  | [quality-signals](../features/quality-signals.md)       |
 | 19  | Version pinning per key + spec-diff changelog                                                                                         | [listing-lifecycle](../features/listing-lifecycle.md)   |
 | 20  | Dispute-a-call flow (successful-but-garbage-response refunds, credits held pending review) + SLA tiers with automatic service credits | [wallet-billing](../features/wallet-billing.md)         |
-| 21  | Per-token / outcome-based pricing extensions                                                                                          | [pricing](../features/pricing.md)                       |
+| 21  | Outcome-based pricing extensions (per-token shipped in #329)                                                                          | [pricing](../features/pricing.md)                       |
 | 22  | ~~Provider fallback routing~~ → moved to P0 #7c on 2026-10-10                                                                         | [capability-routing](../features/capability-routing.md) |
 | —   | Verified reviews                                                                                                                      | [reviews](../features/reviews.md)                       |
 | —   | Generated SDKs                                                                                                                        | [landing-docs](../features/landing-docs.md)             |
@@ -101,7 +101,7 @@ Decision: [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md), [house supply
 - **Accepted → P0**: x402 keyless rail, agent distribution, capability routing, house supply via aggregators
 - **Not approved**: infra freeze
 - **Superseded**: single launch vertical — replaced by aggregator-sourced breadth
-- **Still proposed**: per-token pricing (#21) P2 → P1 for LLM-wrapping APIs ([proposal](../decisions/2026-10-10-llm-per-token-pricing.md))
+- **Built #329 (P0)**: per-token pricing for LLM-wrapping APIs; hold then settle observed usage. [Decision](../decisions/2026-10-10-llm-per-token-pricing.md). Outcome-based pricing remains #21.
 
 ## Later
 

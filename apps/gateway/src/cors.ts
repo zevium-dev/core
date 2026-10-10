@@ -8,7 +8,7 @@
 
 const ALLOW_HEADERS = "authorization, x-api-key, content-type, accept";
 const EXPOSE_HEADERS =
-  "x-zevium-cost, x-zevium-request-id, x-zevium-free-tier, x-zevium-mock, deprecation, sunset, link";
+  "x-zevium-cost, x-zevium-hold, retry-after, x-zevium-request-id, x-zevium-free-tier, x-zevium-mock, deprecation, sunset, link";
 
 /** Terminal response for OPTIONS preflights. */
 export function corsPreflight(): Response {

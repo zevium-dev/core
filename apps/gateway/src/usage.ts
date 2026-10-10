@@ -20,7 +20,7 @@ export type ConvexUsageRecord = {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   credits: number;
   status: number;
   latencyMs: number;
@@ -269,7 +269,7 @@ export function pendingToUsageRecord(input: {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   status: number;
   latencyMs: number;
   keyId: string;

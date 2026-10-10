@@ -57,5 +57,6 @@ export async function handleGatewayRequest(
     admission,
     await forward(request, admission, deps.fetchImpl, prepareResponse),
     deps.now,
+    _ctx,
   );
 }

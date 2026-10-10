@@ -114,9 +114,9 @@ describe("matchOperation", () => {
     expect(hit!.operation.operationId).toBe("getUser");
   });
 
-  it("defaults cost to 1 when extension missing", () => {
+  it("hides operations with missing price", () => {
     const hit = matchOperation(spec, "PUT", "/items/1/tags/hot");
-    expect(hit!.pricing).toEqual({ cost: 1 });
+    expect(hit).toBeNull();
   });
 
   it("is case-insensitive on method", () => {
@@ -178,8 +178,8 @@ describe("matchOperation", () => {
 });
 
 describe("extractPricing", () => {
-  it("defaults unspecified cost to 1 and omits freeTier", () => {
-    expect(extractPricing({})).toEqual({ cost: 1 });
+  it("rejects unspecified pricing", () => {
+    expect(() => extractPricing({})).toThrow(/hidden/);
   });
 
   it("keeps cost 0 as a valid free-tier cost (no rewrite to 1)", () => {
