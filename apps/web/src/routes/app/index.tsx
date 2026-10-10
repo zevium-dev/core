@@ -34,7 +34,6 @@ import {
 } from "#/components/ui/empty";
 import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
-import { listKeys } from "#/lib/api-keys";
 import { api } from "#/lib/convex-api";
 
 import {
@@ -106,7 +105,7 @@ function DashboardPage() {
 
   return (
     <Suspense fallback={<DashboardSkeleton />}>
-      <DashboardContent orgSlug={orgSlug} userId={userId} orgId={orgId} />
+      <DashboardContent orgSlug={orgSlug} userId={userId} />
     </Suspense>
   );
 }
@@ -115,11 +114,9 @@ function DashboardContent({
   orgSlug,
 
   userId,
-  orgId,
 }: {
   orgSlug: string;
   userId: string;
-  orgId: string;
 }) {
   const { membership } = useOrganization();
   const canAdministerWallet = isPrivilegedOrgRole(membership?.role);
@@ -132,14 +129,11 @@ function DashboardContent({
   );
   const wallet = walletQuery.data;
 
-  const keysQuery = useQuery({
-    queryKey: ["settings", "api-keys", "count", userId, orgId] as const,
-    queryFn: () => listKeys(),
-    staleTime: 30_000,
-  });
+  const keysQuery = useQuery(convexQuery(api.keySettings.listKeys, {}));
 
   const keyCount = keysQuery.isSuccess
-    ? keysQuery.data.filter((key) => key.current).length
+    ? keysQuery.data.filter((key) => key.ownerUserId === userId && key.current)
+        .length
     : 0;
   const keysLoaded = keysQuery.isSuccess;
   const flags = deriveOnboardingFlags({

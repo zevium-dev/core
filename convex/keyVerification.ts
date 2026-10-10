@@ -2,7 +2,7 @@
 
 import { createClerkClient } from "@clerk/backend";
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 function claimString(claims: unknown, name: string): string | undefined {
@@ -39,5 +39,40 @@ export const syncVerifiedKey = action({
       ownerUserId: key.subject,
       clerkOrgId,
     });
+  },
+});
+
+/** Compensation after local revocation: never resurrect a terminal registry key. */
+export const revokeWithRetry = internalAction({
+  args: { keyId: v.string(), attempt: v.number() },
+  handler: async (ctx, args): Promise<void> => {
+    try {
+      const client = createClerkClient({
+        secretKey: process.env.CLERK_SECRET_KEY,
+      });
+      const key = await client.apiKeys.get(args.keyId);
+      if (!key.revoked) {
+        await client.apiKeys.revoke({
+          apiKeyId: args.keyId,
+          revocationReason: "Zevium key revoked",
+        });
+      }
+    } catch {
+      if (args.attempt < 5) {
+        await ctx.scheduler.runAfter(
+          60_000 * 2 ** args.attempt,
+          internal.keyVerification.revokeWithRetry,
+          {
+            keyId: args.keyId,
+            attempt: args.attempt + 1,
+          },
+        );
+      } else {
+        // Static error only: SDK responses may contain provider internals.
+        throw new Error(
+          "Provider key cleanup exhausted retries; local revocation remains effective",
+        );
+      }
+    }
   },
 });

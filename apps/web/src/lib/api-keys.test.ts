@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  get: vi.fn(),
   create: vi.fn(),
   revoke: vi.fn(),
   query: vi.fn(),
@@ -41,12 +42,13 @@ vi.mock("@zevium/shared", () => ({
 }));
 
 import { api } from "./convex-api";
-import { createKey } from "./api-keys";
+import { createKey, revokeKey } from "./api-keys";
 
 beforeEach(() => {
   vi.stubEnv("VITE_CONVEX_URL", "https://example.convex.cloud");
   vi.stubEnv("REGISTRY_KEY_PROJECTION_HMAC_SECRET", "test-projection-secret");
   mocks.list.mockResolvedValue({ data: [] });
+  mocks.get.mockResolvedValue({ id: "key_qa", revoked: false });
   mocks.query.mockResolvedValue([]);
   mocks.create.mockResolvedValue({
     id: "key_qa",
@@ -72,19 +74,17 @@ describe("API key creation attribution", () => {
       api.keySettings.registerVerified,
       expect.objectContaining({ signature: "signature" }),
     );
-    expect(mocks.mutation).toHaveBeenNthCalledWith(
-      2,
-      api.keySettings.registerOwnedKey,
-      { keyId: "key_qa", keyName: "QA agent" },
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
+    expect(mocks.mutation).toHaveBeenCalledWith(
+      api.keySettings.registerVerified,
+      expect.objectContaining({ keyName: "QA agent" }),
     );
     expect(result.name).toBe("QA agent");
     expect(mocks.revoke).not.toHaveBeenCalled();
   });
 
   it("revokes the new key if attribution cannot be recorded", async () => {
-    mocks.mutation
-      .mockResolvedValueOnce({})
-      .mockRejectedValueOnce(new Error("Attribution unavailable"));
+    mocks.mutation.mockRejectedValueOnce(new Error("Attribution unavailable"));
 
     await expect(createKey({ data: { name: "QA agent" } })).rejects.toThrow(
       "Attribution unavailable",
@@ -93,5 +93,41 @@ describe("API key creation attribution", () => {
       apiKeyId: "key_qa",
       revocationReason: "Zevium key projection failed",
     });
+  });
+});
+
+describe("API key revocation ordering", () => {
+  it("authorizes and revokes the projection before any provider call", async () => {
+    await revokeKey({ data: { id: "key_qa" } });
+    expect(mocks.mutation).toHaveBeenCalledWith(
+      api.keySettings.revokePrevious,
+      { keyId: "key_qa" },
+    );
+    expect(mocks.mutation.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.get.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.get.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.revoke.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("never touches Clerk when Convex denies authorization", async () => {
+    mocks.mutation.mockRejectedValue(new Error("Verified key not found"));
+    await expect(revokeKey({ data: { id: "key_qa" } })).rejects.toThrow(
+      "Verified key not found",
+    );
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.revoke).not.toHaveBeenCalled();
+  });
+
+  it("keeps local revocation on Clerk failure and exposes only intentional cleanup copy", async () => {
+    mocks.revoke.mockRejectedValue(
+      new Error("Sensitive Clerk request details"),
+    );
+    await expect(revokeKey({ data: { id: "key_qa" } })).resolves.toEqual({
+      id: "key_qa",
+      providerCleanupPending: true,
+    });
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
   });
 });
