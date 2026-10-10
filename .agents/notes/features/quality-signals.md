@@ -1,7 +1,7 @@
 # Quality signals
 
 > Status: partial (P0 #7 quality signals mostly built; P2 #18 security scan + status pages not built) · Updated: 2026-10-10
-> Code: `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`
+> Code: `convex/projects.ts`, `convex/project-authorization.test.ts`, `convex/project-retirement.test.ts`, `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`
 > Related: [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [catalogue-search](catalogue-search.md), [platform-admin](platform-admin.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [roadmap](../product/roadmap.md)
 
 Listing quality is measured and enforced. Catalogue listings carry evidence-based badges (real-call latency, real-call success rate, declared-health reachability, freshness), publication is gated by a reachable declared health endpoint, and repeated health failures suspend a listing until bounded recovery. Curation and quality gates matter more than raw catalogue size.
@@ -34,6 +34,8 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 ## Tech
 
+- **Quality state ownership (#355)**: metadata edits and retirement cancellation preserve `qualityStatus`, suspension time/reason, recovery passes, `desiredVisibility`, and `publicationGeneration`. Only the quality workflow restores a suspended listing. Regression coverage: `convex/project-authorization.test.ts` and `convex/project-retirement.test.ts`.
+
 No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-10):
 
 - **Health-check declaration**: exactly one parameter-free `GET`/`HEAD` operation marked `x-zevium-health-check: true`, absolute path, no `{}`/`?`/`#` (`extractHealthCheckTarget`); URL joined onto `servers[0].url`.
@@ -50,6 +52,8 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - None recorded beyond PRODUCT.md rules above.
 
 ## Open questions
+
+- Resolved #355: `projects.update` and `cancelRetirement` no longer erase suspension through partial document replacement.
 
 - [roadmap](../product/roadmap.md) (former BACKLOG) "Public quality signals and automated listing gates" (probe reachability/uptime, expose latency/success/freshness, block publication on failed gates) is largely built in code; backlog stale. Remaining: per-API status surfaces.
 - FLOW says listing cards show quality badges; code renders `QualityBadges` only on detail page, though `listPublic` returns `quality`.

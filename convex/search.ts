@@ -20,7 +20,8 @@ import {
   internalMutation,
   internalQuery,
 } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { components, internal } from "./_generated/api";
+import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
@@ -46,6 +47,116 @@ const GEMINI_EMBED_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
 /** Must match the `by_embedding` vectorIndex dimensions in schema.ts. */
 const EMBED_DIMENSIONS = 768;
+
+const QUERY_CACHE_TTL_MS = 24 * 60 * MINUTE;
+const QUERY_EMBED_LEASE_MS = 30_000;
+const searchRateLimiter = new RateLimiter(components.rateLimiter, {
+  signedInSearch: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 20,
+  },
+  anonymousSearch: {
+    kind: "token bucket",
+    rate: 30,
+    period: MINUTE,
+    capacity: 30,
+  },
+  searchBudget: {
+    kind: "token bucket",
+    rate: 120,
+    period: MINUTE,
+    capacity: 120,
+  },
+});
+
+type QueryEmbeddingAdmission =
+  | { status: "limited" }
+  | { status: "pending" }
+  | { status: "cached"; embedding: number[] }
+  | {
+      status: "admitted";
+      id: Doc<"searchQueryEmbeddings">["_id"];
+      leaseToken: string;
+    };
+
+/** Atomically rate-limit and claim cache misses, including concurrent searches. */
+export const prepareQueryEmbedding = internalMutation({
+  args: { query: v.string() },
+  handler: async (ctx, args): Promise<QueryEmbeddingAdmission> => {
+    const identity = await ctx.auth.getUserIdentity();
+    // Convex actions have no trusted client IP/session for anonymous callers.
+    // A shared bucket cannot be bypassed by rotating a caller-supplied id.
+    const caller =
+      identity === null
+        ? await searchRateLimiter.limit(ctx, "anonymousSearch")
+        : await searchRateLimiter.limit(ctx, "signedInSearch", {
+            key: identity.tokenIdentifier,
+          });
+    if (!caller.ok) return { status: "limited" };
+    const budget = await searchRateLimiter.limit(ctx, "searchBudget");
+    if (!budget.ok) return { status: "limited" };
+
+    const cacheKey = `gemini-embedding-001:768:RETRIEVAL_QUERY:${args.query}`;
+    const existing = await ctx.db
+      .query("searchQueryEmbeddings")
+      .withIndex("by_cache_key", (q) => q.eq("cacheKey", cacheKey))
+      .unique();
+    if (existing !== null && existing.expiresAt > Date.now()) {
+      return existing.embedding === undefined
+        ? { status: "pending" }
+        : { status: "cached", embedding: existing.embedding };
+    }
+    const leaseToken = crypto.randomUUID();
+    const expiresAt = Date.now() + QUERY_EMBED_LEASE_MS;
+    let id;
+    if (existing === null) {
+      id = await ctx.db.insert("searchQueryEmbeddings", {
+        cacheKey,
+        leaseToken,
+        expiresAt,
+      });
+    } else {
+      id = existing._id;
+      await ctx.db.patch(id, { embedding: undefined, leaseToken, expiresAt });
+    }
+    await ctx.scheduler.runAt(expiresAt, internal.search.expireQueryEmbedding, {
+      id,
+    });
+    return { status: "admitted", id, leaseToken };
+  },
+});
+
+export const finishQueryEmbedding = internalMutation({
+  args: {
+    id: v.id("searchQueryEmbeddings"),
+    leaseToken: v.string(),
+    embedding: v.optional(v.array(v.float64())),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.id);
+    if (row === null || row.leaseToken !== args.leaseToken) return;
+    if (args.embedding === undefined) {
+      await ctx.db.delete(row._id);
+      return;
+    }
+    const expiresAt = Date.now() + QUERY_CACHE_TTL_MS;
+    await ctx.db.patch(row._id, { embedding: args.embedding, expiresAt });
+    await ctx.scheduler.runAt(expiresAt, internal.search.expireQueryEmbedding, {
+      id: row._id,
+    });
+  },
+});
+
+export const expireQueryEmbedding = internalMutation({
+  args: { id: v.id("searchQueryEmbeddings") },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.id);
+    if (row !== null && row.expiresAt <= Date.now())
+      await ctx.db.delete(row._id);
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested directly; no Convex runtime needed)
@@ -125,6 +236,7 @@ export async function embedText(
   const res = await fetchImpl(`${GEMINI_EMBED_URL}?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(10_000),
     body: JSON.stringify({
       content: { parts: [{ text }] },
       taskType,
@@ -138,7 +250,11 @@ export async function embedText(
 
   const body = (await res.json()) as GeminiEmbedResponse;
   const values = body.embedding?.values;
-  if (!Array.isArray(values) || values.length === 0) {
+  if (
+    !Array.isArray(values) ||
+    values.length !== EMBED_DIMENSIONS ||
+    values.some((value) => !Number.isFinite(value))
+  ) {
     throw new Error("Gemini embed returned no vector");
   }
   return values;
@@ -384,7 +500,7 @@ export const fetchSearchListings = internalQuery({
 
 export type SearchCatalogueResult = {
   items: SearchListing[];
-  /** True when Gemini failed — caller falls back to substring silently. */
+  /** True when limited, already embedding, or Gemini failed; use keyword fallback. */
   degraded: boolean;
 };
 
@@ -410,14 +526,33 @@ export const searchCatalogue = action({
       ? Math.min(Math.max(requestedLimit, 1), SEARCH_LIMIT_MAX)
       : SEARCH_LIMIT_DEFAULT;
 
-    let queryEmbedding: number[];
-    try {
-      queryEmbedding = await embedText(trimmed, {
-        taskType: "RETRIEVAL_QUERY",
-      });
-    } catch {
-      // Gemini down / unconfigured — degrade gracefully, never throw to client.
+    const admission = await ctx.runMutation(
+      internal.search.prepareQueryEmbedding,
+      { query: trimmed },
+    );
+    if (admission.status === "limited" || admission.status === "pending") {
       return { items: [], degraded: true };
+    }
+    let queryEmbedding: number[];
+    if (admission.status === "cached") {
+      queryEmbedding = admission.embedding;
+    } else {
+      try {
+        queryEmbedding = await embedText(trimmed, {
+          taskType: "RETRIEVAL_QUERY",
+        });
+      } catch {
+        await ctx.runMutation(internal.search.finishQueryEmbedding, {
+          id: admission.id,
+          leaseToken: admission.leaseToken,
+        });
+        return { items: [], degraded: true };
+      }
+      await ctx.runMutation(internal.search.finishQueryEmbedding, {
+        id: admission.id,
+        leaseToken: admission.leaseToken,
+        embedding: queryEmbedding,
+      });
     }
 
     const results = await ctx.vectorSearch("specEmbeddings", "by_embedding", {

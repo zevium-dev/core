@@ -1694,7 +1694,14 @@ export default defineSchema({
     ])
     .index("by_stripe_payout", ["stripePayoutId"]),
 
-  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
+  // Catalogue semantic search (Gemini gemini-embedding-001, 768 dimensions)
+  searchQueryEmbeddings: defineTable({
+    cacheKey: v.string(),
+    embedding: v.optional(v.array(v.float64())),
+    leaseToken: v.string(),
+    expiresAt: v.number(),
+  }).index("by_cache_key", ["cacheKey"]),
+
   specEmbeddings: defineTable({
     projectId: v.id("projects"),
     /** Text that was embedded (name + description + tags + endpoint summaries). */

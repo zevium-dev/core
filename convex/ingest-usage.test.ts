@@ -281,6 +281,120 @@ describe("wallet settlement ingest contract", () => {
     });
   });
 
+  it("meters concurrent admitted calls even when they race the last credits", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "stripe:payment_intent:pi_test",
+    });
+    const events = [
+      usageEvent(seed, "settle:race-one", 75),
+      usageEvent(seed, "settle:race-two", 75),
+    ];
+    const results = await Promise.all(
+      events.map((event) =>
+        t.mutation(internal.wallets.recordUsage, { events: [event] }),
+      ),
+    );
+    expect(results.flatMap((result) => result.results)).toEqual(
+      events.map((event) => ({ refId: event.settleRefId, status: "applied" })),
+    );
+    const replay = await t.mutation(internal.wallets.recordUsage, { events });
+    expect(replay.results).toEqual(
+      events.map((event) => ({
+        refId: event.settleRefId,
+        status: "already_applied",
+      })),
+    );
+    expect(replay.wallet).toMatchObject({ balance: 0, sequence: 4 });
+    await t.run(async (ctx) => {
+      const usage = await ctx.db.query("usageEvents").collect();
+      expect(usage).toHaveLength(2);
+      expect(usage.reduce((sum, row) => sum + row.credits, 0)).toBe(150);
+      const entries = await ctx.db
+        .query("walletEntries")
+        .withIndex("by_wallet", (q) => q.eq("walletId", seed.consumerWalletId))
+        .collect();
+      expect(entries.map((row) => row.sequence).sort()).toEqual([1, 2, 3, 4]);
+      expect(entries.reduce((sum, row) => sum + row.amount, 0)).toBe(0);
+      expect(
+        entries.filter((row) => row.refId.startsWith("settlement-shortfall:")),
+      ).toMatchObject([{ amount: 50 }]);
+      const earnings = await ctx.db.query("publisherEarnings").collect();
+      expect(earnings.reduce((sum, row) => sum + row.grossCredits, 0)).toBe(
+        150,
+      );
+      const funding = await ctx.db
+        .query("walletFundingStates")
+        .withIndex("by_wallet", (q) => q.eq("walletId", seed.consumerWalletId))
+        .unique();
+      expect(funding).toMatchObject({
+        allocatedCredits: 150,
+        nonrefundableAvailableCredits: 0,
+        refundableAvailableCredits: 0,
+        migrationWatermarkSequence: 4,
+      });
+      const coverage = await ctx.db
+        .query("walletFundingLots")
+        .filter((q) => q.eq(q.field("sourceKind"), "admin_adjustment"))
+        .collect();
+      expect(coverage).toMatchObject([
+        {
+          refundable: false,
+          grantedCredits: 50,
+          availableCredits: 0,
+          allocatedCredits: 50,
+        },
+      ]);
+    });
+  });
+
+  it("retries a bounded shortfall batch without leaving spendable coverage behind", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.applyAdminAdjustment, {
+      organizationId: seed.consumerOrganizationId,
+      amount: 1,
+      refId: "test:bounded-funding",
+    });
+    let pending = Array.from({ length: 8 }, (_, index) =>
+      usageEvent(seed, `settle:bounded-${index}`, 15),
+    );
+    let rounds = 0;
+    while (pending.length > 0 && rounds < 8) {
+      const result = await t.mutation(internal.wallets.recordUsage, {
+        events: pending,
+      });
+      expect(result.wallet.balance).toBe(0);
+      const rejected = result.results.filter(
+        (row) => row.status === "rejected",
+      );
+      expect(rejected.every((row) => row.retryable)).toBe(true);
+      pending = pending.filter((event) =>
+        rejected.some((row) => row.refId === event.settleRefId),
+      );
+      rounds++;
+    }
+    expect(pending).toEqual([]);
+    expect(rounds).toBeGreaterThan(1);
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("usageEvents").collect()).toHaveLength(8);
+      const entries = await ctx.db
+        .query("walletEntries")
+        .withIndex("by_wallet", (q) => q.eq("walletId", seed.consumerWalletId))
+        .collect();
+      expect(
+        entries
+          .filter((row) => row.refId.startsWith("settlement-shortfall:"))
+          .reduce((sum, row) => sum + row.amount, 0),
+      ).toBe(119);
+      expect(entries.reduce((sum, row) => sum + row.amount, 0)).toBe(0);
+    });
+  });
+
   it("returns applied, already_applied, rejected and an authoritative checkpoint", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWallet(t);
@@ -299,7 +413,10 @@ describe("wallet settlement ingest contract", () => {
       body: JSON.stringify({
         events: [
           usageEvent(seed, "settle:one"),
-          usageEvent(seed, "settle:too-expensive", 200),
+          {
+            ...usageEvent(seed, "settle:invalid"),
+            organizationId: seed.otherOrganizationId,
+          },
         ],
       }),
     });
@@ -308,9 +425,9 @@ describe("wallet settlement ingest contract", () => {
       results: [
         { refId: "settle:one", status: "applied" },
         {
-          refId: "settle:too-expensive",
+          refId: "settle:invalid",
           status: "rejected",
-          reason: "reservation checkpoint is stale after ledger debit",
+          reason: "publisher organization does not own project",
           retryable: false,
         },
       ],

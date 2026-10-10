@@ -31,6 +31,8 @@ Related surfaces:
 
 ## Tech
 
+- **Suspension preservation (#355)**: `projects.update` and `cancelRetirement` use targeted patches. Clearing a description or canceling retirement removes only the intended optional fields; quality suspension/recovery metadata, desired visibility, and `publicationGeneration` survive. Cancellation still increments `retirementRevision`, invalidating stale fanout jobs. Regression coverage: `project-authorization.test.ts` and `project-retirement.test.ts`.
+
 From [architecture overview](../architecture/overview.md):
 
 - **Registry lifecycle**: organization and public-route tombstones are authoritative over restored mutable rows. Every org lookup fails closed when `organizationTombstones` contains its Clerk id; every public/execution route lookup requires one exact active reservation binding org id, project id, publisher handle, project slug, and absent `retiredAt`. Org archive, route retirement, key revocation, and legacy-key rotation-required remain terminal stream states. Publisher removal requires a scheduled sunset; immediate retirement is an internal mutation callable only by deployment operators for maintenance. First publish permanently reserves `(publisher handle, project slug)`; project removal archives source/tombstone rows and never physically deletes immutable versions. Direct Convex catalogue/spec/search lookups fail closed immediately; Wallet DO receives a zero/disabled archived checkpoint. Receiver must join every route/key/catalogue read against org kill state, require catalogue's exact active route revision, deny unknown/rotation-required keys, and serve retired public URLs as `410` tombstones.
@@ -51,6 +53,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - None recorded beyond TECH.md bullets above.
 
 ## Open questions
+
+- Resolved #355: clearing metadata or canceling retirement cannot clear quality enforcement or the publication generation fence.
 
 - FLOW says consumers notified by "banner + email"; code sends in-app notifications only (no email provider in tree). Fix FLOW or add email.
 - `410` tombstones for retired public URLs depend on the unimplemented registry receiver ([registry-v2](../architecture/registry-v2.md)); current direct Convex lookups fail closed instead.
