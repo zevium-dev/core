@@ -53,9 +53,7 @@ afterEach(() => {
 });
 
 function fixture({ emptyFirst = false } = {}) {
-  const client = new ConvexReactClient("https://test.convex.cloud", {
-    disabled: true,
-  });
+  const client = new ConvexReactClient("https://test.convex.cloud");
   const listeners = new Set<() => void>();
   const card = (id: number, name = `API ${id}`) => ({
     name,
@@ -79,8 +77,8 @@ function fixture({ emptyFirst = false } = {}) {
     continueCursor: "filtered-end",
   };
   const requests: Array<{ search?: string; cursor: unknown }> = [];
-  vi.spyOn(client, "watchQuery").mockImplementation((_query, args) => {
-    const input = args as {
+  vi.spyOn(client, "watchQuery").mockImplementation((...watchArgs) => {
+    const input = watchArgs[1] as {
       search?: string;
       paginationOpts: { cursor: string | null };
     };
