@@ -22,6 +22,7 @@ Two-sided cold start: zero listings means zero agents means zero publishers. tre
 ## Hard gates before any house listing goes live
 
 - **Terms of service**: confirm treg's and RapidAPI's terms (and each underlying API's terms) allow resale/redistribution through another marketplace. If not, the listing does not ship. Note: treg's software license already blocks reusing its code ([findings/treg-reuse.md](../findings/treg-reuse.md)); calling its paid API is a separate question.
+  - **2026-10-10 research status ([#313](https://github.com/zevium-dev/core/issues/313))**: [resale-terms review](../research/house-listing-resale-terms.md) confirms treg permits hosted platform use with customer tagging and downstream billing. RapidAPI's standard terms prohibit service resale and competing services. Eight direct vendors reviewed; no specific house listing is cleared end to end. **Gate not cleared** pending named upstream/onward-rights evidence or written permission. This status does not change the sourcing decision.
 - **Credentials**: upstream aggregator keys are Zevium's own publisher credentials ([upstream-credentials](../features/upstream-credentials.md)); per-call cost from the aggregator must be tracked against what consumers pay.
 - **Loss budget**: set a monthly cap on subsidy spend.
 
