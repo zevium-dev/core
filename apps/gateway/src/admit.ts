@@ -86,7 +86,7 @@ export async function admit(
           : 403;
     const message =
       rate.reason === "key_rate_limited"
-        ? isWalletSession(secret)
+        ? isWalletSession(secret ?? "")
           ? "Too many requests for this wallet. Try again shortly."
           : "Too many requests for this API key. Try again shortly."
         : rate.reason === "wallet_unavailable"
