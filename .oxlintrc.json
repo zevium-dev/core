@@ -30,13 +30,10 @@
   "ignorePatterns": [
     "node_modules/**",
     ".cache/**",
-    ".vercel/**",
     ".output/**",
     ".nitro/**",
     ".turbo/**",
     "build/**",
-    "api/**",
-    "server/build/**",
     "public/build/**",
     "dist/**",
     "apps/gateway/node_modules/**",
@@ -58,7 +55,8 @@
     "apps/web/dist-ssr/**",
     ".agents/**",
     "apps/web/src/routeTree.gen.ts",
-    "convex/_generated/**"
+    "convex/_generated/**",
+    ".claude/**"
   ],
   "rules": {
     "eqeqeq": ["error", "always"],

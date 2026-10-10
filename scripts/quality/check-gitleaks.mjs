@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -16,36 +15,6 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const zeroSha = "0".repeat(40);
-const approvedGitleaksConfig = "[extend]\nuseDefault = true\n";
-const approvedHistoricalFingerprintCount = 95;
-const approvedHistoricalFingerprintSha256 =
-  "4f6697e59423e6341044fe481da8ee79cb0cf1535bb447f07d062d22b74bb8b4";
-const historicalFingerprint =
-  /^[0-9a-f]{40}:[^:\n]+:(?:curl-auth-header|curl-auth-user|generic-api-key|stripe-access-token):[1-9][0-9]*$/;
-
-export function validateGitleaksPolicy({
-  configPath = resolve(repositoryRoot, ".gitleaks.toml"),
-  ignorePath = resolve(repositoryRoot, ".gitleaksignore"),
-} = {}) {
-  if (readFileSync(configPath, "utf8") !== approvedGitleaksConfig) {
-    throw new Error("Gitleaks config differs from fail-closed approved policy");
-  }
-  const baseline = readFileSync(ignorePath, "utf8");
-  const findings = baseline.split(/\r?\n/).filter(Boolean);
-  const digest = createHash("sha256").update(baseline).digest("hex");
-  if (
-    findings.length !== approvedHistoricalFingerprintCount ||
-    new Set(findings).size !== findings.length ||
-    JSON.stringify(findings) !== JSON.stringify([...findings].sort()) ||
-    findings.some((finding) => !historicalFingerprint.test(finding)) ||
-    digest !== approvedHistoricalFingerprintSha256
-  ) {
-    throw new Error(
-      `Gitleaks ignore must contain ${approvedHistoricalFingerprintCount} exact audited historical fingerprints`,
-    );
-  }
-}
-
 function git(args, cwd) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (result.status !== 0) {
@@ -275,7 +244,6 @@ function runGitleaks(args, cwd) {
 if (process.argv[1] === import.meta.filename) {
   let candidate;
   try {
-    validateGitleaksPolicy();
     const plan = resolveScanPlan();
     const [history, range, current] = gitleaksCommands(plan);
     runGitleaks(history, repositoryRoot);

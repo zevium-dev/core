@@ -16,8 +16,9 @@ The deployment job:
 4. Waits for approval on the protected `production` environment.
 5. Builds the web Worker before mutating providers.
 6. Proves the Convex production target with `convex deploy --dry-run`.
-7. Deploys Convex, gateway, then web.
-8. Verifies gateway `/health`, web release metadata, catalogue rendering, and
+7. Configures Convex runtime secrets before deploying functions.
+8. Deploys Convex, gateway, then web.
+9. Verifies gateway `/health`, web release metadata, catalogue rendering, and
    the stable gateway `404` response.
 
 Concurrency group `production-release` serializes releases and never cancels a
@@ -41,7 +42,8 @@ The GitHub `production` environment owns these secrets:
   through the migration and rollback window.
 
 The workflow validates the registry and credential secrets before provider writes,
-then configures both keyrings and the registration secret in Convex. The same
+then configures both keyrings and the registration secret in Convex before
+`Deploy Convex`. The same
 registration secret is included additively in the tagged web Worker upload.
 Its temporary runner file has mode `0600`, is removed even on failure, and
 never enters deployment artifacts. Other runtime secrets remain configured
@@ -112,8 +114,10 @@ Do not roll back Convex schema or shared Durable Object migrations. Cloudflare
 version history is manual break-glass only when the prior Worker is known to be
 compatible with current Convex and Durable Object state.
 
-If failure occurs before `Deploy Convex`, production is unchanged. If failure
-occurs later, assume partial deployment and roll forward immediately.
+The first provider mutation is `Configure registry runtime`, before `Deploy
+Convex`. Failures from that step onward can leave partially updated secrets or
+code; inspect the failed step and roll forward. Keep previous keyring entries
+so existing data remains readable throughout the deployment.
 
 ## Verification
 
@@ -135,5 +139,22 @@ complete verification.
 
 ## Pipeline notes (moved from former TECH.md)
 
-- **Preview verification**: previews are opt-in: adding the `preview` label to a trusted PR deploys isolated Convex, gateway, and web previews and runs required curl-only checks for web `/`, web `/catalogue`, gateway `/health`, gateway CORS preflight, and a stable gateway 404. Opening, reopening, or pushing to a PR does not deploy; remove and re-add `preview` to rebuild after a push, or run **Pull Request Preview** manually with its PR number. After Convex provisioning, gateway deploy and web build run in parallel; web deployment and gateway deployment converge with the exact compliance scan at the smoke job through explicit job outputs/artifacts. Only the smoke job creates a GitHub deployment record, with the web preview URL; other preview and cleanup jobs retain environment secrets with `deployment: false`. The browser runtime and authenticated publisher/consumer journey are opt-in because they are long and stateful: add `full-e2e` to a PR already labeled `preview`, include both labels when requesting a preview, or run the workflow manually. Publisher and consumer remain sequential because consumer verification reads the publisher-created project artifact. Closed PRs invoke the separate preview cleanup workflow.
-- **Production releases**: one workflow deploys the exact SHA from a successful `Continuous Integration` push on `develop`. GitHub's protected `production` environment is the human approval and provider-credential boundary. The job rechecks current `develop` before every mutation, builds first, proves the Convex target with `convex deploy --dry-run`, deploys Convex, gateway, then web, and waits for both services to report the exact release before verifying public route contracts. Protected registry secrets supply the Convex transport keyring and matching web/Convex key-registration HMAC; malformed keyrings or weak secrets stop before provider writes. Web secrets accompany the tagged upload through a private temporary file removed even on failure, never an artifact. Worker tags are `production-<sha>-<run-id>-<attempt>` so retry uploads remain unambiguous; Durable Object migrations remain append-only. Failures stop and roll forward with a reviewed commit. Convex and shared DO state never roll back; Cloudflare version rollback is manual break-glass for known Worker-only failures. Operator protocol and credential inventory live in this file.
+- **Preview verification**: previews are opt-in: adding the `preview` label to a trusted PR deploys isolated Convex, gateway, and web previews and runs required curl-only checks for web `/`, web `/catalogue`, gateway `/health`, gateway CORS preflight, and a stable gateway 404. Opening, reopening, or pushing to a PR does not deploy; remove and re-add `preview` to rebuild after a push, or run **Pull Request Preview** manually with its PR number. After Convex provisioning, gateway deploy and web build run in parallel; web deployment and gateway deployment converge at the smoke job through explicit job outputs/artifacts. Only the smoke job creates a GitHub deployment record, with the web preview URL; other preview and cleanup jobs retain environment secrets with `deployment: false`. The browser runtime and authenticated publisher/consumer journey are opt-in because they are long and stateful: add `full-e2e` to a PR already labeled `preview`, include both labels when requesting a preview, or run the workflow manually. Publisher and consumer remain sequential because consumer verification reads the publisher-created project artifact. Closed PRs invoke the separate preview cleanup workflow.
+- **Production releases**: one workflow deploys the exact SHA from a successful `Continuous Integration` push on `develop`. GitHub's protected `production` environment is the human approval and provider-credential boundary. The job rechecks current `develop` before every mutation, builds first, proves the Convex target with `convex deploy --dry-run`, configures Convex secrets, deploys Convex, gateway, then web, and waits for both services to report the exact release before verifying public route contracts. Protected registry secrets supply the Convex transport keyring and matching web/Convex key-registration HMAC; malformed keyrings or weak secrets stop before provider writes. Web secrets accompany the tagged upload through a private temporary file removed even on failure, never an artifact. Worker tags are `production-<sha>-<run-id>-<attempt>` so retry uploads remain unambiguous; Durable Object migrations remain append-only. Failures stop and roll forward with a reviewed commit. Convex and shared DO state never roll back; Cloudflare version rollback is manual break-glass for known Worker-only failures. Operator protocol and credential inventory live in this file.
+
+## Preview secrets and browser isolation
+
+The `preview` environment must provide `PREVIEW_REGISTRY_KEY_PROJECTION_HMAC_SECRET`
+(at least 32 characters) and `PREVIEW_UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`
+(the same canonical 32-byte base64 keyring format as production, with independent
+preview keys). Neither secret was present at repository or preview-environment
+level when checked on 2026-10-10; an owner must add both before preview deployment.
+The workflow sets both on the isolated Convex deployment and sets the matching
+HMAC secret on the preview web Worker. Preserve old credential keyring entries
+while preview data still uses them. Existing Clerk and Convex preview secrets
+remain required.
+
+Preview jobs share `.github/actions/setup/action.yml` for tools and installation.
+Full-e2e retries use a fresh session prefix, with distinct anonymous and signed-in
+lane suffixes. Authenticated browser snapshots are not uploaded; public HTTP
+contract evidence remains available on failure.

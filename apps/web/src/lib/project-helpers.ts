@@ -1,8 +1,10 @@
+import { PLATFORM_CUT } from "@zevium/shared";
+
 /** 10,000 credits = $1 (publisher-facing display conversion). */
 export const CREDITS_PER_DOLLAR = 10_000;
 
 /** Publisher keeps 95% of gross credits after platform cut. */
-export const PUBLISHER_SHARE = 0.95;
+export const PUBLISHER_SHARE = 1 - PLATFORM_CUT;
 
 /** Convert credits to USD dollars (fractional). */
 export function creditsToDollars(credits: number): number {

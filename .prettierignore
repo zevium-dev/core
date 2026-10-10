@@ -2,5 +2,4 @@
 /.agents/skills/
 /pnpm-lock.yaml
 /apps/web/src/routeTree.gen.ts
-/scripts/quality/fixtures/invalid-structured-data/
 /apps/web/dist/

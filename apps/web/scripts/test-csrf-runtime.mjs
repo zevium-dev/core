@@ -19,12 +19,14 @@ const runtimeEnv = {
   VITE_GATEWAY_URL: "https://gateway.csrf-runtime.invalid",
 };
 
-const build = spawnSync(process.execPath, ["scripts/build.mjs"], {
-  cwd: packageRoot,
-  env: runtimeEnv,
-  stdio: "inherit",
-});
-assert.equal(build.status, 0, "production Worker build failed");
+if (!process.argv.includes("--skip-build")) {
+  const build = spawnSync(process.execPath, ["scripts/build.mjs"], {
+    cwd: packageRoot,
+    env: runtimeEnv,
+    stdio: "inherit",
+  });
+  assert.equal(build.status, 0, "production Worker build failed");
+}
 
 const builtWrangler = JSON.parse(
   readFileSync(join(packageRoot, "dist/server/wrangler.json"), "utf8"),
