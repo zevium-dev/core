@@ -197,12 +197,12 @@ export function matchOperation(
     }
   }
 
-  if (
-    selected === undefined ||
-    selected.operation["x-zevium-cost"] === undefined
-  )
-    return null;
+  if (selected === undefined) return null;
   const op = selected.operation;
+  // Select the route before checking its price: an unpriced concrete path must
+  // not fall through to a priced template that happens to match the same URL.
+  const pricing = extractPricing(op);
+  if (pricing === null) return null;
   return {
     operation: op,
     method: m,
@@ -212,7 +212,7 @@ export function matchOperation(
         ? op.operationId
         : `${m.toUpperCase()} ${normalizePath(selected.template)}`,
     params: selected.params,
-    pricing: extractPricing(op),
+    pricing,
     upstreamBaseUrl,
   };
 }
@@ -250,7 +250,8 @@ export function parseCreditExtension(
   return value;
 }
 
-export function extractPricing(op: OpenApiOperation): EndpointPricing {
+/** Missing pricing is hidden; explicit scalar or token-rate pricing is callable. */
+export function extractPricing(op: OpenApiOperation): EndpointPricing | null {
   const costValue = op["x-zevium-cost"];
   const token =
     typeof costValue === "object" && costValue !== null
@@ -258,9 +259,7 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
       : undefined;
   let cost: number;
   if (costValue === undefined) {
-    throw new Error(
-      "Operation is hidden until x-zevium-cost is explicitly set",
-    );
+    return null;
   } else if (token) {
     cost =
       token.input === 0 && token.output === 0

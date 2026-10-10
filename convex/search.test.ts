@@ -159,9 +159,9 @@ describe("buildEmbedText", () => {
     const text = buildEmbedText(
       { name: "Pay API", description: undefined, tags: [] },
       openapiSpec({
-        "/charge": { post: { summary: "Charge a card" } },
+        "/charge": { post: { summary: "Charge a card", "x-zevium-cost": 5 } },
         "/refund": {
-          get: { summary: "Issue refund" },
+          get: { summary: "Issue refund", "x-zevium-cost": 0 },
         },
       }),
     );
@@ -183,7 +183,8 @@ describe("buildEmbedText", () => {
     const text = buildEmbedText(
       { name: "Y", description: undefined, tags: [] },
       openapiSpec({
-        "/ping": { get: {} },
+        "/ping": { get: { "x-zevium-cost": 0 } },
+        "/hidden": { get: { summary: "Secret endpoint" } },
       }),
     );
     expect(text).toBe("Y GET /ping");

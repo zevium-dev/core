@@ -210,11 +210,11 @@ describe("summarizePublishedPricing", () => {
     });
   });
 
-  it("hides missing cost and summarizes empty paths as zeros", () => {
+  it("omits unpriced operations, including their free tier", () => {
     expect(
       summarizePublishedPricing(
         openapiSpec({
-          "/x": { get: { summary: "no cost" } },
+          "/x": { get: { summary: "no cost", "x-zevium-free-tier": 10 } },
         }),
       ),
     ).toEqual({
@@ -231,6 +231,26 @@ describe("summarizePublishedPricing", () => {
       hasFreeTier: false,
     });
   });
+
+  it.each([0, 5])(
+    "counts explicit %i pricing and excludes missing pricing",
+    (cost) => {
+      expect(
+        summarizePublishedPricing(
+          openapiSpec({
+            "/hidden": { get: { "x-zevium-free-tier": 100 } },
+            "/visible": { get: { "x-zevium-cost": cost } },
+            "/paid": { post: { "x-zevium-cost": 8 } },
+          }),
+        ),
+      ).toEqual({
+        minCost: cost,
+        maxCost: 8,
+        endpointCount: 2,
+        hasFreeTier: false,
+      });
+    },
+  );
 
   it("returns null on invalid JSON", () => {
     expect(summarizePublishedPricing("{nope")).toBeNull();
@@ -689,3 +709,82 @@ describe("catalogue reactive pagination contract", () => {
     expect(reset.isDone).toBe(true);
   });
 });
+
+it.each(["cron", "queued continuation"])(
+  "rebuilds legacy catalogue pricing via %s",
+  async (trigger) => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const seed = await seedCatalogue(t);
+    await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+      cursor: null,
+    });
+    await t.run(async (ctx) => {
+      const version = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .first();
+      if (!version) throw new Error("Missing fixture spec");
+      await ctx.db.patch(version._id, {
+        spec: openapiSpec({
+          "/hidden": { get: { "x-zevium-free-tier": 10 } },
+          "/free": { get: { "x-zevium-cost": 0 } },
+          "/paid": { post: { "x-zevium-cost": 7 } },
+        }),
+      });
+    });
+    await t.run(async (ctx) => {
+      const stats = await ctx.db.query("catalogueStats").unique();
+      if (!stats) throw new Error("Missing projection stats");
+      await ctx.db.patch(stats._id, { pricingVersion: undefined });
+    });
+    // Even before the cron rebuild, reads must not serve stale default prices.
+    const legacyPage = await t.query(api.catalogue.listPublic, {});
+    expect(
+      legacyPage.items.find((item) => item.slug === "cheap")?.pricing,
+    ).toEqual({
+      minCost: 0,
+      maxCost: 7,
+      endpointCount: 2,
+      hasFreeTier: false,
+    });
+    if (trigger === "cron") {
+      expect(
+        await t.mutation(
+          internal.catalogue.resumeCatalogueProjectionBackfill,
+          {},
+        ),
+      ).toEqual({ scheduled: true });
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+    } else {
+      await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+        cursor: "obsolete-cursor-from-previous-pricing-version",
+      });
+    }
+    expect(
+      await t.mutation(
+        internal.catalogue.resumeCatalogueProjectionBackfill,
+        {},
+      ),
+    ).toEqual({ scheduled: false });
+    const listing = await t.run((ctx) =>
+      ctx.db
+        .query("catalogueListings")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .unique(),
+    );
+    expect(listing).toMatchObject({
+      minCost: 0,
+      maxCost: 7,
+      endpointCount: 2,
+      hasFreeTier: false,
+    });
+    const page = await t.query(api.catalogue.listPublic, {});
+    expect(page.items.find((item) => item.slug === "cheap")?.pricing).toEqual({
+      minCost: 0,
+      maxCost: 7,
+      endpointCount: 2,
+      hasFreeTier: false,
+    });
+  },
+);

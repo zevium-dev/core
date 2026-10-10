@@ -422,6 +422,7 @@ function pricing(specJson: string): RegistryCatalogueListing["pricing"] {
       if (operation === undefined || Array.isArray(operation)) continue;
       if (operation["x-zevium-cost"] === undefined) continue;
       const value = extractPricing(operation as OpenApiOperation);
+      if (value === null) continue;
       endpointCount += 1;
       minCostCredits = Math.min(minCostCredits, value.cost);
       maxCostCredits = Math.max(maxCostCredits, value.cost);

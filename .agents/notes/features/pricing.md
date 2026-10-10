@@ -1,7 +1,7 @@
 # Pricing
 
-> Status: #399 fixed; partial (per-call `x-zevium-cost` + daily free tier + signup credit #317 built; per-token #329 built; tiered and outcome pricing planned) · Updated: 2026-10-10
-> Code: `packages/shared/src/openapi.ts`, `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `packages/shared/src/validate.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/wallet.ts` (`consumeFreeTier`), `apps/gateway/src/discovery.ts`, `convex/accounting.ts`, `apps/web/src/components/spec-editor/rail-endpoints.tsx`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`
+> Status: #399 fixed; partial (explicit per-call `x-zevium-cost`, hidden unpriced operations (#316) + daily free tier + signup credit #317 built; per-token #329 built; tiered and outcome pricing planned) · Updated: 2026-10-10
+> Code: `packages/shared/src/openapi.ts`, `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `packages/shared/src/validate.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/wallet.ts` (`consumeFreeTier`), `apps/gateway/src/discovery.ts`, `convex/accounting.ts`, `apps/web/src/components/spec-editor/rail-endpoints.tsx`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `convex/catalogue.ts`, `convex/registrySync.ts`, `apps/web/src/lib/spec-pricing.ts`
 > Related: [publishing-specs](publishing-specs.md), [wallet-billing](wallet-billing.md), [earnings-payouts](earnings-payouts.md), [gateway](gateway.md), [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: LLM per-token pricing](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 Per-call or per-token pricing declared by the publisher in the OpenAPI spec (`x-zevium-cost`, optional `x-zevium-free-tier`). No parallel pricing tables: the published, immutable spec version is the only price source. Every charge splits 95% publisher / 5% platform at charge time, priced in credits at one global rate ($1 = 10,000 credits).
@@ -69,14 +69,14 @@ Roadmap ([roadmap](../product/roadmap.md)):
 
 Pricing has no screen of its own; it surfaces in other features:
 
-- Spec editor pricing lint: warn on operations missing `x-zevium-cost`; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3") — [publishing-specs](publishing-specs.md)
+- Spec editor pricing lint: warn that operations missing `x-zevium-cost` stay hidden and cannot be called; publishing remains allowed; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3") — [publishing-specs](publishing-specs.md)
 - Catalogue filters (price range, has-free-tier), listing-card price range, API-detail pricing table with free tier highlighted — [catalogue-search](catalogue-search.md)
 - Discovery index carries per-endpoint pricing metadata so agents evaluate cost **before** calling — [agent-surface](agent-surface.md)
 - Gateway charges the matched endpoint's price per call; `402` on insufficient balance — [gateway](gateway.md)
 
 ## Tech
 
-- **Inline pricing validation (#399)**: the editor checks safe non-negative integers and the shared cost/free-tier caps before write-back. Rejected text stays local and editable, with a field-linked error retained through blur; the valid JSON draft and other controls remain intact. Clearing still removes the extension; zero and the inclusive upper bound remain valid.
+- **Inline pricing validation (#399)**: the editor checks safe non-negative integers and the shared cost/free-tier caps before write-back. Rejected text stays local and editable, with a field-linked error retained through blur; the valid JSON draft and other controls remain intact. Clearing removes the extension and keeps the cost input blank after blur, hiding the operation; rejected text cannot restore a price. Explicit zero makes it free, and the inclusive upper bound remains valid.
 
 - **Token pricing (#329)**: `TokenPricing` is an object form of `x-zevium-cost`, carried through editor, catalogue reference, discovery, and MCP. Catalogue cards identify token pricing instead of labeling hold ceilings as per-call prices; numeric price filters use the maximum hold ceiling. Scalar editor controls cannot overwrite token rates; edit the object in the spec. Full sizing, whole-credit rounding, parser limits, fallback, response header, and budget rules are owned by the [implementation contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329).
 - `token_usage` settlement identity records the immutable spec version, admitted hold (`listedCostCredits` / `budgetReservationCredits`), and actual charged credits. Convex validates actual ≤ hold, retains per-call equality checks for scalar pricing, and uses existing whole-credit funding and exact 95/5 atom accounting.
@@ -88,7 +88,10 @@ Pricing has no screen of its own; it surfaces in other features:
 ### Code facts (read from source 2026-10-10, not in source docs)
 
 - `packages/shared/src/openapi.ts` extracts per-operation `x-zevium-cost` / `x-zevium-free-tier` into `EndpointPricing { cost, token?, freeTier? }` (`packages/shared/src/pricing.ts`)
-- Missing `x-zevium-cost` hides the operation from matching, catalogue, discovery, and MCP; editor lint warns that it is hidden. Explicit scalar `0` stays free.
+- `extractPricing` returns `EndpointPricing | null`: missing cost is unpriced (`null`), explicit `0` is free, positive integers are paid; explicit token-rate objects retain their rates and hold ceiling. No default price.
+- Missing cost produces a warning, not a publish blocker. The editor keeps the price input blank and the operation editable, labels it hidden, and explains that explicit `0` makes it free. Draft price ranges/free-tier counts exclude hidden operations.
+- `matchOperation` selects the most specific method/path before checking pricing. An unpriced match returns `null`; it cannot fall through to a priced template. Gateway and mock reuse the normal route-not-found response without upstream execution, reservations, or usage.
+- Public catalogue/reference, discovery, MCP search/docs, semantic embedding endpoint text, and catalogue/registry price rollups omit unpriced operations. An all-unpriced spec has zero visible endpoints, with no displayed price range.
 - Scalar price and daily quota must be finite safe non-negative integers. Token object rates are validated by `parseTokenPricing`. `MAX_ENDPOINT_COST_CREDITS = 1_000_000` (no call above a $100 pack); `MAX_DAILY_FREE_TIER_CALLS = 1_000_000`
 - Free tier is enforced in the wallet DO (`consumeFreeTier`): counter keyed by consumer org × project × method × path template × UTC day. Free-tier calls are rejected `insufficient_credits` when wallet balance ≤ 0
 - `cost === 0` operations skip reservation but still run key authorization (`authorizeKey`)
@@ -101,7 +104,7 @@ Pricing has no screen of its own; it surfaces in other features:
 - 2026-10-10 — Platform fee taken publisher-side: $10 top-up = $10 credits; Zevium keeps 5% of each call's spend, publisher 95%. Matches current code (flat packs, 500 bps fee). [decision](../decisions/2026-10-10-platform-fee-publisher-side.md)
 - 2026-10-10 — ACCEPTED: card processing fee passed through at cost as a separate, transparent line on top-ups (OpenCode Zen style); credits stay face value; no minimum-top-up floor. [decision](../decisions/2026-10-10-card-fee-passthrough.md)
 - 2026-10-10 — BUILT (#317): eligible orgs get $1 promotional credit, once per Clerk creator; see [wallet-billing](wallet-billing.md#implementation-notes) for delivery and verification limits. [decision](../decisions/2026-10-10-signup-credit.md)
-- 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — BUILT (#329): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 ## Open questions

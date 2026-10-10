@@ -333,3 +333,46 @@ describe("mock gateway route", () => {
     });
   });
 });
+
+it.each([undefined, 0, 7])(
+  "mock exposes only explicitly priced operations: %s",
+  async (cost) => {
+    const clerkOrgId = `org_mock_explicit_${String(cost)}`;
+    await installFixtures({
+      clerkOrgId,
+      credits: 100,
+      spec: JSON.stringify({
+        paths: {
+          "/priced": {
+            get: {
+              "x-zevium-cost": cost,
+              responses: {
+                "200": {
+                  content: {
+                    "application/json": {
+                      schema: { type: "object", example: { ok: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    });
+    const before = await walletStub(clerkOrgId).getState();
+    const response = await mockFetch(
+      `/mock/${ORG_SLUG}/${PROJECT_SLUG}/priced`,
+      { headers: { authorization: "" } },
+    );
+    if (cost === undefined) {
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: "route_not_found" });
+    } else {
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-zevium-cost")).toBe("0");
+      expect(await response.json()).toEqual({ ok: true });
+    }
+    expect(await walletStub(clerkOrgId).getState()).toEqual(before);
+  },
+);

@@ -69,6 +69,7 @@ export function endpointsFromSpec(
       if (!op) continue;
       if (op["x-zevium-cost"] === undefined) continue;
       const pricing = extractPricing(op);
+      if (pricing === null) continue;
       const endpoint: DiscoveryEndpoint = {
         method: method.toUpperCase(),
         path,

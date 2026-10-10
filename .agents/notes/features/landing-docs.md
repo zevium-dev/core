@@ -37,6 +37,7 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - **Docs landmark (#386)**: `DocsPage` wraps its article in the page’s single `<main id="main-content" tabIndex={-1}>`; the public-header skip link targets this focusable landmark. Shared layout applies to desktop and mobile. Component tests cover all four guides.
 - Web `/llms.txt` provides an agent-readable setup guide; `/docs/agents` links to it. Request/config-derived URLs, route validation, current gateway error semantics, and client format references are owned by [agent surface](agent-surface.md#tech).
 - `AgentInstall` replaces the three MCP config blocks on landing, agent docs, and listing agent tabs. Claude Code command, Cursor install link + JSON, and Codex TOML share `DocsCodeBlock` → `CopyButton` copy behavior and `ak_YOUR_API_KEY`. Listing usage notes also use that copy block. Docs mock URLs use `tryItBaseUrl` to normalize gateway origins ending in `/gateway`.
+- Publisher guide (#316) states that missing prices hide operations and prevent calls; explicit `x-zevium-cost: 0` is required for free endpoints. No default-credit fallback is documented.
 
 ### Code map (observed)
 

@@ -36,7 +36,7 @@ paths:
   /v1/summarize:
     post:
       summary: Summarize text
-      x-zevium-cost: 10        # credits per call (default 1)
+      x-zevium-cost: 10        # credits per call; omit to hide
       x-zevium-free-tier: 5    # optional: free calls/day, publisher-funded
   /v1/keywords:
     post:
@@ -104,7 +104,8 @@ function DocsPublishingPage() {
         </li>
         <li>
           <strong>Add pricing.</strong> Add <code>x-zevium-cost</code> to each
-          operation (defaults to 1 credit when omitted). Optionally add{" "}
+          operation you want to expose. Unpriced operations stay hidden and
+          cannot be called; set it to 0 for free calls. Optionally add{" "}
           <code>x-zevium-free-tier</code>.
         </li>
         <li>

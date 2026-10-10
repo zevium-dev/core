@@ -207,11 +207,22 @@ describe("validateOpenApiSpec", () => {
     expect(result.errors).toHaveLength(0);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]?.path).toBe('$.paths["/x"].get.x-zevium-cost');
-    expect(result.warnings[0]?.message).toMatch(/Missing x-zevium-cost/);
+    expect(result.warnings[0]?.message).toBe(
+      "Missing x-zevium-cost: operation will be hidden and not callable. Set 0 to make it free.",
+    );
   });
 
-  it("returns clean for valid priced spec", () => {
-    const result = validateOpenApiSpec(JSON.stringify(validBase));
+  it.each([0, 5])("returns clean for explicit price %i", (cost) => {
+    const result = validateOpenApiSpec(
+      JSON.stringify({
+        ...validBase,
+        paths: {
+          "/health": {
+            get: { "x-zevium-health-check": true, "x-zevium-cost": cost },
+          },
+        },
+      }),
+    );
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
     expect(hasValidationErrors(result)).toBe(false);

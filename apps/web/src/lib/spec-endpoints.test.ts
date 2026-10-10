@@ -43,3 +43,20 @@ describe("listSpecEndpoints", () => {
     expect(listSpecEndpoints("")).toEqual([]);
   });
 });
+
+it("keeps missing prices editable without inventing a price", () => {
+  const rows = listSpecEndpoints(
+    JSON.stringify({
+      paths: {
+        "/hidden": { get: { "x-zevium-free-tier": 4 } },
+        "/free": { get: { "x-zevium-cost": 0 } },
+        "/paid": { get: { "x-zevium-cost": 5 } },
+      },
+    }),
+  );
+  expect(rows?.map(({ cost, freeTier }) => ({ cost, freeTier }))).toEqual([
+    { cost: null, freeTier: 4 },
+    { cost: 0, freeTier: undefined },
+    { cost: 5, freeTier: undefined },
+  ]);
+});

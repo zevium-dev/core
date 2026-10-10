@@ -12,7 +12,7 @@
  * stale embedding lingers after a visibility/status flip.
  */
 import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
-import { parseSpec } from "@zevium/shared";
+import { extractPricing, parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import {
   action,
@@ -216,6 +216,7 @@ export function buildEmbedText(
         if (item === undefined) continue;
         for (const [method, op] of Object.entries(item)) {
           if (op === undefined || Array.isArray(op)) continue;
+          if (extractPricing(op) === null) continue;
           const summary =
             typeof op.summary === "string" && op.summary.length > 0
               ? op.summary

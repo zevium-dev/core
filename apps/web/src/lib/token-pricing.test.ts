@@ -20,13 +20,14 @@ describe("token pricing surfaces", () => {
   it("preserves token rates in editor and public reference", () => {
     expect(listSpecEndpoints(spec)).toMatchObject([
       { path: "/chat", tokenPricing },
+      { path: "/hidden", cost: null },
     ]);
     expect(parsePublishedEndpoints(spec)).toMatchObject([
       { path: "/chat", tokenPricing },
     ]);
     expect(
       formatPricingSummary(summarizeEndpoints(listSpecEndpoints(spec)!)),
-    ).toBe("1 endpoint, 1 priced per token");
+    ).toBe("2 endpoints, 1 priced per token");
     expect(
       formatCataloguePriceRange({
         minCost: 1000,

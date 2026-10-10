@@ -164,3 +164,40 @@ describe("input survives realtime", () => {
     expect(screen.getByRole("alert").textContent).toContain("whole number");
   });
 });
+
+it("shows unpriced rows as hidden with a blank cost and allows explicit zero", () => {
+  const change = vi.fn();
+  const endpoint = { path: "/ping", method: "get" as const, cost: null };
+  const view = render(
+    <SpecRailEndpoints
+      endpoints={[endpoint]}
+      stale={false}
+      onPricingChange={change}
+    />,
+  );
+  const input = screen.getByLabelText("Cost for GET /ping") as HTMLInputElement;
+  expect(input.value).toBe("");
+  expect(screen.getByText("Hidden until priced. Set 0 for free.")).toBeTruthy();
+  fireEvent.change(input, { target: { value: "0" } });
+  expect(change).toHaveBeenLastCalledWith({
+    path: "/ping",
+    method: "get",
+    cost: 0,
+  });
+  view.rerender(
+    <SpecRailEndpoints
+      endpoints={[{ ...endpoint, cost: 0 }]}
+      stale={false}
+      onPricingChange={change}
+    />,
+  );
+  fireEvent.blur(input);
+  expect(input.value).toBe("0");
+  expect(screen.queryByText("Hidden until priced. Set 0 for free.")).toBeNull();
+  fireEvent.change(input, { target: { value: "" } });
+  expect(change).toHaveBeenLastCalledWith({
+    path: "/ping",
+    method: "get",
+    cost: null,
+  });
+});

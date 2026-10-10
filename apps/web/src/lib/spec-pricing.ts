@@ -18,6 +18,7 @@ export function summarizeEndpoints(
   let freeTier = 0;
   let tokenEndpoints = 0;
   for (const endpoint of endpoints) {
+    if (endpoint.cost === null) continue;
     if (endpoint.tokenPricing) {
       tokenEndpoints++;
       if ((endpoint.freeTier ?? 0) > 0) freeTier++;

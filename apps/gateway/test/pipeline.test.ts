@@ -1600,3 +1600,53 @@ describe("token-priced gateway calls", () => {
     expect((await walletStub(org).getState()).available).toBe(200);
   });
 });
+
+describe("explicit operation pricing", () => {
+  it.each([undefined, 0, 7])(
+    "routes and bills only explicit prices: %s",
+    async (cost) => {
+      const clerkOrgId = `org_explicit_${String(cost)}`;
+      const mock = makeFetchMock(() => new Response("ok"));
+      await installFixtures({
+        clerkOrgId,
+        fetchImpl: mock.fetchImpl,
+        credits: 100,
+        spec: JSON.stringify({
+          servers: [{ url: "https://upstream.test" }],
+          paths: {
+            "/priced": { get: { "x-zevium-cost": cost } },
+          },
+        }),
+      });
+      const before = await walletStub(clerkOrgId).getState();
+      const res = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/priced`,
+      );
+      const after = await walletStub(clerkOrgId).getState();
+      if (cost === undefined) {
+        const unknown = await gatewayFetch(
+          `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/unknown`,
+        );
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        const unknownBody = await unknown.json();
+        expect(body).toMatchObject({
+          error: "route_not_found",
+          message: "No endpoint matches this method and path",
+        });
+        expect(unknownBody).toMatchObject({
+          error: "route_not_found",
+          message: "No endpoint matches this method and path",
+        });
+        expect(after).toEqual(before);
+        expect(mock.calls).toHaveLength(0);
+      } else {
+        expect(res.status).toBe(200);
+        expect(res.headers.get("x-zevium-cost")).toBe(String(cost));
+        expect(await res.text()).toBe("ok");
+        expect(after.balance).toBe(100 - cost);
+        expect(mock.calls).toHaveLength(1);
+      }
+    },
+  );
+});

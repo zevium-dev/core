@@ -21,7 +21,7 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-10 | [Default signup credit (~$1)](2026-10-10-signup-credit.md)                            | built (#317)                   |
 | 2026-10-10 | [P0: x402, distribution, capability routing](2026-10-10-p0-agent-bet.md)              | accepted                       |
 | 2026-10-10 | [House supply via treg/RapidAPI](2026-10-10-house-supply-via-aggregators.md)          | accepted direction, not built  |
-| 2026-10-10 | [Unpriced operations hidden + not callable](2026-10-10-unpriced-operations-hidden.md) | accepted, not built            |
+| 2026-10-10 | [Unpriced operations hidden + not callable](2026-10-10-unpriced-operations-hidden.md) | built (#316)                   |
 | 2026-10-10 | [No BYOK; explore connected accounts](2026-10-10-no-byok-connected-accounts.md)       | accepted / exploring           |
 | 2026-10-10 | [Email via Resend](2026-10-10-email-resend.md)                                        | accepted, not built            |
 | 2026-10-10 | [Two roles: admin + member](2026-10-10-two-roles-admin-member.md)                     | accepted                       |
