@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import rateLimiterTest from "@convex-dev/rate-limiter/test";
 import { buildEmbedText } from "./search";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -192,6 +193,7 @@ describe("buildEmbedText", () => {
 describe("search.fetchSearchListings", () => {
   it("excludes private and draft projects even with stale embeddings", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const seed = await seedSearchWorld(t);
 
     const result = await t.query(internal.search.fetchSearchListings, {
@@ -218,6 +220,7 @@ describe("search.fetchSearchListings", () => {
 
   it("returns empty when all matches are private/draft", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const seed = await seedSearchWorld(t);
 
     const result = await t.query(internal.search.fetchSearchListings, {
@@ -230,6 +233,7 @@ describe("search.fetchSearchListings", () => {
 
   it("never attaches quality from a superseded spec version", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const seed = await seedSearchWorld(t);
     const version1 = await t.run(async (ctx) =>
       ctx.db
@@ -286,6 +290,7 @@ describe("search.fetchSearchListings", () => {
 
   it("skips ids whose embedding row was deleted", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const seed = await seedSearchWorld(t);
 
     // Insert a real row, then delete it — leaves a valid id that db.get misses.
@@ -311,6 +316,7 @@ describe("search.fetchSearchListings", () => {
 
   it("preserves caller-provided order (vectorSearch already ranks)", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const seed = await seedSearchWorld(t);
 
     // Add a second public+published project so ordering is observable.
@@ -374,6 +380,7 @@ describe("search.searchCatalogue — degraded path", () => {
 
   it("returns degraded=true and never throws when Gemini key is missing", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const result = await t.action(api.search.searchCatalogue, {
       query: "weather forecasts",
     });
@@ -382,6 +389,7 @@ describe("search.searchCatalogue — degraded path", () => {
 
   it("returns empty non-degraded result for blank query", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const result = await t.action(api.search.searchCatalogue, { query: "   " });
     expect(result).toEqual({ items: [], degraded: false });
   });
@@ -413,6 +421,7 @@ describe("search.embedProject — embedding pipeline", () => {
 
   it("builds, embeds, and upserts one row per project", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     const projectId = await t.run(async (ctx) => {
       const orgId = await ctx.db.insert("organizations", {
         clerkOrgId: "org_ep",
@@ -468,6 +477,7 @@ describe("search.embedProject — embedding pipeline", () => {
 
   it("no-ops gracefully when the project does not exist", async () => {
     const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
     // Valid id that no longer exists — getProjectForEmbed returns null.
     const deletedProjectId = await t.run(async (ctx) => {
       const orgId = await ctx.db.insert("organizations", {
@@ -490,5 +500,158 @@ describe("search.embedProject — embedding pipeline", () => {
     await expect(
       t.action(internal.search.embedProject, { projectId: deletedProjectId }),
     ).resolves.toBeNull();
+  });
+});
+
+describe("semantic search cost controls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ embedding: { values: dummyEmbed() } }),
+            { status: 200 },
+          ),
+      ),
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  function setup() {
+    const t = convexTest(schema, modules);
+    rateLimiterTest.register(t);
+    return t;
+  }
+
+  it("refuses anonymous searches beyond the burst without calling Gemini", async () => {
+    const t = setup();
+    for (let index = 0; index < 30; index++) {
+      expect(
+        await t.action(api.search.searchCatalogue, { query: `query ${index}` }),
+      ).toMatchObject({ degraded: false });
+    }
+    expect(fetch).toHaveBeenCalledTimes(30);
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "over limit" }),
+    ).toEqual({ items: [], degraded: true });
+    expect(fetch).toHaveBeenCalledTimes(30);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "after refill" }),
+    ).toMatchObject({ degraded: false });
+    expect(fetch).toHaveBeenCalledTimes(31);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("shares cached query embeddings across users and limits but expires them", async () => {
+    const t = setup();
+    const first = await t.action(api.search.searchCatalogue, {
+      query: " weather ",
+      limit: 1,
+    });
+    const signedIn = t.withIdentity({ subject: "searcher" });
+    expect(
+      await signedIn.action(api.search.searchCatalogue, {
+        query: "weather",
+        limit: 20,
+      }),
+    ).toEqual(first);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    await t.action(api.search.searchCatalogue, { query: "weather" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(
+      await t.run((ctx) => ctx.db.query("searchQueryEmbeddings").collect()),
+    ).toEqual([]);
+  });
+
+  it("keys signed-in limits by verified identity", async () => {
+    const t = setup();
+    const first = t.withIdentity({ subject: "first" });
+    const second = t.withIdentity({ subject: "second" });
+    for (let index = 0; index < 20; index++) {
+      await first.action(api.search.searchCatalogue, { query: "cached" });
+    }
+    expect(
+      await first.action(api.search.searchCatalogue, { query: "blocked" }),
+    ).toMatchObject({ degraded: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(
+      await second.action(api.search.searchCatalogue, { query: "allowed" }),
+    ).toMatchObject({ degraded: false });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("caps total Gemini spend across different signed-in identities", async () => {
+    const t = setup();
+    for (let index = 0; index < 120; index++) {
+      await t
+        .withIdentity({ subject: `user-${index}` })
+        .action(api.search.searchCatalogue, { query: "cached" });
+    }
+    expect(
+      await t
+        .withIdentity({ subject: "another-user" })
+        .action(api.search.searchCatalogue, { query: "blocked" }),
+    ).toMatchObject({ degraded: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("coalesces concurrent identical misses without a second Gemini call", async () => {
+    const t = setup();
+    let resolveFetch!: (response: Response) => void;
+    let started!: () => void;
+    const fetching = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        started();
+        return new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        });
+      }),
+    );
+    const first = t.action(api.search.searchCatalogue, { query: "weather" });
+    await fetching;
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "weather" }),
+    ).toMatchObject({ degraded: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    resolveFetch(
+      new Response(JSON.stringify({ embedding: { values: dummyEmbed() } })),
+    );
+    expect(await first).toMatchObject({ degraded: false });
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "weather" }),
+    ).toMatchObject({ degraded: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+
+  it("does not cache failed Gemini responses", async () => {
+    const t = setup();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("unavailable", { status: 503 }),
+    );
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "weather" }),
+    ).toMatchObject({ degraded: true });
+    expect(
+      await t.action(api.search.searchCatalogue, { query: "weather" }),
+    ).toMatchObject({ degraded: false });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
   });
 });

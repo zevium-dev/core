@@ -461,3 +461,58 @@ describe("retirement queue draining", () => {
     },
   );
 });
+
+describe("cancel retirement preserves quality enforcement", () => {
+  it("clears only retirement fields on a suspended listing", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const quality = {
+      qualityStatus: "suspended" as const,
+      qualitySuspendedAt: 123,
+      qualitySuspensionReason: "Health checks failed",
+      qualityRecoveryPasses: 1,
+      desiredVisibility: "public" as const,
+      publicationGeneration: 7,
+    };
+    const projectId = await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_publisher",
+        name: "Publisher",
+        slug: "publisher",
+        publicHandle: "publisher",
+      });
+      return await ctx.db.insert("projects", {
+        organizationId,
+        name: "Suspended",
+        slug: "suspended",
+        status: "published",
+        visibility: "private",
+        tags: [],
+        ...quality,
+        deprecationStartedAt: Date.now(),
+        sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS,
+        deprecationMessage: "Retiring",
+        retirementState: "scheduled",
+        retirementRevision: 4,
+      });
+    });
+    const updated = await asPublisher(t).mutation(
+      api.projects.cancelRetirement,
+      { projectId },
+    );
+    expect(updated).toMatchObject({
+      ...quality,
+      visibility: "private",
+      retirementRevision: 5,
+    });
+    for (const field of [
+      "deprecationStartedAt",
+      "sunsetAt",
+      "deprecationMessage",
+      "retirementState",
+    ])
+      expect(updated).not.toHaveProperty(field);
+    expect(await t.run((ctx) => ctx.db.get(projectId))).toEqual(updated);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+  });
+});

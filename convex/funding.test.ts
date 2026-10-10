@@ -619,7 +619,7 @@ describe("universal wallet funding", () => {
     expect(rows.earnings).toHaveLength(0);
   });
 
-  it("denies a stale reservation after refund without minting debt", async () => {
+  it("settles an admitted reservation after refund without minting debt", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "race");
     await grantPayment(t, s, "race_payment", 100);
@@ -641,12 +641,11 @@ describe("universal wallet funding", () => {
     expect(settled).toMatchObject({
       results: [
         {
-          status: "rejected",
-          retryable: false,
-          reason: "reservation checkpoint is stale after ledger debit",
+          refId: base.settleRefId,
+          status: "applied",
         },
       ],
-      wallet: { balance: 0, sequence: 2 },
+      wallet: { balance: 0, sequence: 4 },
     });
     const result = await t.run(async (ctx) => ({
       wallet: await ctx.db
@@ -655,15 +654,31 @@ describe("universal wallet funding", () => {
           q.eq("organizationId", s.consumerId),
         )
         .unique(),
-      debt: await ctx.db
-        .query("walletFundingAllocations")
-        .filter((q) => q.eq(q.field("kind"), "reservation_debt"))
-        .collect(),
+      allocations: await ctx.db.query("walletFundingAllocations").collect(),
+      coverage: await ctx.db
+        .query("walletFundingLots")
+        .withIndex("by_source_ref", (q) =>
+          q.eq("sourceRef", `settlement-shortfall:${base.settleRefId}`),
+        )
+        .unique(),
+      usage: await ctx.db.query("usageEvents").collect(),
       earnings: await ctx.db.query("publisherEarnings").collect(),
     }));
     expect(result.wallet).toMatchObject({ balance: 0, debtCredits: 0 });
-    expect(result.debt).toHaveLength(0);
-    expect(result.earnings).toHaveLength(0);
+    expect(result.allocations).toMatchObject([
+      { kind: "usage", grossCredits: 20 },
+    ]);
+    expect(result.coverage).toMatchObject({
+      refundable: false,
+      grantedCredits: 20,
+      availableCredits: 0,
+      allocatedCredits: 20,
+    });
+    expect(result.coverage?.paymentId).toBeUndefined();
+    expect(result.usage).toMatchObject([
+      { settleRefId: base.settleRefId, credits: 20 },
+    ]);
+    expect(result.earnings).toMatchObject([{ grossCredits: 20 }]);
   });
 
   it("restores failed refund inventory through an exact payment funding lot", async () => {

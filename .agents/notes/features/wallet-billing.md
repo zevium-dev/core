@@ -1,7 +1,7 @@
 # Wallet & billing
 
-> Status: partial (P0 #5 + P1 #8 + signup credit #317 built; P1 #12 spend controls planned; real-money journey unproven) · Updated: 2026-10-10
-> Code: `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`
+> Status: partial (P0 #5 + P1 #8 built; P1 #12 spend controls planned; real-money journey unproven) · Updated: 2026-10-10
+> Code: `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
 Org-scoped prepaid credit wallet. Consumer organizations buy credits through one-time top-ups; every metered call draws from the org wallet; zero balance blocks the call. Billing screens show balance, top-ups, usage with projection, per-member/key/API/endpoint breakdown and itemized charges. Convex owns the ledger; a Durable Object per org wallet gates calls at the edge; Stripe supplies external payment/refund/dispute facts.
@@ -55,6 +55,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ## Tech
 
 - **Realtime activity (#363)**: `usePaginatedQuery(api.usage.listForOrg)` owns all loaded rows and cursors; filter arguments reset within render, with one frozen time window per filter set. No copied page state or append-only dedupe cache. Backend page-size bounds preserve Convex end/split cursors so page boundaries can rebalance without gaps or duplicates. Typed query results replace redundant row-shape parsing; backend authorization, active capability checks, and cycle projection checks remain. An optional expected-role snapshot only narrows server visibility and resets native pagination on role changes, preventing previously loaded admin rows from surviving a downgrade. One responsive stock Table serves desktop/mobile activity. Billing/activity use locale-stable UTC and money/credit formatting from `lib/format.ts`; HTTP responses share `components/status-badge.tsx`.
+- **Admitted settlement races (#357)**: `recordUsage` does not reject a valid, already-served reservation because the ledger balance fell below its cost. Before debiting, it atomically covers only the shortfall with a non-refundable platform `admin_adjustment` source, keyed `settlement-shortfall:<settleRefId>`. Full usage, quality samples, publisher earnings, and funding allocations commit together; the consumer balance/debt stays non-negative/zero. The adjustment is an auditable platform loss, never a new reservation or permission to execute at zero balance. Replays return `already_applied` without another adjustment; invalid refs/linkage/payloads remain `rejected`, and checkpoint/write-budget failures retain retry behavior. Coverage: concurrent 75-credit settlements against 100 credits in `convex/ingest-usage.test.ts`, including ledger/funding conservation, bounded retry, and replay; refund-before-settlement coverage in `convex/funding.test.ts`.
 
 ### Why Stripe Checkout + Connect (Checkout / USD / ledger authority)
 
@@ -125,6 +126,8 @@ Key-verification bullet lives in [api-keys](api-keys.md).
 - 2026-10-10 — BUILT (#317): $1 signup promotion, once per org and once per Clerk creator (verified-email signal unavailable). [decision](../decisions/2026-10-10-signup-credit.md)
 
 ## Open questions
+
+- Resolved #357: a stale balance no longer permanently rejects already-admitted usage; admission remains the wallet DO’s responsibility.
 
 - Card-fee passthrough: legal check of surcharge rules per card network/region; fee per payment method; whether the fee is refunded with credits. See [decision](../decisions/2026-10-10-card-fee-passthrough.md)
 - Doc/code conflict: FLOW says "larger denominations surfaced first"; code returns packs $10, $50, $100 (smallest first). Code wins until FLOW or code changes

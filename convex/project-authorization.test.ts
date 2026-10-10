@@ -378,3 +378,33 @@ describe("project lifecycle authorization", () => {
     expect(state.cleanupJob).toMatchObject({ phase: "credentials" });
   });
 });
+
+describe("project metadata preserves quality enforcement", () => {
+  it.each([null, "", "   "])(
+    "clears description %j without clearing suspension or publication generation",
+    async (description) => {
+      const t = convexTest(schema, modules);
+      const seed = await seedWorld(t);
+      const quality = {
+        qualityStatus: "suspended" as const,
+        qualitySuspendedAt: 123,
+        qualitySuspensionReason: "Health checks failed",
+        qualityRecoveryPasses: 1,
+        desiredVisibility: "public" as const,
+        publicationGeneration: 7,
+      };
+      await t.run((ctx) => ctx.db.patch(seed.projectId, quality));
+      const updated = await asAdmin(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { description, name: "Renamed" },
+      });
+      expect(updated).toMatchObject({
+        ...quality,
+        name: "Renamed",
+        visibility: "private",
+      });
+      expect(updated.description).toBeUndefined();
+      expect(await t.run((ctx) => ctx.db.get(seed.projectId))).toEqual(updated);
+    },
+  );
+});
