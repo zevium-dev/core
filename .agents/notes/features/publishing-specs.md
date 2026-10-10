@@ -1,7 +1,7 @@
 # Publishing specs
 
-> Status: built (editor/settings correctness #362 fixed; P2 rollback not built) · Updated: 2026-10-10
-> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`
+> Status: partial (P0 credentialed publication blocked by #389; P2 rollback not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -55,6 +55,13 @@ Sign up → Create org → Create project
 ```
 
 ## Tech
+
+**Dogfood — 2026-10-10**
+
+- **P0 #389:** credentials stored before publication cause repeated `Run a new credential-free reachability test before publishing.` even after a passing probe. Readiness and publication compare different credential revision representations.
+- **P2 #399:** entering a negative inline price invalidates the draft and disables the field needed to correct it; recovery requires editing the source spec.
+
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 From [architecture overview](../architecture/overview.md):
 

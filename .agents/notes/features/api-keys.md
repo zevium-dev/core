@@ -1,6 +1,6 @@
 # API keys
 
-> Status: partial (P0 built; #364/#356 ownership and lifecycle fixes implemented; P1 #13 partial) · Updated: 2026-10-10
+> Status: partial (P0 issuance blocked by #385; #364/#356 ownership and lifecycle fixes implemented; P1 #13 partial) · Updated: 2026-10-10
 > Code: `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
 > Related: [gateway](gateway.md), [wallet-billing](wallet-billing.md), [accounts-orgs](accounts-orgs.md), [machine-payments](machine-payments.md), [registry-v2](../architecture/registry-v2.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -26,6 +26,10 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 ## Tech
 
 - **Schema integration repair**: `keySettings.by_owner` is retained alongside `by_owner_status`; the merged registration and member-list queries require the owner-only index, including disabled keys.
+**Dogfood — 2026-10-10**
+
+- **P0 #385:** dogfood baseline `eaa7eff` cannot register keys: `Index keySettings.by_owner not found.` Also blocks normal Convex typechecking. UI issuance is not validated as working; downstream gateway tests used explicit test fixtures.
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 - **Key verification**: `key-verifier.ts` caches per-isolate memory + Cache API with a 60s TTL. There is no Clerk API-key webhook or screen caller of gateway internal control routes; controls converge through registry events and `/wallet-grants` pull. Hot path behavior is owned by [gateway](gateway.md).
 - **Per-key caps + rotation**: enforced in the wallet DO, not per-request against Convex. A `keySettings` sync (`/wallet-grants` pull) refreshes disabled/monthly-cap/rotation-grace state every 60s (`SYNC_GRANTS_WINDOW_MS`) through single-flight background refresh. Known snapshots survive Convex outages; cold wallets without controls return `503 wallet_unavailable` and retry after 5s. See [wallet storage and retention](wallet-billing.md#wallet-storage-and-retention-360). Unknown provider keys are quarantined disabled and gateway execution fails closed without a tracked row. Rotation inherits one stable family id and family-wide monthly cap; settled and in-flight usage survive physical key replacement. Server derives a fixed 24h grace, then closes local authority and automatically revokes old Clerk key with bounded retry/recovery.
