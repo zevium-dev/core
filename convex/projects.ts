@@ -509,6 +509,12 @@ export const update = mutation({
 
     await syncCatalogueListing(ctx, updated._id);
     await enqueuePublishedProjectProjection(ctx, args.projectId);
+    if (updated.visibility !== current.visibility) {
+      await fireWebhookEvent(ctx, updated._id, "project.visibility_changed", {
+        projectId: updated._id,
+        visibility: updated.visibility,
+      });
+    }
     return updated;
   },
 });

@@ -33,7 +33,7 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 - `requireAdmin` reads comma-separated `ADMIN_USER_IDS`; throws when unset/empty (fails closed — nobody is admin). `isAdmin` / `admin.isAdminQuery` is the non-throwing check the `/admin` layout uses after Convex auth loads.
 - `/admin` (overview): `platformStats` — org count, projects total + draft/published, calls this month (`usageEvents` `by_at` from UTC month start, capped `USAGE_STATS_CAP = 50_000`); `recentUsage` feed + summed recent credits.
 - `/admin/orgs`: `listOrgs` paginated (handle, name, slug, wallet balance).
-- `/admin/projects`: `listProjects` with status/visibility filters; `setProjectVisibility` forces private/public, notifies owning org and fires `project.visibility_changed` webhook.
+- `/admin/projects`: `listProjects` with status/visibility filters; `setProjectVisibility` forces private/public, notifies owning org and fires `project.visibility_changed` webhook on actual transitions only; unchanged retries return current state without duplicate notifications or webhooks (#393).
 - `/admin/payouts`: `listPublisherTransfers`, `retryPublisherTransfer`, `reconcilePublisherTransfer`, finance reconciliation cases (`listFinanceReconciliationCases`, `getFinanceReconciliationCase`, `resolvePublisherTransferReconciliation`, `resolveConnectAccountReconciliation`) — details in [earnings-payouts](earnings-payouts.md).
 - `/admin/reviews`: review moderation, hide/restore requires a recorded reason — details in [reviews](reviews.md).
 - Migration/rollout and legacy transfer repair operators were deleted for fresh deployments (#354). Runtime payout reconciliation and retry operators remain.

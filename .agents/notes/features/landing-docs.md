@@ -40,6 +40,7 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - Loader: client navigation to home starts teaser fetch without blocking shell; SSR awaits data for hydration (see "Authentication loading" in [accounts-orgs](accounts-orgs.md)).
 - Landing sections in code: hero (Browse catalogue / Open dashboard / Create account), How it works (single 3-step list `HOW_STEPS`: publish spec with `x-zevium-cost` → discover and call → pay for successful calls, 95/5), consumer + publisher cards, For agents (MCP config snippet `buildMcpConfigSnippet`, `/mcp` + `/discovery` URLs from `VITE_GATEWAY_URL`, fallback `http://localhost:8787`), live catalogue teasers, footer.
 - `/docs` routes: `index` (What is Zevium, Credits model, Quickstart, Next), `consuming` (API keys, calling through gateway, mock calls, response headers, zero balance blocks, refunds), `publishing` (model, pricing in spec, immutability, deprecation, webhooks), `agents`.
+- `/docs/publishing` documents all five emitted publisher webhook events and visibility-change payload/no-op semantics (#393); event contract owned by [webhooks-notifications](webhooks-notifications.md).
 - Integrate: API detail ships "Copy curl" (keyless mock URL or placeholder key, never the real secret) plus agent config snippet; no js/python snippet generation.
 
 ## Decisions

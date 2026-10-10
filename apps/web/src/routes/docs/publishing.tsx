@@ -192,8 +192,18 @@ Sunset: Wed, 31 Dec 2025 23:59:59 GMT`}
           <code>sunsetAt</code> migration date).
         </li>
         <li>
+          <code>project.deprecated</code> — project retirement scheduled.
+        </li>
+        <li>
+          <code>project.deprecation_canceled</code> — scheduled project
+          retirement canceled.
+        </li>
+        <li>
           <code>project.visibility_changed</code> — project made public or
-          private.
+          private by its publisher or a Zevium admin. The <code>data</code>{" "}
+          payload contains <code>projectId</code> and <code>visibility</code> (
+          <code>public</code> or <code>private</code>). Updates that leave
+          visibility unchanged do not emit this event.
         </li>
       </ul>
       <p>Each delivery is a POST with these headers and a JSON body:</p>
