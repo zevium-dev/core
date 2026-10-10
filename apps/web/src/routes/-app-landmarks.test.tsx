@@ -36,7 +36,9 @@ vi.mock("#/components/theme-toggle", () => ({
   ThemeToggle: () => <button>Theme</button>,
 }));
 vi.mock("#/components/notification-bell", () => ({
-  NotificationBell: () => null,
+  NotificationBell: ({ workspaceReady }: { workspaceReady: boolean }) => (
+    <span data-testid="notifications" data-workspace-ready={workspaceReady} />
+  ),
 }));
 vi.mock("#/lib/auth-session", () => ({ requireAuth: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({
@@ -127,6 +129,11 @@ describe("app shell landmarks", () => {
       state.ready = mode === "ready";
       state.error = mode === "error";
       const { container } = setup();
+      expect(
+        screen
+          .getByTestId("notifications")
+          .getAttribute("data-workspace-ready"),
+      ).toBe(String(state.ready));
       const main = screen.getByRole("main");
       const link = screen.getByRole("link", { name: "Skip to main content" });
       const target = container.querySelector(link.getAttribute("href")!);

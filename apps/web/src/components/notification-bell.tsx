@@ -1,5 +1,6 @@
 import { ListBoundary } from "#/components/list-boundary";
-import { usePaginatedQuery } from "convex/react";
+import { useAuth } from "@clerk/tanstack-react-start";
+import { useConvexAuth, usePaginatedQuery } from "convex/react";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -92,15 +93,33 @@ function hrefForNotification(
   return destinationForKind(kind);
 }
 
-export function NotificationBell() {
+export function NotificationBell({
+  workspaceReady,
+}: {
+  workspaceReady: boolean;
+}) {
+  const { userId, orgId } = useAuth();
   const { orgSlug, isLoaded } = useActiveOrgSlug();
+  const { isLoading: authPending, isAuthenticated } = useConvexAuth();
 
+  // Keep this gate outside the boundary: auth recovery must remount a failed
+  // subscription even when the new organization's slug has not changed.
+  if (!isLoaded || !workspaceReady || authPending || !isAuthenticated) {
+    return (
+      <Skeleton
+        className="size-9 rounded-md"
+        aria-label="Loading notifications"
+        aria-busy="true"
+      />
+    );
+  }
   if (!orgSlug) {
     return <DisabledBell ready={isLoaded} />;
   }
+  const principalKey = JSON.stringify([userId, orgId, orgSlug]);
   return (
-    <ListBoundary label="notifications" resetKey={orgSlug}>
-      <BellWithOrg key={orgSlug} orgSlug={orgSlug} />
+    <ListBoundary label="notifications" resetKey={principalKey}>
+      <BellWithOrg orgSlug={orgSlug} />
     </ListBoundary>
   );
 }

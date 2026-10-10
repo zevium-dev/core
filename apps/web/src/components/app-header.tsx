@@ -30,7 +30,7 @@ function labelFor(segment: string) {
   );
 }
 
-export function AppHeader() {
+export function AppHeader({ workspaceReady }: { workspaceReady: boolean }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const segments = pathname.split("/").filter(Boolean);
 
@@ -76,7 +76,7 @@ export function AppHeader() {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-1">
-        <NotificationBell />
+        <NotificationBell workspaceReady={workspaceReady} />
       </div>
     </header>
   );
