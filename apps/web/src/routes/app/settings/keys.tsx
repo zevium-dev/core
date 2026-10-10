@@ -1,9 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
@@ -54,7 +49,6 @@ import { Switch } from "#/components/ui/switch";
 import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 import {
   createKey,
-  listKeys,
   revokeKey,
   rotateKey,
   type ApiKeyRow,
@@ -62,15 +56,12 @@ import {
 } from "#/lib/api-keys";
 import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
-import { humanError } from "#/lib/human-error";
+import { apiKeyError } from "#/lib/api-key-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
 import { DUR, EASE } from "#/lib/motion";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { safeReturnPath } from "#/lib/return-path";
 
-function keysQueryKey(userId: string, orgId: string) {
-  return ["settings", "api-keys", userId, orgId] as const;
-}
 const KEY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -120,11 +111,9 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
   const { membership } = useOrganization();
   const canAdminister = isPrivilegedOrgRole(membership?.role);
   const { returnTo } = Route.useSearch();
-  const queryClient = useQueryClient();
   const reduce = useHydratedReducedMotion();
   const principalKey = `${userId}:${orgId}`;
   const activePrincipalRef = useRef<string | null>(principalKey);
-  const queryKey = keysQueryKey(userId, orgId);
 
   useLayoutEffect(() => {
     activePrincipalRef.current = principalKey;
@@ -133,16 +122,10 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
     };
   }, [principalKey]);
 
-  const keysQuery = useQuery({
-    queryKey,
-    queryFn: () => listKeys(),
-  });
-
-  // Realtime key-settings (cap, disabled, grace) from the control plane.
-  const { data: settingsData } = useSuspenseQuery(
-    convexQuery(api.keySettings.getForOrg, {}),
+  const keysQuery = useQuery(convexQuery(api.keySettings.listKeys, {}));
+  const settingsByKey = new Map(
+    (keysQuery.data ?? []).map((row) => [row.id, row]),
   );
-  const settingsByKey = new Map((settingsData ?? []).map((s) => [s.keyId, s]));
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
@@ -167,11 +150,10 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
       if (activePrincipalRef.current !== completedPrincipal) return;
       setRevealed(created);
       setName("");
-      void queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
       if (activePrincipalRef.current !== principalKey) return;
-      toast.error(humanError(err, "Could not create API key"));
+      toast.error(apiKeyError(err, "Could not create API key"));
     },
   });
 
@@ -180,14 +162,16 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
       principalKey,
       result: await revokeKey({ data: { id } }),
     }),
-    onSuccess: ({ principalKey: completedPrincipal }) => {
+    onSuccess: ({ principalKey: completedPrincipal, result }) => {
       if (activePrincipalRef.current !== completedPrincipal) return;
       setRevokeTarget(null);
-      void queryClient.invalidateQueries({ queryKey });
+      if (result.providerCleanupPending) {
+        toast.info("Key revoked. Provider cleanup will retry automatically.");
+      }
     },
     onError: (err: unknown) => {
       if (activePrincipalRef.current !== principalKey) return;
-      toast.error(humanError(err, "Could not revoke API key"));
+      toast.error(apiKeyError(err, "Could not revoke API key"));
     },
   });
 
@@ -212,20 +196,16 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
       setRevealed(created);
       setRotateTarget(null);
       rotationOperationIds.current.clear();
-      void queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
       if (activePrincipalRef.current !== principalKey) return;
-      toast.error(humanError(err, "Could not rotate API key"));
+      toast.error(apiKeyError(err, "Could not rotate API key"));
     },
   });
 
   const keys = keysQuery.data ?? [];
-  const hasKey = keys.some(
-    (key) =>
-      getApiKeyLifecycle(settingsByKey.get(key.id), Date.now()) === "current",
-  );
-  const isLoading = keysQuery.isPending;
+  const hasKey = keys.some((key) => key.ownerUserId === userId && key.current);
+  const isPending = keysQuery.isPending;
 
   function closeReveal() {
     if (createMutation.isPending || rotateMutation.isPending) return;
@@ -288,24 +268,26 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Your keys</CardTitle>
+          <CardTitle>
+            {canAdminister ? "Organization keys" : "Your keys"}
+          </CardTitle>
           <CardDescription>
             Secrets appear once. Spend caps, status changes, and rotation reach
             gateway within 1 minute.
           </CardDescription>
           {!canAdminister ? (
             <p className="text-sm text-muted-foreground">
-              You can create your own key. Organization admins manage caps,
-              rotation, status, and revocation.
+              You can create, rotate, disable, and revoke your own key.
+              Organization admins manage spend caps and all member keys.
             </p>
           ) : null}
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isPending ? (
             <KeysTableSkeleton />
           ) : keysQuery.isError ? (
             <KeysError
-              message={humanError(keysQuery.error, "Could not load keys")}
+              message={apiKeyError(keysQuery.error, "Could not load keys")}
               onRetry={() => void keysQuery.refetch()}
             />
           ) : keys.length === 0 ? (
@@ -363,6 +345,7 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
                         }}
                         revokePending={revokeMutation.isPending}
                         canAdminister={canAdminister}
+                        canManage={canAdminister || key.ownerUserId === userId}
                       />
                     ))}
                   </tbody>
@@ -580,6 +563,7 @@ function KeyRow({
   onRevoke,
   revokePending,
   canAdminister,
+  canManage,
 }: {
   apiKey: ApiKeyRow;
   setting: SettingView | undefined;
@@ -589,6 +573,7 @@ function KeyRow({
   onRevoke: (trigger: HTMLButtonElement) => void;
   revokePending: boolean;
   canAdminister: boolean;
+  canManage: boolean;
 }) {
   // Local cap input mirrors the persisted value; edits commit on blur.
   const [capInput, setCapInput] = useState(
@@ -596,10 +581,8 @@ function KeyRow({
       ? ""
       : String(setting.monthlyCapCredits),
   );
-  const [capBusy, setCapBusy] = useState(false);
   const [capError, setCapError] = useState<string | null>(null);
   const capErrorId = useId();
-  const [toggleBusy, setToggleBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -615,34 +598,26 @@ function KeyRow({
     );
   }, [setting?.monthlyCapCredits]);
 
-  async function commitCap() {
+  const capMutation = useMutation({
+    mutationFn: setCap,
+    onError: (error: unknown) =>
+      setCapError(apiKeyError(error, "Could not save cap. Retry.")),
+  });
+  const toggleMutation = useMutation({
+    mutationFn: setDisabled,
+    onError: (error: unknown) =>
+      toast.error(apiKeyError(error, "Could not update key")),
+  });
+
+  function commitCap() {
     const parsed = parseMonthlyCap(capInput);
     if (!parsed.ok) {
       setCapError(parsed.error);
       return;
     }
     setCapError(null);
-    const current = setting?.monthlyCapCredits ?? null;
-    if (parsed.cap === current) return;
-    setCapBusy(true);
-    try {
-      await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
-    } catch (err) {
-      setCapError(humanError(err, "Could not save cap. Retry."));
-    } finally {
-      setCapBusy(false);
-    }
-  }
-
-  async function commitToggle(nextEnabled: boolean) {
-    setToggleBusy(true);
-    try {
-      await setDisabled({ keyId: apiKey.id, disabled: !nextEnabled });
-    } catch (err) {
-      toast.error(humanError(err, "Could not update key"));
-    } finally {
-      setToggleBusy(false);
-    }
+    if (parsed.cap === (setting?.monthlyCapCredits ?? null)) return;
+    capMutation.mutate({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
   }
 
   const graceUntil = setting?.graceUntil;
@@ -661,6 +636,11 @@ function KeyRow({
         </span>
         <span className="min-w-0 break-words text-right lg:text-left">
           {apiKey.name}
+          {apiKey.ownerUserId ? (
+            <span className="block text-xs font-normal text-muted-foreground">
+              {apiKey.ownerUserId}
+            </span>
+          ) : null}
         </span>
       </td>
       <td className="flex items-center justify-between gap-4 font-mono text-xs text-muted-foreground lg:table-cell lg:px-3 lg:py-2.5">
@@ -685,12 +665,12 @@ function KeyRow({
               setCapError(parsed.ok ? null : parsed.error);
             }
           }}
-          onBlur={() => void commitCap()}
+          onBlur={commitCap}
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
           placeholder="Unlimited"
-          disabled={capBusy || !canAdminister}
+          disabled={capMutation.isPending || !canAdminister}
           className="h-8 w-28 tabular-nums"
           aria-label={`Monthly credit cap for ${apiKey.name}`}
           aria-invalid={capError !== null}
@@ -712,8 +692,13 @@ function KeyRow({
           {lifecycle === "current" || lifecycle === "disabled" ? (
             <Switch
               checked={lifecycle === "current"}
-              disabled={toggleBusy || !canAdminister}
-              onCheckedChange={(checked) => void commitToggle(checked === true)}
+              disabled={toggleMutation.isPending || !canManage}
+              onCheckedChange={(checked) =>
+                toggleMutation.mutate({
+                  keyId: apiKey.id,
+                  disabled: checked !== true,
+                })
+              }
               aria-label={`Enable ${apiKey.name}`}
             />
           ) : null}
@@ -758,7 +743,7 @@ function KeyRow({
             size="sm"
             aria-label="Rotate API key"
             onClick={(event) => onRotate(event.currentTarget)}
-            disabled={!canAdminister || lifecycle !== "current"}
+            disabled={!canManage || lifecycle !== "current"}
             title="Rotate key (old key works 24h)"
           >
             <RotateCw className="size-4" />
@@ -769,7 +754,7 @@ function KeyRow({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={(event) => onRevoke(event.currentTarget)}
-            disabled={!canAdminister || revokePending}
+            disabled={!canManage || revokePending}
           >
             <Trash2 className="size-4" />
             {graceActive ? "Revoke previous key" : "Revoke"}

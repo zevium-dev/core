@@ -11,6 +11,7 @@
 
 import {
   REGISTRY_MAX_CLOCK_SKEW_MS,
+  isPrivilegedOrgRole,
   canonicalJson,
   validateRegistryEvent,
   verifyRegistryVerifiedKeyProjection,
@@ -21,7 +22,8 @@ import {
   type RegistryVerifiedKeyProjection,
   type RegistryVerifiedKeyRotationProjection,
 } from "@zevium/shared";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
@@ -95,6 +97,7 @@ export type KeySettingView = {
   graceUntil?: number;
   rotationRequiredAt?: number;
   lifecycle?: "active" | "grace" | "disabled" | "revoked";
+  createdAt: number;
   updatedAt: number;
 };
 
@@ -126,6 +129,7 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
     graceUntil: doc.graceUntil,
     rotationRequiredAt: doc.rotationRequiredAt,
     lifecycle: doc.lifecycle,
+    createdAt: doc._creationTime,
     updatedAt: doc.updatedAt,
   };
 }
@@ -160,16 +164,19 @@ async function requireOrgByClerkId(ctx: DbCtx): Promise<{
   claims: Awaited<ReturnType<typeof requireIdentity>>;
 }> {
   const claims = await requireIdentity(ctx);
+  if (claims.orgRole !== "org:member" && !isPrivilegedOrgRole(claims.orgRole)) {
+    throw new ConvexError("Organization role is not supported");
+  }
   const clerkOrgId = claims.orgId;
   if (typeof clerkOrgId !== "string" || clerkOrgId.length === 0) {
-    throw new Error("Select an organization before managing API keys");
+    throw new ConvexError("Select an organization before managing API keys");
   }
   if ((await getOrganizationTombstone(ctx, clerkOrgId)) !== null) {
-    throw new Error("Organization is archived");
+    throw new ConvexError("Organization is archived");
   }
   const org = await getActiveOrganizationByClerkId(ctx, clerkOrgId);
   if (org === null) {
-    throw new Error("Organization not found");
+    throw new ConvexError("Organization not found");
   }
   return { clerkOrgId, claims };
 }
@@ -190,7 +197,7 @@ async function getOwnedVerifiedRow(
     existing.ownerUserId === undefined
   ) {
     // Cross-org attempt — do not leak existence.
-    throw new Error("Verified key not found");
+    throw new ConvexError("Verified key not found");
   }
   const firstEvent =
     existing.secretSha256 === undefined
@@ -215,9 +222,46 @@ async function getOwnedVerifiedRow(
     provision.payload.ownerUserId !== existing.ownerUserId ||
     provision.payload.clerkKeyId !== existing.keyId
   ) {
-    throw new Error("Verified key not found");
+    throw new ConvexError("Verified key not found");
   }
   return existing;
+}
+
+function requireKeyManager(
+  claims: Awaited<ReturnType<typeof requireIdentity>>,
+  row: Doc<"keySettings">,
+): void {
+  if (
+    row.ownerUserId !== claims.subject &&
+    !isPrivilegedOrgRole(claims.orgRole)
+  ) {
+    throw new ConvexError("Verified key not found");
+  }
+}
+
+function occupiesKeySlot(row: Doc<"keySettings">): boolean {
+  return (
+    row.lifecycle !== "revoked" &&
+    row.membershipRevokedAt === undefined &&
+    row.graceUntil === undefined &&
+    (row.expiresAt === undefined || row.expiresAt > Date.now())
+  );
+}
+
+async function visibleKeys(ctx: DbCtx): Promise<Doc<"keySettings">[]> {
+  const { clerkOrgId, claims } = await requireOrgByClerkId(ctx);
+  if (isPrivilegedOrgRole(claims.orgRole)) {
+    return await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+      .collect();
+  }
+  return await ctx.db
+    .query("keySettings")
+    .withIndex("by_owner", (q) =>
+      q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
+    )
+    .collect();
 }
 
 async function insertVerifiedSetting(
@@ -250,7 +294,8 @@ async function insertVerifiedSetting(
     ...(provision.expiresAt === null ? {} : { expiresAt: provision.expiresAt }),
   });
   const created = await ctx.db.get(id);
-  if (created === null) throw new Error("Failed to read created key setting");
+  if (created === null)
+    throw new ConvexError("Failed to read created key setting");
   return created;
 }
 
@@ -281,7 +326,8 @@ async function patchSetting(
   }
   await ctx.db.patch(id, update as Partial<Doc<"keySettings">>);
   const updated = await ctx.db.get(id);
-  if (updated === null) throw new Error("Failed to read updated key setting");
+  if (updated === null)
+    throw new ConvexError("Failed to read updated key setting");
   return updated;
 }
 
@@ -301,14 +347,15 @@ function currentLifecycle(
 
 function projectionSecret(): string {
   const secret = process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET;
-  if (!secret) throw new Error("Verified key projection is not configured");
+  if (!secret)
+    throw new ConvexError("Verified key projection is not configured");
   return secret;
 }
 
 function requireFreshProjection(verifiedAt: number): void {
   const delta = Math.abs(Date.now() - verifiedAt);
   if (!Number.isSafeInteger(verifiedAt) || delta > REGISTRY_MAX_CLOCK_SKEW_MS) {
-    throw new Error("Verified key projection is expired");
+    throw new ConvexError("Verified key projection is expired");
   }
 }
 
@@ -322,12 +369,27 @@ function requireFreshProjection(verifiedAt: number): void {
 export const getForOrg = query({
   args: {},
   handler: async (ctx): Promise<KeySettingView[]> => {
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    const rows = await ctx.db
-      .query("keySettings")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", clerkOrgId))
-      .collect();
+    const rows = await visibleKeys(ctx);
     return rows.map(toView);
+  },
+});
+
+/** Realtime display DTO. No provider reads or secret/hash fields. */
+export const listKeys = query({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await visibleKeys(ctx);
+    return rows
+      .filter((row) => row.lifecycle !== "revoked")
+      .map((row) => ({
+        id: row.keyId,
+        name: row.keyName ?? "API key",
+        masked: `••••${row.keyId.slice(-4)}`,
+        lastUsedAt: null,
+        revoked: false,
+        current: occupiesKeySlot(row),
+        ...toView(row),
+      }));
   },
 });
 
@@ -340,6 +402,7 @@ export const registerVerified = mutation({
   args: {
     projection: verifiedKeyProjectionValidator,
     signature: v.string(),
+    keyName: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
     const projection = args.projection as RegistryVerifiedKeyProjection;
@@ -352,7 +415,7 @@ export const registerVerified = mutation({
         args.signature,
       ))
     ) {
-      throw new Error("Verified key projection signature is invalid");
+      throw new ConvexError("Verified key projection signature is invalid");
     }
     const provision = projection.provision;
     if (
@@ -360,7 +423,7 @@ export const registerVerified = mutation({
       provision.ownerUserId !== claims.subject ||
       provision.subjectUserId !== claims.subject
     ) {
-      throw new Error("Verified key projection does not match identity");
+      throw new ConvexError("Verified key projection does not match identity");
     }
 
     const existing = await ctx.db
@@ -386,12 +449,31 @@ export const registerVerified = mutation({
       ) {
         return toView(existing);
       }
-      throw new Error("Verified key projection conflicts with existing state");
+      throw new ConvexError(
+        "Verified key projection conflicts with existing state",
+      );
     }
 
+    // This indexed read and insertion share one serializable transaction.
+    // Disabled keys still occupy the member's slot until explicitly revoked.
+    const owned = await ctx.db
+      .query("keySettings")
+      .withIndex("by_owner", (q) =>
+        q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
+      )
+      .collect();
+    if (owned.some(occupiesKeySlot)) {
+      throw new ConvexError(
+        "You already have a key in this organization. Rotate or revoke it before creating another.",
+      );
+    }
     const created = await insertVerifiedSetting(ctx, provision);
     await enqueueKeyPut(ctx, provision);
-    return toView(created);
+    return toView(
+      await patchSetting(ctx, created._id, {
+        keyName: args.keyName?.trim().slice(0, 64),
+      }),
+    );
   },
 });
 
@@ -406,21 +488,18 @@ export const registerOwnedKey = mutation({
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     const keyId = args.keyId.trim();
     const keyName = args.keyName.trim();
-    if (keyId.length === 0) throw new Error("keyId is required");
+    if (keyId.length === 0) throw new ConvexError("keyId is required");
     if (keyName.length === 0 || keyName.length > 64) {
-      throw new Error("Key name must be 1–64 characters");
+      throw new ConvexError("Key name must be 1–64 characters");
     }
-    const existing = await getOwnedRow(ctx, clerkOrgId, keyId);
-    const doc =
-      existing !== null
-        ? await patchSetting(ctx, existing._id, {
-            keyName,
-            ownerUserId: claims.subject,
-          })
-        : await insertSetting(ctx, clerkOrgId, keyId, {
-            keyName,
-            ownerUserId: claims.subject,
-          });
+    const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, keyId);
+    if (
+      existing.ownerUserId !== claims.subject ||
+      existing.subjectUserId !== claims.subject
+    ) {
+      throw new ConvexError("Verified key not found");
+    }
+    const doc = await patchSetting(ctx, existing._id, { keyName });
     return toView(doc);
   },
 });
@@ -437,7 +516,7 @@ export const setCap = mutation({
     requireOrgAdmin(claims);
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
-      throw new Error("keyId is required");
+      throw new ConvexError("keyId is required");
     }
     if (
       args.monthlyCapCredits !== null &&
@@ -445,7 +524,7 @@ export const setCap = mutation({
         args.monthlyCapCredits <= 0 ||
         !Number.isInteger(args.monthlyCapCredits))
     ) {
-      throw new Error("Cap must be a positive whole number of credits");
+      throw new ConvexError("Cap must be a positive whole number of credits");
     }
     // null clears the field (undefined in patch deletes it); a number sets it.
     const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
@@ -473,14 +552,21 @@ export const setDisabled = mutation({
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
     const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
-      throw new Error("keyId is required");
+      throw new ConvexError("keyId is required");
     }
     const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
+    requireKeyManager(claims, existing);
+    if (
+      existing.lifecycle === "revoked" ||
+      existing.membershipRevokedAt !== undefined ||
+      existing.graceUntil !== undefined
+    ) {
+      throw new ConvexError("This key is no longer active");
+    }
     if (args.disabled === false && existing.rotationRequiredAt !== undefined) {
-      throw new Error("Key must be rotated before it can be enabled");
+      throw new ConvexError("Key must be rotated before it can be enabled");
     }
     const doc = await patchSetting(ctx, existing._id, {
       disabled: args.disabled,
@@ -502,9 +588,17 @@ export const revokePrevious = mutation({
   args: { keyId: v.string() },
   handler: async (ctx, args): Promise<KeySettingView> => {
     const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
+    requireKeyManager(claims, existing);
+    // Terminal registry revocation cannot safely be rolled back after delivery.
+    // Queue provider cleanup atomically, including idempotent user retries.
+    await ctx.scheduler.runAfter(
+      60_000,
+      internal.keyVerification.revokeWithRetry,
+      { keyId: existing.keyId, attempt: 0 },
+    );
+    if (existing.lifecycle === "revoked") return toView(existing);
     const doc = await patchSetting(ctx, existing._id, {
       disabled: true,
       lifecycle: "revoked",
@@ -518,14 +612,11 @@ export const revokePrevious = mutation({
 export const beginRotation = mutation({
   args: { operationId: v.string(), oldKeyId: v.string() },
   handler: async (ctx, args) => {
-    const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
+    const { claims } = await requireOrgByClerkId(ctx);
     if (!claims.orgId || !claims.subject)
-      throw new Error("Select an organization before rotating");
+      throw new ConvexError("Select an organization before rotating");
     const oldKey = await getOwnedVerifiedRow(ctx, claims.orgId, args.oldKeyId);
-    if (oldKey.ownerUserId !== claims.subject) {
-      throw new Error("Verified key not found");
-    }
+    requireKeyManager(claims, oldKey);
     const existing = await ctx.db
       .query("keyRotationOperations")
       .withIndex("by_operation", (q) =>
@@ -535,6 +626,8 @@ export const beginRotation = mutation({
           .eq("operationId", args.operationId),
       )
       .unique();
+    if (existing && existing.oldKeyId !== args.oldKeyId)
+      throw new ConvexError("Rotation operation conflicts with key");
     if (
       existing?.status === "reserved" &&
       Date.now() - existing.updatedAt > 5 * 60_000
@@ -544,7 +637,12 @@ export const beginRotation = mutation({
         failure: "Reservation expired",
         updatedAt: Date.now(),
       });
-    } else if (existing) return existing;
+      return await ctx.db.get(existing._id);
+    } else if (existing) {
+      if (existing.oldKeyId !== args.oldKeyId)
+        throw new ConvexError("Rotation operation conflicts with key");
+      return existing;
+    }
     const active = await ctx.db
       .query("keyRotationOperations")
       .withIndex("by_active_old_key", (q) =>
@@ -561,8 +659,10 @@ export const beginRotation = mutation({
         updatedAt: Date.now(),
       });
     } else if (active) {
-      throw new Error("A rotation is already in progress for this key");
+      throw new ConvexError("A rotation is already in progress for this key");
     }
+    if (!occupiesKeySlot(oldKey) || oldKey.disabled)
+      throw new ConvexError("Only the current key can be rotated");
     const now = Date.now();
     const id = await ctx.db.insert("keyRotationOperations", {
       clerkOrgId: claims.orgId,
@@ -581,13 +681,13 @@ export const completeRotation = mutation({
   args: {
     projection: verifiedKeyRotationProjectionValidator,
     signature: v.string(),
+    keyName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const projection = args.projection as RegistryVerifiedKeyRotationProjection;
-    const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
+    const { claims } = await requireOrgByClerkId(ctx);
     if (!claims.orgId || !claims.subject)
-      throw new Error("Select an organization before rotating");
+      throw new ConvexError("Select an organization before rotating");
     requireFreshProjection(projection.verifiedAt);
     if (
       !(await verifyRegistryVerifiedKeyRotationProjection(
@@ -596,14 +696,10 @@ export const completeRotation = mutation({
         args.signature,
       ))
     ) {
-      throw new Error("Verified key rotation signature is invalid");
+      throw new ConvexError("Verified key rotation signature is invalid");
     }
-    if (
-      projection.newProvision.clerkOrgId !== claims.orgId ||
-      projection.newProvision.ownerUserId !== claims.subject ||
-      projection.newProvision.subjectUserId !== claims.subject
-    ) {
-      throw new Error("Verified key rotation does not match identity");
+    if (projection.newProvision.clerkOrgId !== claims.orgId) {
+      throw new ConvexError("Verified key rotation does not match identity");
     }
     const op = await ctx.db
       .query("keyRotationOperations")
@@ -615,21 +711,33 @@ export const completeRotation = mutation({
       )
       .unique();
     if (!op || op.oldKeyId !== projection.oldKeyId)
-      throw new Error("Rotation operation not found");
+      throw new ConvexError("Rotation operation not found");
     if (op.status === "completed") {
       if (op.newKeyId !== projection.newProvision.clerkKeyId) {
-        throw new Error("Rotation operation conflicts with completed key");
+        throw new ConvexError(
+          "Rotation operation conflicts with completed key",
+        );
       }
       return op;
     }
-    if (op.status !== "reserved") throw new Error("Rotation operation failed");
+    if (op.status !== "reserved")
+      throw new ConvexError("Rotation operation failed");
     const old = await getOwnedVerifiedRow(
       ctx,
       claims.orgId,
       projection.oldKeyId,
     );
-    if (old.ownerUserId !== claims.subject) {
-      throw new Error("Verified key not found");
+    requireKeyManager(claims, old);
+    if (!occupiesKeySlot(old) || old.disabled)
+      throw new ConvexError("Only the current key can be rotated");
+    if (
+      projection.newProvision.ownerUserId !== old.ownerUserId ||
+      projection.newProvision.subjectUserId !== old.subjectUserId ||
+      projection.newProvision.budgetId !== old.budgetId ||
+      projection.newProvision.monthlyCapCredits !==
+        (old.monthlyCapCredits ?? null)
+    ) {
+      throw new ConvexError("Verified key rotation does not match identity");
     }
     const existingNew = await ctx.db
       .query("keySettings")
@@ -638,20 +746,30 @@ export const completeRotation = mutation({
       )
       .unique();
     if (existingNew !== null) {
-      throw new Error("Verified replacement key already exists");
+      throw new ConvexError("Verified replacement key already exists");
+    }
+    if (projection.graceUntil !== projection.verifiedAt + 24 * 60 * 60 * 1000) {
+      throw new ConvexError("Rotation grace must be 24 hours");
     }
     const newDoc = await insertVerifiedSetting(ctx, projection.newProvision, {
       rotatedFromKeyId: projection.oldKeyId,
       keyFamilyId: old.keyFamilyId ?? old.keyId,
     });
     await enqueueKeyPut(ctx, projection.newProvision);
-    void newDoc;
+    await patchSetting(ctx, newDoc._id, {
+      keyName: args.keyName?.trim().slice(0, 64),
+    });
     const oldDoc = await patchSetting(ctx, old._id, {
       disabled: false,
       lifecycle: "grace",
       graceUntil: projection.graceUntil,
     });
     await enqueueKeyLifecycle(ctx, oldDoc, "grace");
+    await ctx.scheduler.runAt(
+      projection.graceUntil,
+      internal.keySettings.expireGrace,
+      { keyId: old.keyId },
+    );
     await ctx.db.patch(op._id, {
       status: "completed",
       newKeyId: projection.newProvision.clerkKeyId,
@@ -665,10 +783,9 @@ export const completeRotation = mutation({
 export const failRotation = mutation({
   args: { operationId: v.string(), message: v.string() },
   handler: async (ctx, args) => {
-    const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
+    const { claims } = await requireOrgByClerkId(ctx);
     if (!claims.orgId || !claims.subject)
-      throw new Error("Select an organization before rotating");
+      throw new ConvexError("Select an organization before rotating");
     const op = await ctx.db
       .query("keyRotationOperations")
       .withIndex("by_operation", (q) =>
@@ -678,8 +795,8 @@ export const failRotation = mutation({
           .eq("operationId", args.operationId),
       )
       .unique();
-    if (!op) throw new Error("Rotation operation not found");
-    if (op.status === "completed") return op;
+    if (!op) throw new ConvexError("Rotation operation not found");
+    if (op.status === "completed" || op.status === "failed") return op;
     await ctx.db.patch(op._id, {
       status: "failed",
       failure: args.message.slice(0, 160),
@@ -703,7 +820,9 @@ async function getOwnedRow(
     .query("keySettings")
     .withIndex("by_key", (q) => q.eq("keyId", keyId))
     .unique();
-  if (existing === null || existing.clerkOrgId !== clerkOrgId) return null;
+  if (existing !== null && existing.clerkOrgId !== clerkOrgId)
+    throw new ConvexError("Verified key not found");
+  if (existing === null) return null;
   return existing;
 }
 
@@ -731,7 +850,8 @@ async function insertSetting(
       : {}),
   });
   const created = await ctx.db.get(id);
-  if (created === null) throw new Error("Failed to read created key setting");
+  if (created === null)
+    throw new ConvexError("Failed to read created key setting");
   return created;
 }
 
@@ -747,10 +867,10 @@ export const recordProviderVerifiedKey = internalMutation({
       args.ownerUserId.trim() === "" ||
       args.clerkOrgId.trim() === ""
     ) {
-      throw new Error("Provider key ownership could not be verified");
+      throw new ConvexError("Provider key ownership could not be verified");
     }
     if ((await getActiveOrganizationByClerkId(ctx, args.clerkOrgId)) === null) {
-      throw new Error("Organization is archived or not provisioned");
+      throw new ConvexError("Organization is archived or not provisioned");
     }
     const existing = await getOwnedRow(ctx, args.clerkOrgId, args.keyId);
     const doc =
@@ -764,7 +884,7 @@ export const recordProviderVerifiedKey = internalMutation({
       });
     }
     const updated = await ctx.db.get(doc._id);
-    if (updated === null) throw new Error("Key setting disappeared");
+    if (updated === null) throw new ConvexError("Key setting disappeared");
     return toView(updated);
   },
 });
@@ -785,7 +905,7 @@ export const revokeMembershipVerified = internalMutation({
     args,
   ): Promise<{ duplicate: boolean; keyIds: string[] }> => {
     if (args.svixId.trim() === "")
-      throw new Error("Invalid Clerk webhook envelope");
+      throw new ConvexError("Invalid Clerk webhook envelope");
     const prior = await ctx.db
       .query("clerkWebhookReceipts")
       .withIndex("by_svix_id", (q) => q.eq("svixId", args.svixId))
@@ -831,5 +951,32 @@ export const revokeMembershipVerified = internalMutation({
       }
     }
     return { duplicate: false, keyIds };
+  },
+});
+
+/** Grace expiry is durable even when no browser is open. */
+export const expireGrace = internalMutation({
+  args: { keyId: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("keySettings")
+      .withIndex("by_key", (q) => q.eq("keyId", args.keyId))
+      .unique();
+    if (
+      !row ||
+      row.lifecycle === "revoked" ||
+      row.graceUntil === undefined ||
+      row.graceUntil > Date.now()
+    )
+      return;
+    const revoked = await patchSetting(ctx, row._id, {
+      disabled: true,
+      lifecycle: "revoked",
+    });
+    await enqueueKeyRevoke(ctx, revoked, "admin_revoked");
+    await ctx.scheduler.runAfter(0, internal.keyVerification.revokeWithRetry, {
+      keyId: row.keyId,
+      attempt: 0,
+    });
   },
 });
