@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zevium/shared": "workspace:*"
+    "@zevium/shared": "workspace:*",
+    "jose": "^6.2.12"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

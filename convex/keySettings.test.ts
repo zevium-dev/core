@@ -567,3 +567,103 @@ describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
     });
   });
 });
+
+describe("MCP OAuth identity mapping", () => {
+  async function setup() {
+    const t = identity();
+    await t.mutation(api.organizations.ensureOrganization, {
+      clerkOrgId: "org_keys",
+    });
+    const value = await projection();
+    await t.mutation(api.keySettings.registerVerified, {
+      projection: value,
+      signature: await signRegistryVerifiedKeyProjection(
+        projectionSecret,
+        value,
+      ),
+    });
+    return t;
+  }
+  const args = { userId: "user_keys", orgId: "org_keys" };
+  it("resolves only the user's current key in the consented org", async () => {
+    const t = await setup();
+    expect(
+      await t.query(internal.keySettings.resolveMcpIdentity, args),
+    ).toEqual({ orgId: "org_keys", keyId: "ck_keys" });
+    expect(
+      await t.query(internal.keySettings.resolveMcpIdentity, {
+        ...args,
+        userId: "user_other",
+      }),
+    ).toBeNull();
+    expect(
+      await t.query(internal.keySettings.resolveMcpIdentity, {
+        ...args,
+        orgId: "org_other",
+      }),
+    ).toBeNull();
+  });
+  it.each([
+    { disabled: true },
+    { lifecycle: "revoked" as const },
+    { membershipRevokedAt: 1 },
+    { expiresAt: 1 },
+    { graceUntil: Date.now() + 60_000 },
+    { rotationRequiredAt: 1 },
+    { subjectUserId: "user_other" },
+    { secretSha256: undefined },
+  ])("rejects a key outside active lifecycle: %j", async (patch) => {
+    const t = await setup();
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("keySettings")
+        .withIndex("by_key", (q) => q.eq("keyId", "ck_keys"))
+        .unique();
+      await ctx.db.patch(row!._id, patch);
+    });
+    expect(
+      await t.query(internal.keySettings.resolveMcpIdentity, args),
+    ).toBeNull();
+  });
+  it("protects cold identity resolution with the gateway secret", async () => {
+    const t = await setup();
+    const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
+    process.env.GATEWAY_INTERNAL_SECRET = "test-mcp-internal-secret";
+    try {
+      const init = { method: "POST", body: JSON.stringify(args) };
+      expect((await t.fetch("/mcp-identity", init)).status).toBe(401);
+      const headers = {
+        "x-internal-secret": "test-mcp-internal-secret",
+        "content-type": "application/json",
+      };
+      expect(
+        (await t.fetch("/mcp-identity", { ...init, headers, body: "{}" }))
+          .status,
+      ).toBe(400);
+      const response = await t.fetch("/mcp-identity", { ...init, headers });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        orgId: "org_keys",
+        keyId: "ck_keys",
+      });
+    } finally {
+      if (previousSecret === undefined)
+        delete process.env.GATEWAY_INTERNAL_SECRET;
+      else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
+    }
+  });
+  it("rejects ambiguous current keys rather than picking a budget", async () => {
+    const t = await setup();
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("keySettings")
+        .withIndex("by_key", (q) => q.eq("keyId", "ck_keys"))
+        .unique();
+      const { _id, _creationTime, ...copy } = row!;
+      await ctx.db.insert("keySettings", { ...copy, keyId: "ck_duplicate" });
+    });
+    expect(
+      await t.query(internal.keySettings.resolveMcpIdentity, args),
+    ).toBeNull();
+  });
+});

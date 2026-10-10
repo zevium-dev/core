@@ -13,6 +13,8 @@
   "vars": {
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
     // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage
+    // MCP_OAUTH_ISSUER + MCP_OAUTH_RESOURCE — optional OAuth activation; configure
+    // in Worker settings after Clerk DCR/PKCE/scopes setup. Deploy keeps vars.
     // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
     "CONVEX_URL": "https://polite-ermine-809.convex.cloud",
     "CONVEX_SITE_URL": "https://polite-ermine-809.convex.site",

@@ -386,12 +386,12 @@ describe("anonymous x402 wallet rail", () => {
     });
   });
   it("uses a wallet session for MCP call_api and returns a payable offer without credentials", async () => {
-    setup();
+    const f = setup(2500);
     const first = await call({
       "PAYMENT-SIGNATURE": paymentHeader({ id: "one" }),
     });
     const token = first.headers.get("x-zevium-wallet-session")!;
-    async function mcp(session?: string) {
+    async function mcp(session?: string, oauth = false) {
       const ctx = createExecutionContext();
       const response = await worker.fetch(
         new Request("https://gateway.test/mcp", {
@@ -415,7 +415,15 @@ describe("anonymous x402 wallet rail", () => {
             },
           }),
         }),
-        env as unknown as Env,
+        {
+          ...env,
+          ...(oauth
+            ? {
+                MCP_OAUTH_ISSUER: "https://clerk.oauth.test",
+                MCP_OAUTH_RESOURCE: "https://gateway.test/mcp",
+              }
+            : {}),
+        } as unknown as Env,
         ctx,
       );
       await waitOnExecutionContext(ctx);
@@ -425,6 +433,10 @@ describe("anonymous x402 wallet rail", () => {
     }
     const result = await mcp(token);
     expect(result.result.isError).not.toBe(true);
+    const withOAuth = await mcp(token, true);
+    expect(withOAuth.result.isError).not.toBe(true);
+    expect(f.clerk).not.toHaveBeenCalled();
+    expect(f.grants).not.toHaveBeenCalled();
     const unpaid = await mcp();
     expect(unpaid.result.isError).toBe(true);
     expect(JSON.parse(unpaid.result.content[0]!.text)).toMatchObject({

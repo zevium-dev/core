@@ -7,9 +7,9 @@
  */
 
 const ALLOW_HEADERS =
-  "authorization, x-api-key, content-type, accept, payment-signature";
+  "authorization, x-api-key, content-type, accept, payment-signature, mcp-protocol-version, mcp-session-id, last-event-id";
 const EXPOSE_HEADERS =
-  "x-zevium-cost, x-zevium-hold, retry-after, x-zevium-request-id, x-zevium-free-tier, x-zevium-mock, deprecation, sunset, link, payment-required, payment-response, x-zevium-wallet-session";
+  "x-zevium-cost, x-zevium-hold, retry-after, x-zevium-request-id, x-zevium-free-tier, x-zevium-mock, deprecation, sunset, link, payment-required, payment-response, x-zevium-wallet-session, www-authenticate, mcp-session-id";
 
 /** Terminal response for OPTIONS preflights. */
 export function corsPreflight(): Response {

@@ -953,6 +953,41 @@ http.route({
   }),
 });
 
+/** Cold OAuth identity resolution; authenticated gateway only. */
+http.route({
+  path: "/mcp-identity",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (!secret || request.headers.get("x-internal-secret") !== secret)
+      return json({ error: "unauthorized" }, 401);
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "invalid_json" }, 400);
+    }
+    if (
+      !body ||
+      typeof body !== "object" ||
+      !("userId" in body) ||
+      !("orgId" in body) ||
+      typeof body.userId !== "string" ||
+      typeof body.orgId !== "string" ||
+      body.userId.length > 256 ||
+      body.orgId.length > 256
+    )
+      return json({ error: "invalid_body" }, 400);
+    return json(
+      await ctx.runQuery(internal.keySettings.resolveMcpIdentity, {
+        userId: body.userId,
+        orgId: body.orgId,
+      }),
+      200,
+    );
+  }),
+});
+
 export default http;
 
 /** Payment-only gateway boundary; never called by ordinary wallet-session requests. */
