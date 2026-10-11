@@ -1,6 +1,6 @@
 # Catalogue and search
 
-> Status: root cutover and generated Try it form implemented; owner activation pending · Updated: 2026-10-11
+> Status: root cutover and generated Try it form implemented; owner activation pending · Updated: 2026-10-12
 > Code: `convex/{catalogue,search,lib/catalogue}.ts`, `apps/web/src/components/{catalogue-browser,catalogue-detail}.tsx`, `apps/web/src/lib/catalogue-search.server.ts`, `tests/readSurfaces.test.ts`
 > Related: [quality-signals](quality-signals.md), [reviews](reviews.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [pricing](pricing.md), [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [landing-docs](landing-docs.md), [web-app](../architecture/web-app.md)
 

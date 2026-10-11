@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { generateSpecContract, generatedToolArguments } from "@zevium/shared";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -38,7 +39,7 @@ const endpoints = parsePublishedEndpoints(
   }),
 );
 
-function panel(rows = endpoints) {
+function panel(rows = endpoints, endpointId = rows[0]!.id) {
   return (
     <QueryClientProvider client={new QueryClient()}>
       <TryItPanel
@@ -46,7 +47,7 @@ function panel(rows = endpoints) {
         publisherHandle="publisher"
         projectSlug="weather"
         endpoints={rows}
-        endpointId={endpoints[0]!.id}
+        endpointId={endpointId}
         mode="live"
         onEndpointChange={vi.fn()}
         onModeChange={vi.fn()}
@@ -301,33 +302,39 @@ it("reports an invalid key without leaking it or throwing from header constructi
   );
 });
 
-function bodyEndpoints(schema: unknown, example: unknown) {
-  return parsePublishedEndpoints(
-    JSON.stringify({
-      openapi: "3.1.0",
-      paths: {
-        "/body": {
-          post: {
-            "x-zevium-cost": 1,
-            requestBody: {
-              required: true,
-              content: { "application/json": { schema, example } },
-            },
-            responses: { "200": { description: "OK" } },
+function bodySpec(schema: unknown, example: unknown) {
+  return JSON.stringify({
+    openapi: "3.1.0",
+    paths: {
+      "/body": {
+        post: {
+          "x-zevium-cost": 1,
+          requestBody: {
+            required: true,
+            content: { "application/json": { schema, example } },
           },
+          responses: { "200": { description: "OK" } },
         },
       },
-    }),
-  );
+    },
+  });
 }
-it.each(["hello", null])(
-  "preserves JSON body %j in MCP preview and gateway bytes",
-  async (value) => {
+function bodyEndpoints(schema: unknown, example: unknown) {
+  return parsePublishedEndpoints(bodySpec(schema, example));
+}
+
+it.each(
+  ["hello", null, false, 0, { message: "hello" }, [1, 2]].map((value) => ({
+    value,
+  })),
+)(
+  "preserves JSON body $value in MCP preview and gateway bytes",
+  async ({ value }) => {
     const fetch = vi
       .fn()
       .mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetch);
-    render(panel(bodyEndpoints({ type: ["string", "null"] }, value)));
+    render(panel(bodyEndpoints({}, value)));
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: "qa-placeholder-key" },
     });
@@ -342,7 +349,14 @@ it.each(["hello", null])(
     const args = JSON.parse(
       screen.getByLabelText("MCP call_api arguments").textContent!,
     );
-    expect(args.body).toBe(JSON.stringify(value));
+    const operation = generateSpecContract({
+      spec: bodySpec({}, value),
+      version: "1.0.0",
+    }).operations[0]!;
+    expect(args.body).toEqual(
+      generatedToolArguments(operation, "publisher", "weather", { body: value })
+        .body,
+    );
     // The gateway adapter sends strings verbatim and treats null/undefined as absent.
     const adapted =
       args.body === null || args.body === undefined
@@ -350,7 +364,9 @@ it.each(["hello", null])(
         : typeof args.body === "string"
           ? args.body
           : JSON.stringify(args.body);
-    expect(adapted).toBe(fetch.mock.calls[0]![1].body);
+    const sent = fetch.mock.calls[0]![1].body as string;
+    if (typeof args.body === "string") expect(adapted).toBe(sent);
+    else expect(JSON.parse(adapted!)).toEqual(JSON.parse(sent));
   },
 );
 it.each([
@@ -418,4 +434,38 @@ it("renders a parameter example behind 18 nested allOf schemas without amplifyin
       "Validation is incomplete: value: Not checked here: pattern.",
     ),
   ).toHaveLength(1);
+});
+
+it("hydrates stored API keys without including them in server markup", () => {
+  sessionStorage.setItem("zevium:playground-api-key", "qa-stored-key");
+  expect(renderToStaticMarkup(panel())).not.toContain("qa-stored-key");
+  render(panel());
+  const key = screen.getByLabelText<HTMLInputElement>("API key");
+  expect(key.value).toBe("qa-stored-key");
+  fireEvent.change(key, { target: { value: "" } });
+  expect(key.value).toBe("");
+  expect(sessionStorage.getItem("zevium:playground-api-key")).toBeNull();
+});
+
+it("resets typed parameters and body when the selected endpoint changes", () => {
+  const first = formEndpoints[0]!;
+  const second = { ...first, id: "POST /other/{id}", path: "/other/{id}" };
+  const rows = [first, second];
+  const view = render(panel(rows, first.id));
+  fireEvent.change(screen.getByLabelText("id (path) · required"), {
+    target: { value: "edited-id" },
+  });
+  fireEvent.change(screen.getByLabelText("title · required"), {
+    target: { value: "Edited title" },
+  });
+  view.rerender(panel(rows, second.id));
+  expect(
+    screen.getByLabelText<HTMLInputElement>("id (path) · required").value,
+  ).toBe("");
+  expect(
+    screen.getByLabelText<HTMLInputElement>("title · required").value,
+  ).toBe("");
+  expect(screen.getByLabelText<HTMLInputElement>("limit (query)").value).toBe(
+    "2",
+  );
 });
