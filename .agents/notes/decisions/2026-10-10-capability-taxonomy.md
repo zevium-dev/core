@@ -1,7 +1,8 @@
 # Curated capability taxonomy and normalized web search
 
-> Date: 2026-10-10 · Status: proposed (awaiting user)
+> Date: 2026-10-10 · Status: deferred (P2; proposal not accepted)
 > Design issue: [#327](https://github.com/zevium-dev/core/issues/327) · Implementation: [#328](https://github.com/zevium-dev/core/issues/328)
+> 2026-10-11 — [Superseding decision](2026-10-11-capability-routing-deferred.md): Deferred to P2; proposal retained as future reference, not accepted.
 
 ## Recommendation
 
@@ -17,7 +18,7 @@ A curated schema gives a capability one meaning across providers. Declarative pr
 
 The [design](../design/capability-routing.md) owns all exact shapes, proposed limits, tradeoffs, code gaps, and the smallest implementation slice. This stub records a recommendation, not owner approval; merging the docs does not accept the policy or close #327 automatically.
 
-## Awaiting owner
+## Deferred questions for revival
 
 Approve contract governance and schema scope, mandatory cap and gross-attempt semantics, mapping approach, initial supplier pair with sourcing permission, and launch score/freshness/deadline defaults. See the [owner questions](../design/capability-routing.md#open-questions-for-the-owner).
 

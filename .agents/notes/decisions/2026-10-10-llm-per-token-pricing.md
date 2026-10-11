@@ -1,7 +1,8 @@
 # LLM endpoints: per-token pricing, same fee rule
 
-> Date: 2026-10-10 · Status: accepted direction; implemented in #329 · Decided by: user ("hold a max per call and settle the actual tokens used"; copy OpenRouter's hold sizing)
+> Date: 2026-10-10 · Historical status: accepted direction; implemented in #329 · Decided by: user ("hold a max per call and settle the actual tokens used"; copy OpenRouter's hold sizing)
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: superseded 2026-10-11 by [decision](2026-10-11-llm-deferred.md): Active scope and hold policy superseded; #329 code/history retained. Disable work #425 is pending.
 
 ## Proposal
 

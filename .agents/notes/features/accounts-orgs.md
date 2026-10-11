@@ -1,6 +1,6 @@
 # Accounts & organizations
 
-> Status: partial (signup credit #317 built) · Updated: 2026-10-10
+> Status: partial (signup credit #317 built); signup personal-org restriction #426 pending · Updated: 2026-10-11
 > Code: `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/signup-credit.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
@@ -54,6 +54,12 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 
 ## Tech
 
+### Accepted changes — implementation pending (2026-10-11)
+
+P0 #426 must add trusted signup personal-org eligibility to the current #317 once-per-creator implementation; `created_by` alone does not prove eligibility. Existing code pointers remain current. See [eligibility decision](../decisions/2026-10-11-signup-credit-eligibility.md).
+
+### Current implementation
+
 **Dogfood — 2026-10-10**
 
 - **P2 #397:** authenticated sidebar lacks a navigation landmark and settings skip heading levels. Separate publisher/consumer orgs were created successfully under one test identity; this does not validate cross-user RBAC.
@@ -94,7 +100,9 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 
 ## Decisions
 
-- 2026-10-10 — BUILT (#317): $1 signup promotion with once-per-Clerk-creator fallback. [decision](../decisions/2026-10-10-signup-credit.md)
+- 2026-10-11 — ACCEPTED: Only signup auto-created personal org gets $1, once per user; later-created/joined orgs get nothing. P0 #426. [Decision](../decisions/2026-10-11-signup-credit-eligibility.md).
+
+- 2026-10-10 — BUILT (#317): $1 signup promotion with once-per-Clerk-creator fallback. [decision](../decisions/2026-10-10-signup-credit.md) (Historical; scope superseded 2026-10-11 above.)
 
 - 2026-07-11 — Settings: Clerk UserProfile/OrganizationProfile embeds + custom app prefs; keys stay custom.
 - 2026-07-12 — Clerk chosen for auth + orgs + API keys, replacing Better Auth + its apikey plugin (stack decision, see [architecture overview](../architecture/overview.md)).

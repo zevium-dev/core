@@ -1,8 +1,9 @@
 # Card processing fee passed through at cost, shown transparently
 
-> Date: 2026-10-10 · Status: accepted direction, not built · Decided by: user
+> Date: 2026-10-10 · Historical status: accepted direction, not built · Decided by: user
 > Supersedes: [card-fee floor](2026-10-10-card-fee-floor.md) (proposal)
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: superseded 2026-10-11 by [decision](2026-10-11-card-fee-and-refunds.md): Quote/true-up/refund policy superseded; legal gate remains.
 
 ## Decision
 

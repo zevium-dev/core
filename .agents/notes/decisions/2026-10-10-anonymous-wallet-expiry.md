@@ -1,7 +1,8 @@
 # Anonymous wallet balance expires after one year
 
-> Date: 2026-10-10 · Status: built (#109); policy remains changeable
+> Date: 2026-10-10 · Historical status: built (#109); policy remains changeable
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: partially superseded 2026-10-11 by [decision](2026-10-11-breakage-revenue.md): Notices and breakage questions resolved; one-year per-top-up expiry unchanged.
 
 ## Decision
 

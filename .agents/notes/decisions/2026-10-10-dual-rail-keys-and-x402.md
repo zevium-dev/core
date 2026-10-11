@@ -1,7 +1,8 @@
 # Two consumer rails: API keys and keyless x402
 
-> Date: 2026-10-10 · Status: built behind configuration (#109); sandbox activation pending · Decided by: user
+> Date: 2026-10-10 · Historical status: built behind configuration (#109); sandbox activation pending · Decided by: user
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: superseded 2026-10-11 by [decision](2026-10-11-x402-disabled.md): Activation deferred to P2; default-off enforcement #424 pending. Built rail retained.
 
 ## Decision
 

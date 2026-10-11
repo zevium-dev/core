@@ -1,6 +1,6 @@
 # Gateway (metered call path)
 
-> Status: built; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0) · Updated: 2026-10-10
+> Status: built; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0); owner authority/defer decisions pending implementation · Updated: 2026-10-11
 > Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/gateway/src/index.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/admit.ts`, `packages/shared/src/admission-proof.ts`, `convex/specs.ts`, `convex/wallets.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/finalize.ts`, `apps/gateway/src/cache.ts`, `apps/gateway/src/convex-http.ts`, `apps/gateway/src/headers.ts`, `apps/gateway/src/idempotency.ts`, `apps/gateway/src/cors.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/errors.ts`, `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/spec-source.ts`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/usage.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -38,6 +38,12 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. When the machine rail is configured, the envelope also carries x402 V2 top-up requirements. Verified payment returns a payer-bound session. (FLOW 3.4; owned by [machine-payments](machine-payments.md))
 
 ## Tech
+
+### Accepted changes — implementation pending (2026-10-11)
+
+Rebuild #353/#430 owns accepted authority/funding changes; a 30s executable authority lifetime is not the same as today’s route cache TTL. #424 enforces x402 off; #425 blocks deferred token listings. Existing auth/token code below is retained until those issues land. One listing routes to one upstream; cross-provider routing #328 is deferred.
+
+### Current implementation
 
 - **Payment recovery (#396, #417)**: all admission 402 branches use `payment-required.ts`, including monthly caps. Direct HTTP and MCP retain the same safe explanation, reason-specific recovery, and configured web actions. Environment wiring and response contract: [agent surface](agent-surface.md#tech). Empty-wallet recovery (#421): [wallet billing](wallet-billing.md#credit-gate-design-the-hot-path). Regression table: `apps/gateway/test/payment-recovery.test.ts`.
 
@@ -94,17 +100,22 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 
 ## Decisions
 
+- 2026-10-11 — ACCEPTED: DO spend authority and 30s snapshot design; freeze/drain before negative adjustments, no fixed-price consumer debt. #353/#430. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
+- 2026-10-11 — ACCEPTED: Exactly one upstream per listing; publisher owns multi-provider failover. #327/#328 P2. [Decision](../decisions/2026-10-11-capability-routing-deferred.md).
+- 2026-10-11 — ACCEPTED: Rail off by policy; P1 #424 gate pending, activation P2 #109. [Decision](../decisions/2026-10-11-x402-disabled.md).
+- 2026-10-11 — ACCEPTED: Hide/non-callable per-token LLMs #425; future debt policy #431 P2 is not authorized now. [Decision](../decisions/2026-10-11-llm-deferred.md).
+
 - 2026-07-12 — Data plane stays a thin, isolated Cloudflare Worker (future Go-port candidate). [stack decision](../decisions/2026-07-12-stack.md)
 - 2026-07-11 — Consumer's own org wallet pays; foreign-org keys on private projects get `404`; wildcard CORS on public gateway surfaces (commit `32d5c17`).
 - 2026-10-07 — Upstream `Idempotency-Key` scoped per consumer org/project/method/URL; forwarding identity, `Connection`-nominated and `x-zevium-*` headers stripped (commit `e968b1e`). See findings above.
-- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Built behind configuration in #109. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
+- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Built behind configuration in #109. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md). (Historical; scope superseded 2026-10-11 above.)
 - 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
-- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
-- 2026-10-10 — BUILT (#329): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
+- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md). (Historical; scope superseded 2026-10-11 above.)
+- 2026-10-10 — BUILT (#329): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md) (Historical; scope superseded 2026-10-11 above.)
 
 ## Open questions
 
-- Real machine-payment sandbox settlement remains blocked by owner setup; see [machine-payments](machine-payments.md).
+- Machine payments are deferred; gate/enablement work is #424 (activation P2 #109); see [machine-payments](machine-payments.md).
 - Doc/code conflict: "Payment-required errors" lists `/gateway` failures as `402` or generic `404`. Code also returns `503 verification_unavailable` (Clerk unreachable), `503 wallet_unavailable` (cold wallet control snapshot unavailable; warm wallets retain last-known state, [#360 storage/refresh](wallet-billing.md#wallet-storage-and-retention-360)), `410 sunset_reached`, `422 invalid_spec`/`unsafe_upstream`, `404 no_upstream`, `500 reserve_failed`/`pricing_identity_failed`.
