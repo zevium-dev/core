@@ -47,4 +47,4 @@ Full design: [design/connected-accounts.md](../design/connected-accounts.md).
 - Media hosting for Instagram (public URL) and large YouTube uploads: #444.
 - Bring-your-own client per org: #446. Opening provider schemes to third-party publishers.
 - Confirm step against link phishing (a link completed by the wrong person connects their account into the creator's org).
-- Per-auth-event fee or none (per-call only today). MCP `call_api` connection selection. Connections on the `next` control plane.
+- Per-auth-event fee or none (per-call only today). MCP `call_api` connection selection. Connections on the `next` control plane: #448 (completion contract marks them retired-pending-port).

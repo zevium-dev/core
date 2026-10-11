@@ -194,6 +194,6 @@ Adding a provider = one registry entry, two env vars, the provider's app registr
 - Media hosting: Instagram publishes only from a public media URL; large YouTube uploads need resumable sessions beyond Worker body limits (#444).
 - Bring-your-own provider client per org (own quota and review) (#446).
 - App confirm step against link phishing.
-- Connections on the `next` control plane.
+- Connections on the `next` control plane (#448); `packages/control-plane-next/contracts/completion.json` marks the 16 functions retired-pending-port.
 - MCP `call_api` choosing among several connections.
 - Per-auth-event fee (per-call only for now). `lastUsedAt` on connections.
