@@ -1,3 +1,4 @@
+import { isTokenPricingEnabled } from "./pricing-policy.js";
 /** Kebab-case slug: lowercase alnum segments joined by single hyphens. */
 import {
   MAX_DAILY_FREE_TIER_CALLS,
@@ -183,6 +184,14 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
       } else if (typeof cost === "object" && cost !== null) {
         try {
           parseTokenPricing(cost);
+          if (!isTokenPricingEnabled()) {
+            issues.push({
+              level: "warning",
+              path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
+              message:
+                "Per-token pricing is currently disabled: operation will be hidden and not callable. Use a fixed x-zevium-cost to make it available.",
+            });
+          }
         } catch (error) {
           issues.push({
             level: "error",

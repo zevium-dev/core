@@ -185,6 +185,12 @@ describe("buildEmbedText", () => {
       openapiSpec({
         "/ping": { get: { "x-zevium-cost": 0 } },
         "/hidden": { get: { summary: "Secret endpoint" } },
+        "/chat": {
+          post: {
+            summary: "Hidden token endpoint",
+            "x-zevium-cost": { per: "token", input: 2000, output: 8000 },
+          },
+        },
       }),
     );
     expect(text).toBe("Y GET /ping");

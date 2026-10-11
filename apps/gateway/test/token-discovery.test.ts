@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "../../../packages/shared/src/pricing-policy";
 import { parseSpec } from "@zevium/shared";
 import { endpointsFromSpec } from "../src/discovery";
 import { apiDocsFromSpec } from "../src/mcp-api-docs";
+
+afterEach(() => vi.restoreAllMocks());
 
 const tokenPricing = {
   per: "token",
@@ -19,7 +22,8 @@ const spec = parseSpec(
   }),
 );
 describe("token discovery", () => {
-  it("exposes explicit token rates and hold ceiling, never a fake per-call price", () => {
+  it("exposes explicit token rates and hold ceiling when enabled, never a fake per-call price", () => {
+    vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
     expect(endpointsFromSpec(spec)).toEqual([
       { method: "POST", path: "/chat", maxHoldCredits: 1000, tokenPricing },
       { method: "GET", path: "/free", credits: 0 },

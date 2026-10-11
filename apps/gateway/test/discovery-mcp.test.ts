@@ -26,6 +26,8 @@ import { FixtureSpecSource } from "../src/spec-source";
 import { handleMcpRequest, type McpDeps } from "../src/mcp";
 import { apiDocsFromSpec } from "../src/mcp-api-docs";
 import { parseSpec } from "@zevium/shared";
+import * as pricingPolicy from "../../../packages/shared/src/pricing-policy";
+import { endpointsFromSpec } from "../src/discovery";
 import type { WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -1995,10 +1997,29 @@ describe("MCP published call reference", () => {
   });
 });
 
-describe("unpriced operation visibility", () => {
+describe("unpriced and disabled token operation visibility", () => {
   const spec = JSON.stringify({
     servers: [{ url: "https://upstream.test" }],
     paths: {
+      "/chat": {
+        post: {
+          "x-zevium-cost": {
+            per: "token",
+            input: 2000,
+            output: 8000,
+            maxPerCall: 1000,
+          },
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/TokenOnly" },
+                },
+              },
+            },
+          },
+        },
+      },
       "/hidden": {
         get: {
           summary: "Hidden endpoint",
@@ -2017,12 +2038,33 @@ describe("unpriced operation visibility", () => {
       "/free": { get: { "x-zevium-cost": 0 } },
       "/paid": { post: { "x-zevium-cost": 7 } },
     },
-    components: { schemas: { HiddenOnly: { type: "string" } } },
+    components: {
+      schemas: {
+        HiddenOnly: { type: "string" },
+        TokenOnly: { type: "string" },
+      },
+    },
   });
   const visible = [
     { method: "GET", path: "/free", credits: 0 },
     { method: "POST", path: "/paid", credits: 7 },
   ];
+
+  it("restores token endpoints and their docs when enabled", () => {
+    const enabled = vi
+      .spyOn(pricingPolicy, "isTokenPricingEnabled")
+      .mockReturnValue(true);
+    try {
+      expect(
+        endpointsFromSpec(parseSpec(spec)).map((endpoint) => endpoint.path),
+      ).toEqual(["/chat", "/free", "/paid"]);
+      expect(JSON.stringify(apiDocsFromSpec(parseSpec(spec)))).toContain(
+        "TokenOnly",
+      );
+    } finally {
+      enabled.mockRestore();
+    }
+  });
 
   it("omits unpriced operations from discovery", async () => {
     await installAgentFixtures({ clerkOrgId: "org_hidden_discovery", spec });
@@ -2075,12 +2117,14 @@ describe("unpriced operation visibility", () => {
               }
             : { endpoints: visible },
       });
+      expect(toolText(rpc)).not.toContain("/chat");
+      expect(toolText(rpc)).not.toContain("TokenOnly");
       expect(toolText(rpc)).not.toContain("/hidden");
       expect(toolText(rpc)).not.toContain("HiddenOnly");
     },
   );
 
-  it.each([undefined, 0, 7])(
+  it.each([undefined, { per: "token", input: 2000, output: 8000 }, 0, 7])(
     "call_api enforces explicit pricing: %s",
     async (cost) => {
       const clerkOrgId = `org_mcp_explicit_${String(cost)}`;
@@ -2115,11 +2159,11 @@ describe("unpriced operation visibility", () => {
       );
       const payload: unknown = JSON.parse(toolText(rpc));
       expect(payload).toMatchObject({
-        status: cost === undefined ? 404 : 200,
-        cost: cost ?? 0,
+        status: typeof cost === "number" ? 200 : 404,
+        cost: typeof cost === "number" ? cost : 0,
       });
       const after = await walletStub(clerkOrgId).getState();
-      if (cost === undefined) {
+      if (cost === undefined || typeof cost === "object") {
         expect(after).toEqual(before);
         expect(mock.calls).toHaveLength(0);
       } else {

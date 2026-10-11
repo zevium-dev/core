@@ -6,6 +6,7 @@ import {
   evictDurableObject,
 } from "cloudflare:test";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "../../../packages/shared/src/pricing-policy";
 import worker, {
   __setTestPipelineDeps,
   __setTestGrantsFetcher,
@@ -379,6 +380,7 @@ describe("anonymous x402 wallet rail", () => {
     });
   });
   it("settles actual token costs from reserved lots and records free/refunded usage", async () => {
+    vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
     const f = setup(0);
     const first = await call({
       "PAYMENT-SIGNATURE": paymentHeader({ id: "one" }),

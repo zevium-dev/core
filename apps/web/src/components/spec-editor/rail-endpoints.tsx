@@ -94,7 +94,9 @@ export function SpecRailEndpoints({
                     </div>
                     {ep.cost === null ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        Hidden until priced. Set 0 for free.
+                        {ep.tokenPricing
+                          ? "Per-token pricing is disabled. Hidden and not callable."
+                          : "Hidden until priced. Set 0 for free."}
                       </p>
                     ) : null}
                     {ep.summary ? (

@@ -4,11 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import * as pricingPolicy from "../packages/shared/src/pricing-policy";
 import { syncCatalogueListing, summarizePublishedPricing } from "./catalogue";
 
 const modules = import.meta.glob("./**/*.ts");
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 type SeededCatalogue = {
   orgId: Id<"organizations">;
@@ -191,6 +195,37 @@ async function seedCatalogue(
 }
 
 describe("summarizePublishedPricing", () => {
+  it.each([false, true])(
+    "excludes token rollups unless enabled: %s",
+    (enabled) => {
+      if (enabled)
+        vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
+      expect(
+        summarizePublishedPricing(
+          openapiSpec({
+            "/chat": {
+              post: {
+                "x-zevium-cost": {
+                  per: "token",
+                  input: 2000,
+                  output: 8000,
+                  maxPerCall: 1000,
+                },
+                "x-zevium-free-tier": 10,
+              },
+            },
+            "/paid": { get: { "x-zevium-cost": 7 } },
+          }),
+        ),
+      ).toEqual({
+        minCost: 7,
+        maxCost: enabled ? 1000 : 7,
+        endpointCount: enabled ? 2 : 1,
+        hasFreeTier: enabled,
+        ...(enabled ? { hasTokenPricing: true } : {}),
+      });
+    },
+  );
   it("computes min/max/count/free from ops", () => {
     const summary = summarizePublishedPricing(
       openapiSpec({
@@ -710,9 +745,14 @@ describe("catalogue reactive pagination contract", () => {
   });
 });
 
-it.each(["cron", "queued continuation"])(
-  "rebuilds legacy catalogue pricing via %s",
-  async (trigger) => {
+it.each([
+  ["cron", undefined],
+  ["queued continuation", undefined],
+  ["cron", 1],
+  ["queued continuation", 1],
+] as const)(
+  "rebuilds legacy catalogue pricing via %s from version %s",
+  async (trigger, pricingVersion) => {
     vi.useFakeTimers();
     const t = convexTest(schema, modules);
     const seed = await seedCatalogue(t);
@@ -727,6 +767,17 @@ it.each(["cron", "queued continuation"])(
       if (!version) throw new Error("Missing fixture spec");
       await ctx.db.patch(version._id, {
         spec: openapiSpec({
+          "/chat": {
+            post: {
+              "x-zevium-cost": {
+                per: "token",
+                input: 2000,
+                output: 8000,
+                maxPerCall: 1000,
+              },
+              "x-zevium-free-tier": 50,
+            },
+          },
           "/hidden": { get: { "x-zevium-free-tier": 10 } },
           "/free": { get: { "x-zevium-cost": 0 } },
           "/paid": { post: { "x-zevium-cost": 7 } },
@@ -736,7 +787,7 @@ it.each(["cron", "queued continuation"])(
     await t.run(async (ctx) => {
       const stats = await ctx.db.query("catalogueStats").unique();
       if (!stats) throw new Error("Missing projection stats");
-      await ctx.db.patch(stats._id, { pricingVersion: undefined });
+      await ctx.db.patch(stats._id, { pricingVersion });
     });
     // Even before the cron rebuild, reads must not serve stale default prices.
     const legacyPage = await t.query(api.catalogue.listPublic, {});

@@ -229,7 +229,7 @@ export async function admit(
     return jsonError(
       404,
       "route_not_found",
-      "No endpoint matches this method and path",
+      "No available priced endpoint matches this method and path",
       requestId,
     );
   }

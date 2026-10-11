@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "../../../../packages/shared/src/pricing-policy";
 import { listSpecEndpoints } from "./spec-endpoints";
 import { parsePublishedEndpoints } from "./openapi-reference";
 import { formatCataloguePriceRange } from "./catalogue-card";
 import { summarizeEndpoints, formatPricingSummary } from "./spec-pricing";
+
+afterEach(() => vi.restoreAllMocks());
 
 const tokenPricing = {
   per: "token",
@@ -17,7 +20,21 @@ const spec = JSON.stringify({
   },
 });
 describe("token pricing surfaces", () => {
-  it("preserves token rates in editor and public reference", () => {
+  it("hides disabled token operations from the reference and price summary while retaining editable rates", () => {
+    expect(parsePublishedEndpoints(spec)).toEqual([]);
+    expect(listSpecEndpoints(spec)).toMatchObject([
+      { path: "/chat", cost: null, tokenPricing },
+      { path: "/hidden", cost: null },
+    ]);
+    expect(summarizeEndpoints(listSpecEndpoints(spec)!)).toEqual({
+      endpointCount: 2,
+      minCredits: null,
+      maxCredits: null,
+      freeTier: 0,
+    });
+  });
+  it("preserves token rates in editor and public reference when enabled", () => {
+    vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
     expect(listSpecEndpoints(spec)).toMatchObject([
       { path: "/chat", tokenPricing },
       { path: "/hidden", cost: null },

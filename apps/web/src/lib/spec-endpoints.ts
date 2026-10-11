@@ -2,6 +2,7 @@ import {
   type TokenPricing,
   extractPricing,
   parseCreditExtension,
+  parseTokenPricing,
   parseSpec,
   type HttpMethod,
 } from "@zevium/shared";
@@ -40,6 +41,12 @@ export function listSpecEndpoints(specText: string): SpecEndpointRow[] | null {
         const op = pathItem[method];
         if (op === undefined) continue;
         const pricing = extractPricing(op);
+        // Preserve disabled rates in the editor; scalar controls must not replace them.
+        const rawCost = op["x-zevium-cost"];
+        const token =
+          typeof rawCost === "object" && rawCost !== null
+            ? parseTokenPricing(rawCost)
+            : undefined;
         rows.push({
           method,
           path,
@@ -51,7 +58,7 @@ export function listSpecEndpoints(specText: string): SpecEndpointRow[] | null {
                   "x-zevium-free-tier",
                 ) || undefined
               : pricing?.freeTier,
-          ...(pricing?.token ? { tokenPricing: pricing.token } : {}),
+          ...(token ? { tokenPricing: token } : {}),
           summary:
             typeof op.summary === "string" && op.summary.trim() !== ""
               ? op.summary

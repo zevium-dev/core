@@ -3,6 +3,7 @@
  * Spec is source of truth for upstream URL, routes, and x-zevium-* pricing.
  */
 
+import { isTokenPricingEnabled } from "./pricing-policy.js";
 import {
   MAX_ENDPOINT_COST_CREDITS,
   type EndpointPricing,
@@ -250,7 +251,7 @@ export function parseCreditExtension(
   return value;
 }
 
-/** Missing pricing is hidden; explicit scalar or token-rate pricing is callable. */
+/** Missing or disabled pricing is hidden; explicit scalar zero remains free. */
 export function extractPricing(op: OpenApiOperation): EndpointPricing | null {
   const costValue = op["x-zevium-cost"];
   const token =
@@ -261,6 +262,7 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing | null {
   if (costValue === undefined) {
     return null;
   } else if (token) {
+    if (!isTokenPricingEnabled()) return null;
     cost =
       token.input === 0 && token.output === 0
         ? 0

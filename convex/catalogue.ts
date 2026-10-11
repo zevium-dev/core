@@ -1,6 +1,7 @@
 import { paginationOptsValidator } from "convex/server";
 import {
   extractPricing,
+  isTokenPricingEnabled,
   MAX_ENDPOINT_COST_CREDITS,
   parseSpec,
   type QualitySnapshotContract,
@@ -29,8 +30,8 @@ const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
 const CATALOGUE_STATS_KEY = "public";
-// Legacy projections included a fabricated 1-credit price for unpriced operations.
-const PRICING_PROJECTION_VERSION = 1;
+// Invalidate token-inclusive projections when disabled, and rebuild if revived.
+const PRICING_PROJECTION_VERSION = isTokenPricingEnabled() ? 3 : 2;
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
 
