@@ -1,19 +1,21 @@
 # Capability routing
 
-> Status: planned (P0 since 2026-10-10) — design proposed in #327; nothing built · Updated: 2026-10-10
+> Status: deferred (P2 #327/#328); design #372 retained, nothing built · Updated: 2026-10-11
 > Code: none. Would touch `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mcp.ts`, `packages/shared/src/openapi.ts`, `convex/quality.ts`
 > Related: [agent-surface](agent-surface.md), [quality-signals](quality-signals.md), [pricing](pricing.md), [gateway](gateway.md), [publishing-specs](publishing-specs.md), [decision](../decisions/2026-10-10-p0-agent-bet.md)
 
-Agents ask for a job ("web search", "find work email"), not a vendor. Zevium picks one of several interchangeable listings by price, measured success, and latency, falls back on transient failure, and never exceeds the caller's cost cap. Was P2 #22 "provider fallback routing"; promoted to P0 on 2026-10-10.
+Agents ask for a job ("web search", "find work email"), not a vendor. Zevium picks one of several interchangeable listings by price, measured success, and latency, falls back on transient failure, and never exceeds the caller's cost cap. Promoted to P0 on 2026-10-10, then deferred back to P2 on 2026-10-11.
 
 ## Product
+
+Current scope: one listing routes to exactly one upstream; publisher owns multi-provider failover. The following product ideas are deferred. Keep any future ranking small and deterministic.
 
 - Caller names a capability and optionally a max cost per call; Zevium chooses the provider.
 - Price is known before the call and never exceeds the cap. Zero balance still blocks.
 - Fallback only on transient failures (429, 5xx, timeout). 429 is the sole 4xx exception; other 4xx responses stop the route.
 - Caller can pin a provider or exclude providers.
 - Every routed call is itemized with the provider actually used; publisher of that provider earns 95% as usual.
-- House listings sourced from different aggregators (treg, RapidAPI, direct) become interchangeable providers for one capability ([house supply](../decisions/2026-10-10-house-supply-via-aggregators.md)).
+- House listings sourced from different aggregators (permitted aggregators or direct suppliers; RapidAPI excluded) become interchangeable providers for one capability ([house supply](../decisions/2026-10-10-house-supply-via-aggregators.md)).
 
 ## Flow
 
@@ -32,10 +34,12 @@ The proposal is not accepted or implemented. It recommends a mandatory cap for r
 
 ## Decisions
 
-- 2026-10-10 — ACCEPTED: capability routing promoted P2 #22 → P0. [decision](../decisions/2026-10-10-p0-agent-bet.md)
+- 2026-10-11 — ACCEPTED: defer routing, budgets, mapping, ranking and supplier pair; #327/#328 P2. Preserve #372 design. [Decision](../decisions/2026-10-11-capability-routing-deferred.md).
 
-- 2026-10-10 — PROPOSED (awaiting user): curated capability contracts, normalized web search, bounded maps, and route-wide attempt budget. [decision](../decisions/2026-10-10-capability-taxonomy.md)
+- 2026-10-10 — HISTORICAL (superseded 2026-10-11): capability routing promoted P2 #22 → P0. [decision](../decisions/2026-10-10-p0-agent-bet.md)
+
+- 2026-10-10 — DEFERRED (P2; not approved): curated capability contracts, normalized web search, bounded maps, and route-wide attempt budget. [decision](../decisions/2026-10-10-capability-taxonomy.md)
 
 ## Open questions
 
-Owner approval questions and recommendations are tracked once in [the design](../design/capability-routing.md#open-questions-for-the-owner): schema scope, cap semantics, mapping approach, initial suppliers, and launch ranking/timeout defaults.
+Deferred questions for revival are tracked once in [the design](../design/capability-routing.md#open-questions-for-the-owner): schema scope, cap semantics, mapping approach, initial suppliers, and launch ranking/timeout defaults.

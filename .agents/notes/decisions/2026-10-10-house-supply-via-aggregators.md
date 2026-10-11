@@ -1,7 +1,8 @@
 # Seed supply with Zevium house listings, sourced from aggregators first
 
-> Date: 2026-10-10 · Status: accepted direction, not built · Decided by: user
+> Date: 2026-10-10 · Historical status: accepted direction, not built · Decided by: user
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: partially superseded 2026-10-11 by [decision](2026-10-11-house-listing-accounting.md): RapidAPI fallback, mandatory cap and unresolved split superseded; source rights gate remains.
 
 ## Decision
 

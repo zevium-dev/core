@@ -1,13 +1,13 @@
 # Roadmap and backlog
 
-> Updated: 2026-10-10 (merged from former `PRODUCT.md` roadmap and `.project/BACKLOG.md`, backlog truth as of 2026-07-19)
+> Updated: 2026-10-11 (owner decisions; existing implementation status retained)
 > This file owns priority. Work is tracked as GitHub issues in `zevium-dev/core` (labels `P0`/`P1`/`P2`, `area:*`); `#N` below = issue number. Feature notes own detail and status. Keep both in sync in the same change.
 
 Status legend: **built** · **partial** · **planned**. Status is set by each feature note after checking code; if this table disagrees with a feature note, the feature note wins — fix this table.
 
 ## Now — launch blockers
 
-1. #91 #313 #314 **Publish initial production catalogue** (now via house listings, [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)). Anonymous dogfood on 2026-10-10 found one public API, Markdown to HTML; initial supply is still thin. Publish 1–3 owned, reliable APIs with real upstreams, credentials, descriptions, tags, pricing, and agent-readable docs. (Landing fallback teaser cards were removed 2026-08-12, commit `85aad61`; landing now shows live listings or an empty state.) → [publishing-specs](../features/publishing-specs.md), [landing-docs](../features/landing-docs.md)
+1. #91 #313 #314 **Publish initial production catalogue** (now via house listings, [accounting/source decision](../decisions/2026-10-11-house-listing-accounting.md)). Anonymous dogfood on 2026-10-10 found one public API, Markdown to HTML; initial supply is still thin. Publish 1–3 owned, reliable APIs with real upstreams, credentials, descriptions, tags, pricing, and agent-readable docs. (Landing fallback teaser cards were removed 2026-08-12, commit `85aad61`; landing now shows live listings or an empty state.) → [publishing-specs](../features/publishing-specs.md), [landing-docs](../features/landing-docs.md)
 2. #315 **Prove real payment and settlement journey.** Configure staging env/secrets for the payment drill (`e2e/04-payment-drill.sh`, run in the preview E2E suite; the `payment-drill.yml` workflow named in older notes does not exist); manually run authenticated publish/call plus real Stripe Checkout, refund, and Connect settlement drill. Scheduled drills run deterministic tests only. → [wallet-billing](../features/wallet-billing.md), [earnings-payouts](../features/earnings-payouts.md)
 3. #315 **Finish external production gates.** Written Stripe approval for pooled prepaid credits across independent publishers; accept platform/MoR legal and tax obligations; fix supported countries/currency; write refund, dispute, debt, risk-hold, and payout policies; complete operational runbook from [stripe-connect-discovery](../research/stripe-connect-discovery.md).
 
@@ -38,21 +38,21 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 1. #365 #366 Prune tooling/CI
 2. #354 Delete Convex migration/rollout code
 3. #359 #360 #361 Gateway restructure
-4. #353 Convex rebuild (carries bugs #355–#358, #334)
+4. #353 Convex rebuild (carries bugs #355–#358, #334); fold in P0 #430 traceable dust-lot merge, 32-slice bound, accepted DO authority/freeze-drain, daily risk release and anonymous breakage recognition — [decisions](../sessions/2026-10-11-owner-decisions.md)
 5. #362 #363 #364 #367 Web fixes
 
-## Build queue — decided 2026-10-10
+## Build queue — updated 2026-10-11
 
 Small, decided items. Each links to its decision; build in any order unless noted.
 
 1. #316 Built — unpriced operations hidden + not callable; explicit `0` = free — [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
-2. **Built** #317 $1 signup credit per eligible org, once per Clerk creator (funds free-tier calls) — [decision](../decisions/2026-10-10-signup-credit.md)
-3. #318 Card fee passed through at cost on top-ups (legal check first) — [decision](../decisions/2026-10-10-card-fee-passthrough.md)
+2. **Pending P0 #426** restrict $1 grant to signup auto-created personal org, once per user; #317 broader implementation remains until fixed — [decision](../decisions/2026-10-11-signup-credit-eligibility.md)
+3. #318 Estimated checkout card fee, no true-up, full paid-amount refund including fee (legal check first) — [decision](../decisions/2026-10-11-card-fee-and-refunds.md)
 4. **Built** #319 Review eligibility includes free-tier callers — [decision](../decisions/2026-10-10-review-eligibility.md)
 5. #320 Email via Resend (built; dormant until owner configures verified sender + API key) — [decision](../decisions/2026-10-10-email-resend.md)
 6. #321 Docs/FLOW alignment: two roles (admin, member), admin-only analytics + delivery history — [decision](../decisions/2026-10-10-two-roles-admin-member.md)
 
-Bigger P0 items (x402 rail, distribution, capability routing, house supply, LLM per-token) are in the P0 table below.
+Agent distribution remains P0. x402 activation and capability routing move to P2; LLM support is deferred entirely. Disabling existing features is tracked separately from future activation. [Owner answer map](../sessions/2026-10-11-owner-decisions.md).
 
 ## Product roadmap
 
@@ -67,24 +67,28 @@ Bigger P0 items (x402 rail, distribution, capability routing, house supply, LLM 
 | 5   | Usage dashboard (org wallet, per-member/key/endpoint, projections) + activity log                                                     | [wallet-billing](../features/wallet-billing.md)                                                        |
 | 6   | Publisher analytics (calls, revenue, p95/p99, error breakdown)                                                                        | [publisher-analytics](../features/publisher-analytics.md)                                              |
 | 7   | Catalogue quality signals + semantic search                                                                                           | [quality-signals](../features/quality-signals.md), [catalogue-search](../features/catalogue-search.md) |
-| 7a  | #109 x402 wallet sessions built behind configuration; real sandbox/owner activation pending                                           | [machine-payments](../features/machine-payments.md)                                                    |
 | 7b  | #322–#326 Agent distribution: `llms.txt`, OAuth on `/mcp`, Claude Connectors Directory, MCP Registry, one-click installs (2026-10-10) | [agent-surface](../features/agent-surface.md)                                                          |
-| 7c  | #327 #328 Capability routing across interchangeable providers, fallback, max cost (from P2 #22, 2026-10-10)                           | [capability-routing](../features/capability-routing.md)                                                |
-| 7d  | #313 #314 House listings seeded via treg / RapidAPI, ToS-gated, losses accepted (2026-10-10)                                          | [publishing-specs](../features/publishing-specs.md)                                                    |
+| 7d  | #313 #314 House listings through permitted sources, ordinary publisher 95/5; RapidAPI excluded; optional cap P2 #429                  | [publishing-specs](../features/publishing-specs.md)                                                    |
+| 7e  | #425 Hide/disable per-token LLM listings, retain code                                                                                 | [pricing](../features/pricing.md)                                                                      |
+| 7f  | #428 Spec → MCP/CLI/docs converter; link existing MCP #110, SDKs #350 remain P2                                                       | [agent-surface](../features/agent-surface.md)                                                          |
+| 7g  | #426 Signup personal-org-only $1 grant, once per user                                                                                 | [accounts-orgs](../features/accounts-orgs.md)                                                          |
+| 7h  | #353 #430 Rebuild authority/lots, traceable dust merge, daily release and breakage accounting                                         | [wallet-billing](../features/wallet-billing.md)                                                        |
 
 ### P1 — the agent-first bet + trust plumbing
 
-| #   | Item                                                             | Feature                                                         |
-| --- | ---------------------------------------------------------------- | --------------------------------------------------------------- |
-| 8   | Org-scoped wallets                                               | [wallet-billing](../features/wallet-billing.md)                 |
-| 9   | Per-API agent tooling + machine-readable discovery/pricing index | [agent-surface](../features/agent-surface.md)                   |
-| 10  | ~~x402 machine-native payments~~ → moved to P0 #7a on 2026-10-10 | [machine-payments](../features/machine-payments.md)             |
-| 11  | Free tier enforcement (publisher-funded) + tiered pricing        | [pricing](../features/pricing.md)                               |
-| 12  | Spend caps, threshold alerts, budget webhooks                    | [wallet-billing](../features/wallet-billing.md)                 |
-| 13  | Key-management API with zero-downtime rotation                   | [api-keys](../features/api-keys.md)                             |
-| 14  | Mock/sandbox mode                                                | [mock-sandbox](../features/mock-sandbox.md)                     |
-| 15  | Deprecation/unpublish lifecycle                                  | [listing-lifecycle](../features/listing-lifecycle.md)           |
-| 16  | Publisher webhooks                                               | [webhooks-notifications](../features/webhooks-notifications.md) |
+| #   | Item                                                                             | Feature                                                         |
+| --- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 8   | Org-scoped wallets                                                               | [wallet-billing](../features/wallet-billing.md)                 |
+| 9   | Per-API agent tooling + machine-readable discovery/pricing index                 | [agent-surface](../features/agent-surface.md)                   |
+| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109           | [machine-payments](../features/machine-payments.md)             |
+| 11  | Free tier enforcement (publisher-funded) + tiered pricing                        | [pricing](../features/pricing.md)                               |
+| 12  | Spend caps, threshold alerts, budget webhooks                                    | [wallet-billing](../features/wallet-billing.md)                 |
+| 13  | Key-management API with zero-downtime rotation                                   | [api-keys](../features/api-keys.md)                             |
+| 14  | Mock/sandbox mode                                                                | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 15  | Deprecation/unpublish lifecycle                                                  | [listing-lifecycle](../features/listing-lifecycle.md)           |
+| 16  | Publisher webhooks                                                               | [webhooks-notifications](../features/webhooks-notifications.md) |
+| 16a | #427 OpenAPI-generated Try it form; current raw-text input replaced in follow-up | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                | [agent-surface](../features/agent-surface.md)                   |
 
 ### P2 — cutting edge
 
@@ -94,14 +98,20 @@ Bigger P0 items (x402 rail, distribution, capability routing, house supply, LLM 
 | 18  | Security-scan + uptime badges as listing gates; per-API status pages                                                                  | [quality-signals](../features/quality-signals.md)       |
 | 19  | Version pinning per key + spec-diff changelog                                                                                         | [listing-lifecycle](../features/listing-lifecycle.md)   |
 | 20  | Dispute-a-call flow (successful-but-garbage-response refunds, credits held pending review) + SLA tiers with automatic service credits | [wallet-billing](../features/wallet-billing.md)         |
-| 21  | Outcome-based pricing extensions (per-token shipped in #329)                                                                          | [pricing](../features/pricing.md)                       |
-| 22  | ~~Provider fallback routing~~ → moved to P0 #7c on 2026-10-10                                                                         | [capability-routing](../features/capability-routing.md) |
+| 21  | #349 Outcome pricing; #431 LLM revival/precision policy (support deferred, #425 disables existing #329)                               | [pricing](../features/pricing.md)                       |
+| 22  | #327 #328 Capability routing deferred; #372 design retained; one listing → one upstream for now                                       | [capability-routing](../features/capability-routing.md) |
 | —   | Verified reviews                                                                                                                      | [reviews](../features/reviews.md)                       |
-| —   | Generated SDKs                                                                                                                        | [landing-docs](../features/landing-docs.md)             |
+| —   | #350 Generated SDKs                                                                                                                   | [landing-docs](../features/landing-docs.md)             |
+| —   | #109 x402 activation deferred; feature-off follow-up P1 #424 and enablement runbook                                                   | [machine-payments](../features/machine-payments.md)     |
+| —   | #429 Optional $100/month total house subsidy cap, only if simple; otherwise skip                                                      | [publishing-specs](../features/publishing-specs.md)     |
 
 Several P1/P2 items shipped ahead of their tag (payouts via Stripe Connect, mock mode, webhooks, free-tier enforcement, verified reviews). Feature notes carry the real status.
 
-## Reprioritization (2026-10-10)
+## Reprioritization (2026-10-11)
+
+[Owner decisions](../sessions/2026-10-11-owner-decisions.md): agent distribution remains P0. x402 activation (#109) and capability routing (#327/#328) are P2; LLM support is deferred. #424/#425 enforce disabled behavior in follow-up code. The ten decision files preserve money, contract and house-listing policy answers.
+
+### Historical reprioritization (2026-10-10; superseded where noted)
 
 Decision: [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md), [house supply](../decisions/2026-10-10-house-supply-via-aggregators.md). Source: [research](../research/agent-api-marketplace-landscape.md), [session](../sessions/2026-10-10-competitive-research-and-docs.md).
 
@@ -112,7 +122,7 @@ Decision: [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md), [house supply
 
 ## Later
 
-- Per-listing MCP tool surfaces beyond current global search/load/call tools
+- Listing-scoped MCP is tracked as P1 #110 above and linked to P0 converter #428; no duplicate issue.
 
 ## Recently completed (removed from active backlog)
 

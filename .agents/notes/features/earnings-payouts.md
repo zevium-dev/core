@@ -1,6 +1,6 @@
 # Earnings & payouts
 
-> Status: #398 fixed; partial (#363 list/presentation fixes complete) (P2 — built ahead of tag on Stripe Connect; settlement schedule + statement export absent) · Updated: 2026-10-10
+> Status: #398 fixed; partial (#363 list/presentation fixes complete) (P2 — built ahead of tag on Stripe Connect; settlement schedule + statement export absent); daily risk buckets accepted for rebuild #353 · Updated: 2026-10-11
 > Code: `convex/earnings.ts`, `convex/payouts.ts`, `convex/accounting.ts`, `convex/billing.ts` (publisher reconciliation), `convex/admin.ts` (`retryPublisherTransfer`), `convex/http.ts` (`/stripe-connect-webhook`, `/stripe-connect-v2-webhook`), `packages/shared/src/connect-countries.ts`, `apps/web/src/routes/app/earnings.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/lib/format.ts`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [pricing](pricing.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -11,7 +11,7 @@ Publisher side of the money flow. Each settled call credits the publisher org 95
 ## Product
 
 - Publishers earn revenue when consumers call their endpoints; earnings accumulate toward payouts
-- **Publishers keep 95%.** Low platform fees preserve publisher economics for high-volume machine traffic and make the split easy to understand. The 5% is taken from the publisher side of each call — consumers pay no top-up surcharge (decided 2026-10-10, see [decision](../decisions/2026-10-10-platform-fee-publisher-side.md))
+- **Publishers keep 95%.** Low platform fees preserve publisher economics for high-volume machine traffic and make the split easy to understand. The 5% is taken from the publisher side of each call — consumers pay no platform top-up surcharge; separate card-fee estimate remains legal-gated in #318 (decided 2026-10-10, see [decision](../decisions/2026-10-10-platform-fee-publisher-side.md))
 - Platform cut + publisher share are calculated per call at charge time
 - Publisher earnings accumulate and are settled via payouts
 - **Payouts**: transparent 95/5 split, accumulated earnings visible in dashboard; organization admin transfers available earnings to its connected Stripe account once the $10 minimum is reached; Stripe handles bank delivery (automated settlement scheduling is a later refinement)
@@ -31,6 +31,12 @@ Roadmap ([roadmap](../product/roadmap.md)):
 Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → earnings accrue at 95% → payout.
 
 ## Tech
+
+### Accepted changes — implementation pending (2026-10-11)
+
+Rebuild #353 may release source-aware daily earning buckets up to ~24h after the seven-day hold; never earlier. This is an accepted target, not a change to current release code. House publisher delivery #314 uses the ordinary publisher ledger; optional total subsidy cap #429 must not create a second earnings ledger.
+
+### Current implementation
 
 - **Email (#320)**: `transfer_sent` / `transfer_failed` kinds now have idempotent producers in verified transfer projection and definitive dispatch failure, with optional Resend delivery. Stale failure events after success and initially reversed snapshots cannot send misleading notices. These describe transfers to the connected account, not confirmed bank delivery. No new bank-payout notification kind. Setup and preferences: [webhooks-notifications](webhooks-notifications.md#transactional-email-320).
 
@@ -64,6 +70,9 @@ Connect webhook subscriptions (`/stripe-connect-webhook` payout events, `/stripe
 - Transfers are org-admin-initiated (`payouts.initiatePublisherTransfer` from `/app/earnings`), not scheduled; onboarding via `payouts.startOnboarding` / `refreshOnboarding` / `replaceClosedAccount`
 
 ## Decisions
+
+- 2026-10-11 — ACCEPTED: Daily buckets may release up to ~24h after the seven-day hold; rebuild #353. [Decision](../decisions/2026-10-11-publisher-risk-release.md).
+- 2026-10-11 — ACCEPTED: House org uses ordinary 95/5 ledger (#314); optional total subsidy cap is P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).
 
 - Wave 9 (user, ≤ 2026-07-12) — Payouts: manual ledger MVP (request → admin queue → human wires). Min payout 100,000 credits ($10). **Superseded 2026-07-12** by Stripe Connect
 - 2026-07-12 — Stripe Checkout + Connect replace Polar checkout + manual payouts; separate charges and transfers; Accounts v2 recipient configuration. See [architecture overview](../architecture/overview.md)

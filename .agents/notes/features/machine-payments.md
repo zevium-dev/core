@@ -1,10 +1,12 @@
 # Machine payments (x402)
 
-> Status: built behind configuration (#109); #396/#417 recovery parity fixed; real sandbox settlement blocked by owner setup · Updated: 2026-10-10
+> Status: built behind configuration (#109); #396/#417 recovery parity fixed; real sandbox settlement blocked by owner setup; x402 off by decision; enforcement #424 pending; activation P2 · Updated: 2026-10-11
 > Code: `apps/gateway/src/machine-payments.ts`, `machine-facilitator.ts`, `wallet-session.ts`, `wallet.ts`, `convex/machinePayments.ts`, `convex/lib/funding.ts`, `packages/shared/src/machine-payments.ts`
 > Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [agent-surface](agent-surface.md), [dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md)
 
 ## Product
+
+Deferred product flow below is retained for future activation. Owner decision is feature off; implementation #424 is pending.
 
 Individuals and agents can fund a wallet without an account or API key. One $1 payment buys 10,000 credits. Calls spend those credits at the published spec price, with the existing 95% publisher / 5% platform split. There is no anonymous signup credit. Zero spendable balance blocks even free endpoints.
 
@@ -18,6 +20,12 @@ Each top-up expires one calendar year after funding. Spending uses the oldest un
 4. Empty wallets receive another payable 402. Another payment from the same payer restores access to all remaining unexpired funds. A repeated payment cannot fund twice and does not issue another session.
 
 ## Tech
+
+### Accepted changes — implementation pending (2026-10-11)
+
+Feature-off enforcement remains P1 #424. Current `index.ts` enables the rail when all required bindings exist; no explicit default-off flag is present. This PR changes no deployment settings. [Enablement runbook](../architecture/x402-enablement.md) owns future activation steps. Existing lot code uses a 24-slice bound and no expiring-lot compaction; accepted 32-slice/dust policy is rebuild #353/#430. Raw expired inventory is not yet recognized as revenue; #353 owns breakage accounting.
+
+### Current implementation
 
 - **Recovery parity (#396, #417)**: x402 offers retain the shared safe 402 envelope on direct HTTP and MCP, with recovery links derived from `APP_ORIGIN`. Invalid payment proofs use that same configured origin and safe recovery text. The direct/MCP origin matrix lives in `apps/gateway/test/payment-recovery.test.ts`; anonymous wallet admission still never fetches Convex. See [agent surface](agent-surface.md#tech).
 
@@ -35,9 +43,9 @@ Each top-up expires one calendar year after funding. Spending uses the oldest un
 - `POST /machine-fund` is gateway-secret protected and only accepts verified payment facts. It calls an internal mutation. It is not a public client-funded credit mutation.
 - Tests: `apps/gateway/test/machine-payments.test.ts` and `convex/machinePayments.test.ts` cover the offer/pay/session/empty/replay path, no admission-time control-plane calls, session tampering/audience/expiry, lot admission/expiry, payment HTTP contract, source attribution, and 95/5 earnings.
 
-### Owner setup and sandbox evidence
+### Historical setup and sandbox evidence
 
-The rail is disabled unless all optional gateway bindings are present: `X402_DEPOSIT_ADDRESS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_TOKEN`, `X402_STRIPE_SECRET_KEY`, `WALLET_SESSION_SECRET`. The usual Convex URL and gateway shared secret are also required.
+Current configuration gate (not an explicit off switch): the rail is disabled unless all optional gateway bindings are present: `X402_DEPOSIT_ADDRESS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_TOKEN`, `X402_STRIPE_SECRET_KEY`, `WALLET_SESSION_SECRET`. The usual Convex URL and gateway shared secret are also required.
 
 1. Replace the expired configured Stripe test key with a test restricted key permitted to create deposit addresses and create/read transaction-verification PaymentIntents. Request machine/stablecoin access. Provision the Stripe-owned Base deposit address outside the request path; never use a Zevium custody address.
 2. Provide a private V2 facilitator proxy with appropriate CDP credentials and verify its `/verify` and `/settle` contracts against the adapter tests. Confirm a Stripe-supported sandbox network/transaction flow with Stripe before sending any real funds; this adapter advertises Base, not Tempo or Base Sepolia.
@@ -49,7 +57,7 @@ Observed 2026-10-10: the configured test account initially accepted Base deposit
 
 ### Operational limits
 
-- Refund/expiry breakage policy remains an owner launch decision. Anonymous lots are classified non-refundable in the current automatic allocation path; no automatic machine-payment refund/reversal projection is advertised.
+- Breakage revenue/no-notice policy is decided 2026-10-11; implementation is pending (#353). Anonymous refund mechanics remain unresolved. Anonymous lots are classified non-refundable in the current automatic allocation path; no automatic machine-payment refund/reversal projection is advertised.
 - A lost successful HTTP response also loses its bearer session. Replaying the payment remains refused; a fresh top-up from the same payer can access existing unexpired funds. Wallet-signature session recovery is not built.
 - A crash between external on-chain settlement and durable receipt persistence requires facilitator transaction recovery/manual reconciliation. Never tell an operator to pay a second time to repair that gap.
 
@@ -72,11 +80,15 @@ Source: [landscape](../research/agent-api-marketplace-landscape.md), raw notes [
 
 ## Decisions
 
-- 2026-10-10 — BUILT behind configuration: payer-bound wallet sessions, zero-balance gate, 95/5 split, $1 top-up default, anonymous accounting organizations. [Dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md).
+- 2026-10-11 — ACCEPTED: x402 disabled by policy; P1 #424 enforces feature off; #109 activation moves to P2. [Decision](../decisions/2026-10-11-x402-disabled.md).
+- 2026-10-11 — ACCEPTED: Expired anonymous funds are Zevium revenue; no expiry warnings or expiry display in balance responses. #353/#424. [Decision](../decisions/2026-10-11-breakage-revenue.md).
+- 2026-10-11 — ACCEPTED: Rebuild #353/#430 accepts 32 slices and traceable dust merges with identical expiry rules. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
+
+- 2026-10-10 — BUILT behind configuration: payer-bound wallet sessions, zero-balance gate, 95/5 split, $1 top-up default, anonymous accounting organizations. [Dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md). (Historical; scope superseded 2026-10-11 above.)
 - 2026-10-10 — BUILT: per-top-up one-year expiry, oldest-first admission. [Expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md).
-- 2026-10-10 — P0 priority. [Agent bet](../decisions/2026-10-10-p0-agent-bet.md).
+- 2026-10-10 — Historical P0 priority, superseded by P2 activation on 2026-10-11. [Agent bet](../decisions/2026-10-10-p0-agent-bet.md).
 
 ## Open questions
 
-- Complete owner setup and the real sandbox settlement evidence before enabling production.
-- Accounting breakage, anonymous refunds, sanctions screening and session recovery policy before launch.
+- Activation is P2. Complete runbook prerequisites and real sandbox settlement evidence before enabling.
+- Before future activation: implement decided breakage policy (#353), resolve anonymous refunds, sanctions screening and session recovery. Follow the [enablement runbook](../architecture/x402-enablement.md).

@@ -1,10 +1,12 @@
 # Capability routing: taxonomy and normalized contracts
 
-> Status: proposed (awaiting user), not implemented · Updated: 2026-10-10
+> Status: deferred (P2 #327/#328), not implemented · Updated: 2026-10-11
 > Design: [#327](https://github.com/zevium-dev/core/issues/327) · Implementation: [#328](https://github.com/zevium-dev/core/issues/328)
 > Feature owner: [capability-routing](../features/capability-routing.md) · Decision: [capability taxonomy](../decisions/2026-10-10-capability-taxonomy.md)
 
 This file owns the proposed wire contracts, mapping language, selection policy, and edge projection. The feature note owns product scope. All limits and weights below are proposed launch values, not measurements or accepted policy.
+
+> Owner decision 2026-10-11: [capability routing deferred](../decisions/2026-10-11-capability-routing-deferred.md). Keep this #372 design as future reference. Provider selection, budgets, mapping, ranking and supplier pair are deferred; proposed constants below remain unapproved. Current scope is one listing → one upstream, with publisher-owned failover. Any ranking should stay small and deterministic. The publisher’s OpenAPI remains the [current contract](../decisions/2026-10-11-openapi-as-contract.md).
 
 ## Scope and evidence
 
@@ -350,6 +352,8 @@ Required implementation evidence: end-to-end fixture calls with (a) cheaper prov
 This slice addresses #328's acceptance once the edge prerequisites and two production-eligible providers exist. It does not require building a general mapping engine or every supplier listed in the research. Track #327 with `Refs`, not `Closes`: owner approval accepts the design.
 
 ## Open questions for the owner
+
+Deferred until revival; these are not launch blockers or pending approval for immediate work.
 
 - Approve Zevium-curated exact-version contracts and the first-page-only `web.search` schema, including omission of domain/date/locale controls for v1?
 - Approve mandatory `maxCostCredits` and the conservative sum-of-listed-attempt-prices meaning? Refunds and free-tier discounts do not replenish that budget; a net-charge-only interpretation would permit more fallback work but is a different promise.

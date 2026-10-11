@@ -1,6 +1,6 @@
 # Agent surface (MCP + discovery)
 
-> Status: partial (P1 #9 — marketplace-wide MCP + discovery index built; per-API agent tooling planned; #361 buffered-result billing fixed; #395 parameters, #396 all-reason payment recovery, and #417 environment actions fixed; #330 semantic discovery built; #392 local discovery origins fixed; #323 OAuth resource server built, owner activation pending) · Updated: 2026-10-10
+> Status: partial (P1 #9 — marketplace-wide MCP + discovery index built; per-API agent tooling planned; #361 buffered-result billing fixed; #395 parameters, #396 all-reason payment recovery, and #417 environment actions fixed; #330 semantic discovery built; #392 local discovery origins fixed; #323 OAuth resource server built, owner activation pending); distribution P0; routing/x402 deferred; generation #428 pending · Updated: 2026-10-11
 > Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/gateway/src/mcp-oauth.ts`, `apps/gateway/test/mcp-oauth.test.ts`, `convex/keySettings.ts` (`resolveMcpIdentity`), `convex/http.ts` (`/mcp-identity`), `apps/gateway/src/mcp.ts`, `apps/gateway/src/mcp-call-params.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/forward.ts` (`prepareResponse` hook), `apps/gateway/src/finalize.ts` (settlement/refund), `apps/gateway/test/discovery-mcp.test.ts`, `apps/gateway/src/mcp-api-docs.ts`, `apps/gateway/src/discovery.ts`, `apps/gateway/wrangler.jsonc`, `apps/gateway/scripts/discovery-dev-origin.smoke.mjs`, `apps/gateway/src/catalogue-source.ts`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/catalogue-detail.tsx` (`ConnectAgentPanel`), `apps/web/src/lib/landing.ts` (`buildMcpConfigSnippet`, `mcpEndpointUrl`, `discoveryEndpointUrl`), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`, `apps/gateway/src/catalogue-search.ts`, `convex/http.ts`, `/gateway-search`, `convex/search.ts`
 > Related: [gateway](gateway.md), [machine-payments](machine-payments.md), [catalogue-search](catalogue-search.md), [quality-signals](quality-signals.md), [api-keys](api-keys.md), [mock-sandbox](mock-sandbox.md), [landing-docs](landing-docs.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -46,6 +46,12 @@ Item 4 (machine-native payments, x402): [machine-payments](machine-payments.md).
 - `/docs/agents`: in-app guide — MCP config, discovery URL, tool list, mock URL pattern.
 
 ## Tech
+
+### Accepted changes — implementation pending (2026-10-11)
+
+P0 #428 coordinates the shared spec converter; #110 already owns listing-scoped MCP schemas, #350 remains P2 SDK work. #425 must hide token listings from discovery/docs/tools and prevent execution. #424 must gate x402 offers/proofs/sessions on HTTP and MCP. These are pending code changes; current implementation details below are retained.
+
+### Current implementation
 
 - **402 recovery (#396, #417)**: the shared envelope supplies matching `message`/`detail`, a reason-specific `recovery` instruction, and action URLs. Monthly caps retain `error: key_cap_exceeded` and add `reason`, `cost`, admin/next-UTC-month guidance, and `actions.manageKey`; they omit the misleading top-up action. MCP allowlists those fields, exposes required price as `requiredCredits` and charged price as `cost: 0`, and preserves in-flight `Retry-After` as `retryAfterSeconds`. Upstream-forged 402 bodies remain sanitized/refunded. `APP_ORIGIN` supplies the paired web origin (production default); the gateway dev command defaults to `http://localhost:3000` and accepts an exported override, while both preview deploys inject the corresponding PR web Worker URL. Neither inbound Origin nor forwarded headers supplies recovery URLs. `apps/gateway/test/payment-recovery.test.ts` exercises no/invalid key, empty/insufficient wallet, cap, both token budgets, and x402 offers across direct/MCP and local/preview/production origins; the Wrangler dev smoke also checks local recovery URLs.
 
@@ -107,15 +113,20 @@ Code limits (`mcp.ts`): request body 1 MiB, upstream response 1 MiB, JSON-RPC ba
 
 ## Decisions
 
+- 2026-10-11 — ACCEPTED: Generate MCP/CLI/docs from publisher OpenAPI; P0 #428 links existing #110, P2 #350. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
+- 2026-10-11 — ACCEPTED: Routing #327/#328 moves to P2; preserve #372. Agent distribution stays P0. [Decision](../decisions/2026-10-11-capability-routing-deferred.md).
+- 2026-10-11 — ACCEPTED: x402 off; enforcement #424 pending and activation #109 P2. [Decision](../decisions/2026-10-11-x402-disabled.md).
+- 2026-10-11 — ACCEPTED: Per-token LLM listings must leave discovery and callable tools in #425; revival #431 P2. [Decision](../decisions/2026-10-11-llm-deferred.md).
+
 - 2026-10-10 — Web distribution implementation of [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md): #326 client installs share one component; #322 serves web `/llms.txt`, with gateway-side copy deferred to avoid concurrent gateway restructuring. Catalogue changes are limited to the agent panel.
 
 - 2026-10-10 — #323 implementation: use Clerk as authorization server, hosted org consent, JWT/JWKS validation plus cached opaque-token verification for revocable grants, and the existing current member key for billing. Production activation and live claude.ai acceptance remain owner actions.
 
 - 2026-07-11 — `/discovery` index + `/mcp` endpoint ship; agent tools execute through the metered pipeline (commit `93d259e`).
 - 2026-10-07 — `get_api_docs` gains parameters/schemas/examples; `search_apis` and `/discovery` stay compact. No Treg code copied (license) (commit `e968b1e`).
-- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
+- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md). (Historical; scope superseded 2026-10-11 above.)
 - 2026-10-10 — ACCEPTED: agent distribution promoted to P0 — `llms.txt`, OAuth on `/mcp` (claude.ai connector), Claude Connectors Directory submission, official MCP Registry listing, one-click installs (Claude Code/Cursor/Codex). [decision](../decisions/2026-10-10-p0-agent-bet.md)
-- 2026-10-10 — ACCEPTED: capability routing promoted P2 #22 → P0; owned by [capability-routing](capability-routing.md). [decision](../decisions/2026-10-10-p0-agent-bet.md)
+- 2026-10-10 — HISTORICAL (superseded 2026-10-11): capability routing promoted P2 #22 → P0; owned by [capability-routing](capability-routing.md). [decision](../decisions/2026-10-10-p0-agent-bet.md)
 - 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 
 ## Open questions

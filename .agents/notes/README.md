@@ -26,6 +26,10 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 | [findings/](findings/)            | Lessons and review findings. `values.md` = standing lessons                                               |
 | [history/](history/)              | Read-only archive: build plan and wave prompts from the greenfield build. Do not update                   |
 
+## Current owner decisions
+
+[2026-10-11 answers](sessions/2026-10-11-owner-decisions.md) resolve rebuild PR #394 and defer capability routing/LLMs/x402. [x402 enablement runbook](architecture/x402-enablement.md) is retained for future activation. Decision acceptance does not imply implementation; feature notes and linked issues track delivery.
+
 ## Features
 
 | Feature                                                      | Area                                                                     |

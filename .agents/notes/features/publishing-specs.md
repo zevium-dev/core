@@ -1,6 +1,6 @@
 # Publishing specs
 
-> Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built) · Updated: 2026-10-10
+> Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built); spec-generated surfaces #427/#428 pending · Updated: 2026-10-11
 > Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
@@ -56,6 +56,12 @@ Sign up → Create org → Create project
 
 ## Tech
 
+### Accepted changes — implementation pending (2026-10-11)
+
+P0 #428 owns shared OpenAPI conversion and missing CLI/docs generation; existing #110 owns listing MCP generation and P2 #350 SDKs. P1 #427 replaces raw-text-only Try it with spec-generated fields. P0 #425 will hide and block token listings; token code facts below remain current until that follow-up. #314 uses an ordinary publisher org; subsidy cap #429 is optional.
+
+### Current implementation
+
 **Dogfood — 2026-10-10**
 
 - **P0 #389:** credentials stored before publication cause repeated `Run a new credential-free reachability test before publishing.` even after a passing probe. Readiness and publication compare different credential revision representations.
@@ -91,11 +97,15 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 
 ## Decisions
 
+- 2026-10-11 — ACCEPTED: Publisher spec is the contract; generated surfaces #428, existing MCP #110, form playground #427. Zevium writes house specs. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
+- 2026-10-11 — ACCEPTED: Ordinary house publisher org/95/5 ledger (#314); RapidAPI excluded (#313); cap optional P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).
+- 2026-10-11 — ACCEPTED: Hide and disable per-token LLM listings #425; code retained, revival P2 #431. [Decision](../decisions/2026-10-11-llm-deferred.md).
+
 - 2026-07-11 — Spec editor: direction C phased. Cut 1 editor + validation + read-only rail; cut 2 write-back + diffs. Mockups: claude.ai/code/artifact/3591af48.
 - 2026-07-11 — YAML accepted at input, converted client-side, stored canonical JSON (gateway stays JSON-only).
-- 2026-10-10 — ACCEPTED: Zevium publishes house listings to seed supply, sourced via treg then RapidAPI, replaced over time by direct integrations; eats losses for now. ToS gate per source. [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
+- 2026-10-10 — ACCEPTED: Zevium publishes house listings to seed supply, sourced via treg then RapidAPI, replaced over time by direct integrations; eats losses for now. ToS gate per source. [decision](../decisions/2026-10-10-house-supply-via-aggregators.md) (Historical; scope superseded 2026-10-11 above.)
 - 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
-- 2026-10-10 — House listings labeled "Operated by Zevium". [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
+- 2026-10-10 — House listings labeled "Operated by Zevium". [decision](../decisions/2026-10-10-house-supply-via-aggregators.md) (Historical; scope superseded 2026-10-11 above.)
 
 ## Open questions
 

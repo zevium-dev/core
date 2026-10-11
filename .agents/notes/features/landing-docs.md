@@ -1,6 +1,6 @@
 # Landing & docs
 
-> Status: partial (web `/llms.txt` #322 and shared client installs #326 built) · Updated: 2026-10-10
+> Status: partial (web `/llms.txt` #322 and shared client installs #326 built); generated docs/CLI pipeline #428 pending · Updated: 2026-10-11
 > Code: `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`
 > Related: [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [mock-sandbox](mock-sandbox.md), [gateway](gateway.md), [accounts-orgs](accounts-orgs.md), [webhooks-notifications](webhooks-notifications.md), [design system](../design/design-system.md), [roadmap](../product/roadmap.md)
 
@@ -26,6 +26,12 @@ Public front door and integration help. Landing page pitches the agent-first mar
 - Generated SDKs (P2)
 
 ## Tech
+
+### Accepted changes — implementation pending (2026-10-11)
+
+P0 #428 adds the shared spec conversion pipeline and generated CLI/docs; #110 owns listing-scoped MCP, #350 SDKs stays P2. Current docs/snippet code remains as described below; no generated CLI is claimed by this decision PR.
+
+### Current implementation
 
 **Dogfood — 2026-10-10**
 
@@ -53,6 +59,8 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - Consuming guide error list documents #336: 60-request burst / one request per second refill, `429` + `Retry-After`, monthly spend cap `402`, disabled key `403`.
 
 ## Decisions
+
+- 2026-10-11 — ACCEPTED: Generate consumer surfaces from immutable publisher OpenAPI; P0 #428, existing #110, form #427 and P2 SDK #350. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
 
 - 2026-10-10 — Web distribution implementation of [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md): #326 client installs share one component; #322 serves web `/llms.txt`, with gateway-side copy deferred to avoid concurrent gateway restructuring. Catalogue changes are limited to the agent panel.
 

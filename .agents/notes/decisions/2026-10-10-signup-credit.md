@@ -1,7 +1,8 @@
 # Every new org gets a small default credit
 
-> Date: 2026-10-10 · Status: built (#317) · Decided by: user ("we can top up every like $1 or something by default")
+> Date: 2026-10-10 · Historical status: built (#317) · Decided by: user ("we can top up every like $1 or something by default")
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
+> Status: superseded 2026-10-11 by [decision](2026-10-11-signup-credit-eligibility.md): Eligibility superseded; #317 implementation history retained.
 
 ## Decision
 
