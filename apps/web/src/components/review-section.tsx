@@ -1,7 +1,10 @@
+import { api as legacyApi } from "../../../../convex/_generated/api";
+import { api as nextApi } from "#/lib/convex-api.next";
+import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { formatDate } from "#/lib/format";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { usePaginatedQuery } from "convex/react";
+import { usePaginatedQuery, useAction } from "convex/react";
 import { Star } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
@@ -40,6 +43,10 @@ import { humanError } from "#/lib/human-error";
 
 const REVIEW_PAGE_SIZE = 10;
 
+function canRespond(viewer: { canRespond?: boolean; isPublisher: boolean }) {
+  return viewer.canRespond ?? viewer.isPublisher;
+}
+
 function Stars({ rating }: { rating: number }) {
   return (
     <span
@@ -70,7 +77,9 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
     { initialNumItems: REVIEW_PAGE_SIZE },
   );
 
-  const upsertReview = useConvexMutation(api.reviews.upsert);
+  const upsertLegacy = useConvexMutation(legacyApi.reviews.upsert);
+  const upsertNext = useAction(nextApi.reviews.upsert);
+  const upsertReview = NEXT_CONTROL_PLANE ? upsertNext : upsertLegacy;
   const withdrawReview = useConvexMutation(api.reviews.withdraw);
   const reportReview = useConvexMutation(api.reviews.report);
   const respond = useConvexMutation(api.reviews.respondAsPublisher);
@@ -81,8 +90,9 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
   const reportErrorRef = useRef<HTMLParagraphElement>(null);
 
   const saveMutation = useMutation({
-    mutationFn: (input: { rating: number; body?: string }) =>
-      upsertReview({ projectId, ...input }),
+    mutationFn: async (input: { rating: number; body?: string }) => {
+      await upsertReview({ projectId, ...input });
+    },
     onSuccess: () => toast.success("Verified review saved"),
     onError: (error) => toast.error(humanError(error, "Could not save review")),
   });
@@ -338,7 +348,7 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                       </div>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {viewer?.isPublisher ? (
+                      {viewer && canRespond(viewer) ? (
                         <form
                           className="flex w-full flex-col gap-2 sm:flex-row"
                           onSubmit={(event) => {

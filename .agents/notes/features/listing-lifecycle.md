@@ -34,6 +34,12 @@ Related surfaces:
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next lifecycle updates share a six/hour/project limit. Inbox notices update canonically; email is sent for initial deprecation/retirement, cancellation and completed retirement, not message/date edits. Consumer fan-out uses 25-org pages paced five seconds apart; email recipient lookup is separately globally throttled. Publisher text is escaped and URL delimiters broken with zero-width spaces in email. Code: `packages/control-plane-next/convex/{lifecycleNotices,projects,specs,notificationEmail,notificationEmailAction}.ts`.
+
 ### Isolated rebuild PR 2 — 2026-10-11
 
 PR #437 review fixes: draft bodies now live in `projectDrafts`, so 50-project archive/sunset batches read small project rows without approaching Convex’s read limit. Retirement retains draft bodies and immutable versions; cleanup clears readiness through project metadata. Regression coverage: `packages/control-plane-next/tests/publishing.test.ts` exercises 55 near-limit drafts through both paged archive and repeated sunset batches.
@@ -61,6 +67,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - "New subscriptions freeze": `quality.setSubscription` (table `listingSubscriptions`, per consumer org) refuses activation once `deprecationStartedAt`/`sunsetAt`/`retirementState`/`retiredAt`/`deletionState` is set or publisher org archived. No web caller of `setSubscription` exists.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - None recorded beyond TECH.md bullets above.
 

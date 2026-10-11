@@ -25,6 +25,7 @@
     "publisherTransfers",
     "connectedPayouts",
     "specEmbeddings",
+    "searchQueryEmbeddings",
     "catalogueIndex",
     "qualityEvents",
     "reviews",
@@ -38,6 +39,34 @@
   ],
   "components": {
     "rateLimiter": ["rateLimits", "pendingUpdates"],
-    "rateLimiter/batchWorker": ["workers", "workerState"]
+    "rateLimiter/batchWorker": ["workers", "workerState"],
+    "resend": [
+      "content",
+      "nextBatchRun",
+      "lastOptions",
+      "deliveryEvents",
+      "emails"
+    ],
+    "resend/rateLimiter": ["rateLimits"],
+    "resend/emailWorkpool": [
+      "globals",
+      "internalState",
+      "work",
+      "pendingStart",
+      "pendingCompletion",
+      "pendingCancelation",
+      "payload"
+    ],
+    "resend/emailWorkpool/batchWorker": ["workers", "workerState"],
+    "resend/callbackWorkpool": [
+      "globals",
+      "internalState",
+      "work",
+      "pendingStart",
+      "pendingCompletion",
+      "pendingCancelation",
+      "payload"
+    ],
+    "resend/callbackWorkpool/batchWorker": ["workers", "workerState"]
   }
 }

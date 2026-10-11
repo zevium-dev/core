@@ -30,6 +30,16 @@ try {
     VITE_GATEWAY_URL: "https://ci.invalid",
   });
   run("pnpm", ["--filter", "web", "test:csrf-runtime", "--skip-build"]);
+  run("pnpm", ["--filter", "web", "typecheck:next"]);
+  run("pnpm", ["--filter", "web", "build:next"], {
+    ...process.env,
+    CLERK_PUBLISHABLE_KEY: clerkPublicFixture,
+    CLERK_SECRET_KEY: clerkSecretFixture,
+    VITE_BUILD_SHA: "0".repeat(40),
+    VITE_CONVEX_URL: "https://legacy-ci.invalid",
+    VITE_NEXT_CONVEX_URL: "https://next-ci.invalid",
+    VITE_GATEWAY_URL: "https://next-ci.invalid",
+  });
 } catch (error) {
   process.stderr.write(
     `${error instanceof Error ? error.message : String(error)}\n`,

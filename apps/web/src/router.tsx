@@ -1,3 +1,4 @@
+import { convexUrl as selectedConvexUrl } from "#/lib/control-plane";
 import { ConvexQueryClient } from "@convex-dev/react-query";
 import { QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
@@ -34,7 +35,7 @@ export interface RouterContext {
   principalCache: PrincipalCache;
 }
 
-const convexUrl = import.meta.env.VITE_CONVEX_URL;
+const convexUrl = selectedConvexUrl();
 if (typeof convexUrl !== "string" || convexUrl.length === 0) {
   throw new Error("missing envar VITE_CONVEX_URL");
 }

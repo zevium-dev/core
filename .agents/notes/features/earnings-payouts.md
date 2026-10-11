@@ -33,6 +33,20 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next `earnings.forOrg` requires org admin for its aggregate and per-project call/gross/net reads. Staff provider adoption uses an AlertDialog showing case ID, verified transfer amount, effect and audit note. Code: `packages/control-plane-next/convex/{earnings,admin}.ts`, `apps/web/src/components/operator-console.tsx`.
+
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next earnings totals use exact lifetime/month publisher rollups; org project detail is bounded to first 100 with truncation metadata; project screens use an exact slug-indexed lookup. Payout DTOs now compile against actual screens, including in-transit bank payouts; authoritative totals remain separate from recent 50 detail rows. Transfer confirmation/definitive failure emits idempotent inbox notices. Operator failed-transfer retry allocates a new canonical transfer; unknown outcomes retain their original dispatch identity and require reconciliation.
+
+Code pointers: `packages/control-plane-next/convex/earnings.ts`; `packages/control-plane-next/convex/payouts.ts`; `packages/control-plane-next/convex/admin.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 PR #439 throughput hardening: isolated rebuild earning release and payment restoration/clawback share `packages/control-plane-next/convex/money/throughput.ts` admission (ten pages/second, 128 KiB full-document writes per page). Release discovery spaces workers/continuations; deployment throughput errors retry after two seconds without opening corruption cases. Existing release leases remain cron-recoverable if scheduling fails. [Budget and CI scale validation](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11).
 
 ### Isolated rebuild PR 4 — 2026-10-11
@@ -95,6 +109,8 @@ Connect webhook subscriptions (`/stripe-connect-webhook` payout events, `/stripe
 - Transfers are org-admin-initiated (`payouts.initiatePublisherTransfer` from `/app/earnings`), not scheduled; onboarding via `payouts.startOnboarding` / `refreshOnboarding` / `replaceClosedAccount`
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off; follow-up #440.
 

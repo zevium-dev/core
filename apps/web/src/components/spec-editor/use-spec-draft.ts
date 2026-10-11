@@ -9,7 +9,11 @@ import { toast } from "sonner";
 import type { SpecWorkspaceProps } from "./spec-workspace";
 import { OPENAPI_TEMPLATE } from "./template";
 
-type Snapshot = { text: string; hash: string | null; savedAt: number | null };
+export type Snapshot = {
+  text: string;
+  hash: string | null;
+  savedAt: number | null;
+};
 type State = {
   text: string;
   base: Snapshot;
@@ -105,7 +109,7 @@ export function useSpecDraft({
         hash: result.draftHash ?? null,
         savedAt: result.lastSavedAt,
       };
-      if (result.conflict) {
+      if ("conflict" in result && result.conflict) {
         dispatch({ type: "conflict", snapshot });
         return;
       }
@@ -176,6 +180,8 @@ export function useSpecDraft({
     autosaveTripped: state.failures >= 3,
     issues: mergeIssues(clientIssues, state.serverIssues),
     edit,
+    setConflict: (snapshot: Snapshot) =>
+      dispatch({ type: "conflict", snapshot }),
     setServerIssues: (issues: SpecIssue[]) =>
       dispatch({ type: "issues", issues }),
     save: () => {

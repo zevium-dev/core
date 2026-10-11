@@ -49,6 +49,7 @@ export const settlementTables = {
     publisherIdempotencyKey: v.optional(v.string()),
     fundingSlices: v.array(fundingSlice),
   })
+    .index("by_at", ["at"])
     .index("by_ref", ["settleRefId"])
     .index("by_wallet_edge", ["walletId", "epoch", "edgeSequence"])
     .index("by_org_time", ["consumerOrganizationId", "at"])
@@ -56,6 +57,7 @@ export const settlementTables = {
     .index("by_org_key_time", ["consumerOrganizationId", "keyId", "at"])
     .index("by_org_project_time", ["consumerOrganizationId", "projectId", "at"])
     .index("by_project_time", ["projectId", "at"])
+    .index("by_project_version_time", ["projectId", "specVersionId", "at"])
     .index("by_public", ["publicId"]),
   usageRollups: defineTable(
     v.union(
@@ -84,6 +86,7 @@ export const settlementTables = {
         reversedAtoms: v.number(),
         failedAtoms: v.number(),
         updatedAt: v.number(),
+        projectId: v.optional(v.id("projects")),
         kind: v.literal("daily"),
         day: v.string(),
         success: v.number(),
@@ -130,6 +133,23 @@ export const settlementTables = {
       }),
     ),
   )
+    .index("by_project_dimension_day", [
+      "kind",
+      "scope",
+      "scopeId",
+      "projectId",
+      "dimension",
+      "day",
+    ])
+    .index("by_dimension_day", [
+      "kind",
+      "scope",
+      "scopeId",
+      "dimension",
+      "day",
+      "dimensionKey",
+      "shard",
+    ])
     .index("by_daily", [
       "kind",
       "scope",

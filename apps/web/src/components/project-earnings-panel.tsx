@@ -1,3 +1,4 @@
+import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { formatPublisherCredits } from "#/lib/format";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -21,9 +22,8 @@ export function ProjectEarningsPanel({
   orgSlug: string;
   projectSlug: string;
 }) {
-  const { data } = useSuspenseQuery(
-    convexQuery(api.earnings.forOrg, { orgSlug }),
-  );
+  const args = { orgSlug, ...(NEXT_CONTROL_PLANE ? { projectSlug } : {}) };
+  const { data } = useSuspenseQuery(convexQuery(api.earnings.forOrg, args));
 
   const projectRow = data.byProject.find((row) => row.slug === projectSlug);
   const project = projectRow ?? {

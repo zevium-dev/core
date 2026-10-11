@@ -420,7 +420,10 @@ describe("immutable publishing and bounded readiness", () => {
     await admin.mutation(api.specs.undeprecateVersion, {
       versionId: version._id,
     });
-    expect(await t.run((ctx) => ctx.db.get(version._id))).toEqual(version);
+    expect(await t.run((ctx) => ctx.db.get(version._id))).toEqual({
+      ...version,
+      noticeRevision: 2,
+    });
     await admin.mutation(api.specs.deprecateVersion, {
       versionId: version._id,
       sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS,

@@ -56,4 +56,22 @@ crons.interval(
   internal.edgeMaintenance.discoverDust,
   { cursor: null },
 );
+crons.interval(
+  "probe published upstreams",
+  { minutes: 1 },
+  internal.quality.runDueProbes,
+  {},
+);
+crons.interval(
+  "recover publisher webhooks",
+  { minutes: 1 },
+  internal.webhooks.recover,
+  {},
+);
+crons.interval(
+  "clean import leases",
+  { minutes: 5 },
+  internal.specImportLimits.cleanup,
+  {},
+);
 export default crons;

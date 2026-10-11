@@ -15,6 +15,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminOperationsRouteImport } from './routes/admin/operations'
 import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
 import { Route as AdminPayoutsRouteImport } from './routes/admin/payouts'
 import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
@@ -73,6 +74,11 @@ const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminOperationsRoute = AdminOperationsRouteImport.update({
+  id: '/operations',
+  path: '/operations',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminOrgsRoute = AdminOrgsRouteImport.update({
@@ -230,6 +236,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/llms.txt': typeof LlmsDottxtRoute
+  '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
@@ -264,6 +271,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/llms.txt': typeof LlmsDottxtRoute
+  '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
@@ -299,6 +307,7 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/llms.txt': typeof LlmsDottxtRoute
+  '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
@@ -338,6 +347,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/llms.txt'
+    | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
@@ -372,6 +382,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/llms.txt'
+    | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
@@ -406,6 +417,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/llms.txt'
+    | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
@@ -494,6 +506,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/operations': {
+      id: '/admin/operations'
+      path: '/operations'
+      fullPath: '/admin/operations'
+      preLoaderRoute: typeof AdminOperationsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/orgs': {
@@ -703,6 +722,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminRouteChildren {
+  AdminOperationsRoute: typeof AdminOperationsRoute
   AdminOrgsRoute: typeof AdminOrgsRoute
   AdminPayoutsRoute: typeof AdminPayoutsRoute
   AdminProjectsRoute: typeof AdminProjectsRoute
@@ -711,6 +731,7 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminOperationsRoute: AdminOperationsRoute,
   AdminOrgsRoute: AdminOrgsRoute,
   AdminPayoutsRoute: AdminPayoutsRoute,
   AdminProjectsRoute: AdminProjectsRoute,

@@ -45,6 +45,20 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Search charges caller buckets before cache lookup, then a 16-shard global 120/minute budget only for cache misses. Query leases/cache live in `searchQueryEmbeddings` without a vector index (36 application tables); `specEmbeddings` contains only 768-dimensional listing vectors. `syncCatalogue` deletes undiscoverable/replaced-version vectors and schedules embedding on re-discovery, version or metadata changes. Trusted IPv6 callers share a hashed /64 key. Public detail strips unpriced operations while preserving explicit zero prices; next catalogue cards/detail show **Operated by Zevium** for house listings. Code: `packages/control-plane-next/convex/{search,catalogue}.ts`, `lib/{catalogue,specPolicy}.ts`, `apps/web/src/lib/catalogue-search.server.ts`.
+
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Replacement `catalogue.ts`, `search.ts` and `lib/catalogue.ts` implement scalar-only public DTOs, bounded indexed browse/tag pages, transactional facet counters and fenced query embeddings. Direct anonymous Convex search never spends provider budget; next web uses a trusted server/HMAC boundary, gateway uses org/key budgets. Keyword sort is relevance; other sort modes apply without a keyword. Facets/totals describe the tag/global catalogue, not arbitrary combined-filter totals. Short filtered pages retain continuation cursors. See PR 6 handoff for explicit bounds.
+
+Code pointers: `packages/control-plane-next/convex/catalogue.ts`; `packages/control-plane-next/convex/search.ts`; `packages/shared/src/edge/read.ts`; `apps/web/src/lib/catalogue-search.server.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild PR 5 review — 2026-10-11
 
 The isolated PR #441 gateway pairing (`apps/gateway/src/next/pipeline.ts`) reads one signed public catalogue manifest for browsing/MCP fallback search. It trusts generation-time public filtering, performs no per-listing route/org RPCs, and cold-fills through the coordinator. A failed fill reports unavailable rather than successful empty results. The web/semantic replacement stays in PR 6. [Gateway PR 5 notes](gateway.md#isolated-rebuild-pr-5--2026-10-11).
@@ -75,6 +89,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - **Card quality (#331)**: browse and semantic cards render compact `QualityBadges` with gateway success/latency, health-endpoint reachability and measurement freshness. Insufficient evidence retains the 20-call/3-probe floors. `catalogueListings.quality` stores current-version aggregates; normal paginated browse maps them without per-card snapshot reads. Maintenance/backfill details live in [quality-signals](quality-signals.md).
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - None recorded beyond TECH.md bullets above.
 - 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)

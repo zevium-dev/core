@@ -82,6 +82,13 @@ const financeHarness = readFileSync(
   .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
   .replace('"./measureDb"', '"../tests/measureDb"');
 writeFileSync(new URL("convex/financeRaces.ts", scratch), financeHarness);
+const readHarness = readFileSync(
+  new URL("../tests/readRacesHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replaceAll("'../convex/", "'./");
+writeFileSync(new URL("convex/readRaces.ts", scratch), readHarness);
 const edgeHarness = readFileSync(
   new URL("../tests/edgeHarness.ts", import.meta.url),
   "utf8",
@@ -144,6 +151,7 @@ run([
 run(["env", "set", "NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_fixture"]);
 run(["dev", "--once", "--typecheck", "enable"]);
 if (!process.env.NEXT_EDGE_ONLY) {
+  run(["run", "readRaces:queryCache"]);
   run(["run", "testClaims:races"]);
 
   run(["run", "domainClaims:races"]);

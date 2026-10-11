@@ -84,3 +84,19 @@ export function pricingSummary(text: string) {
     hasFreeTier,
   };
 }
+
+/** Public docs omit unpriced operations, while preserving explicitly free calls. */
+export function publicSpec(text: string): string {
+  const spec = parseSpec(text);
+  const raw = JSON.parse(text) as {
+    paths: Record<string, Record<string, unknown>>;
+  };
+  for (const [path, item] of Object.entries(spec.paths)) {
+    for (const method of methods)
+      if (item[method] && !extractPricing(item[method]!))
+        delete raw.paths[path][method];
+    if (!methods.some((method) => raw.paths[path][method]))
+      delete raw.paths[path];
+  }
+  return JSON.stringify(raw);
+}

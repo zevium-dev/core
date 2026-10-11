@@ -1,6 +1,6 @@
 # Publisher analytics
 
-> Status: #398 fixed; partial (P0) · Updated: 2026-10-10
+> Status: #398 fixed; partial (P0) · Updated: 2026-10-11
 > Rebuild status: isolated PR 3 settlement projection implemented; production reads and cutover unchanged.
 > Code: `packages/control-plane-next/convex/money/rollups.ts`, `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/components/publisher-earnings-display.test.tsx`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md) (usage ingest pipe), [gateway](gateway.md), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
@@ -27,6 +27,20 @@ Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)"
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next project endpoint reads use `by_project_dimension_day(kind,scope,scopeId,projectId,dimension,day)` with newest-day ordering before the 4,000-row cap; `recordRollups` writes the project prefix. Billing breakdowns also read newest days first, retaining explicit truncation flags. All earnings aggregate reads now require org admin, consistent with analytics permissions. Code: `packages/control-plane-next/convex/{analytics,earnings}.ts`, `lib/billingRead.ts`, `money/rollups.ts`, `schema/settlement.ts`.
+
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next project analytics is admin-only. Exact daily shard totals are independent of event volume; latency percentiles report histogram bounds with explicit UI labels. Endpoint detail is bounded to 4,000 dimension rows and flags partial results. Consumer overview uses org totals for admins and own-member rollups/redacted recent rows for members.
+
+Code pointers: `packages/control-plane-next/convex/analytics.ts`; `packages/control-plane-next/convex/lib/readRollups.ts`; `apps/web/src/routes/app/projects/$projectSlug.tsx`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild PR 3 — 2026-10-11
 
 Settlement now writes sharded daily/lifetime call, gross/net and fixed-bucket latency metrics with usage. Call metrics use execution day; publisher total/project risk inventory uses acceptance day. Free successful calls retain consumer-project eligibility. Read surfaces and histogram labeling remain PR 6. [Implementation and handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
@@ -52,6 +66,8 @@ Settlement now writes sharded daily/lifetime call, gross/net and fixed-bucket la
 - `analytics.orgOverview` (wallet + today/cycle usage + recent 20, `ORG_SCAN_CAP = 5_000`) feeds the consumer `/app` dashboard, not publisher analytics.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - Wave 4 — analytics dashboards shipped (web+convex, commit 632f6ed).
 - 2026-10-10 — ACCEPTED: two roles for now, admin + member (owner treated as admin); full permission-based access later. [decision](../decisions/2026-10-10-two-roles-admin-member.md) Analytics is admin-only — code correct, FLOW wrong.

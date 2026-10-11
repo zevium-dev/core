@@ -59,6 +59,20 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next low-balance notifications are emitted atomically by `appendWalletEntry` only when balance crosses from at least 1,000 to below 1,000 credits; entry sequence deduplicates each crossing. A later top-up above the threshold re-arms notices. The hourly below-threshold scan is removed. Billing breakdown caps read newest rows first and remain explicitly marked truncated. Code: `packages/control-plane-next/convex/money/walletLedger.ts`, `lib/billingRead.ts`, `crons.ts`.
+
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next cycle summaries use exact finite rollup fan-in. Members see own usage and redacted key references; admin dimensions and member detail are bounded and explicitly partial. The operator preview retries a needs-review generation without resetting applied effects/cursor and exposes guarded stuck-close recovery. Completed reconciliation resolves its payment case. Web defaults to legacy until PR 7.
+
+Code pointers: `packages/control-plane-next/convex/lib/billingRead.ts`; `packages/control-plane-next/convex/operators.ts`; `apps/web/src/lib/control-plane.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild PR 5 — 2026-10-11
 
 `wallets.edgeBootstrapId` fences the durable edge owner before admission; cold wallets can drain before their first call. Negative closes enqueue authenticated wake delivery through `NEXT_GATEWAY_URL`, with cron retry until an actual drain ACK. A wake receipt never grants permission to reclaim.
@@ -183,6 +197,8 @@ Key-verification bullet lives in [api-keys](api-keys.md).
   - Also verify keyless mock and MCP calls against same listing.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off; follow-up #440.
 

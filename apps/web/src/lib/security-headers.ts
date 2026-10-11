@@ -1,3 +1,4 @@
+import { convexUrl as selectedConvexUrl } from "#/lib/control-plane";
 import { resolveGatewayOrigin } from "./landing";
 
 const STRIP_HEADERS = [
@@ -45,7 +46,7 @@ export function buildWebContentSecurityPolicy(
   nonce: string,
   options: { upgradeInsecureRequests?: boolean } = {},
 ): string {
-  const convex = sourceOrigin(import.meta.env.VITE_CONVEX_URL);
+  const convex = sourceOrigin(selectedConvexUrl());
   const gateway = sourceOrigin(
     resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_URL),
   );

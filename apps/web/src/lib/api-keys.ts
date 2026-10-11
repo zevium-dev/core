@@ -1,3 +1,4 @@
+import { convexUrl as selectedConvexUrl } from "#/lib/control-plane";
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
@@ -103,7 +104,7 @@ export const createKey = createServerFn({ method: "POST" })
         "Select an organization before creating an API key",
       );
     }
-    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const convexUrl = selectedConvexUrl();
     const token = (await session.getToken({ template: "convex" })) ?? null;
     const projectionSecret = requireProjectionSecret();
     if (!convexUrl || !token) {
@@ -197,7 +198,7 @@ export const revokeKey = createServerFn({ method: "POST" })
         );
       }
       const client = await clerkClient();
-      const convexUrl = import.meta.env.VITE_CONVEX_URL;
+      const convexUrl = selectedConvexUrl();
       const token = (await session.getToken({ template: "convex" })) ?? null;
       if (!convexUrl || !token) {
         throw new ConvexError(
@@ -264,7 +265,7 @@ export const rotateKey = createServerFn({ method: "POST" })
       );
     }
     const client = await clerkClient();
-    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const convexUrl = selectedConvexUrl();
     const token = (await session.getToken({ template: "convex" })) ?? null;
     if (!convexUrl || !token) {
       throw new ConvexError(

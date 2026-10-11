@@ -63,6 +63,7 @@ export function SpecWorkspace(props: SpecWorkspaceProps) {
     reload,
     overwrite,
     setServerIssues,
+    setConflict,
   } = draft;
   const [pendingReplacement, setPendingReplacement] = useState<string | null>(
     null,
@@ -111,6 +112,7 @@ export function SpecWorkspace(props: SpecWorkspaceProps) {
       pricing={pricing}
       endpointCount={goodEndpoints.length}
       onIssues={setServerIssues}
+      onConflict={setConflict}
     />
   ) : (
     <p className="text-sm text-muted-foreground">

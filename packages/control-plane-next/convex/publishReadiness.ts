@@ -1,5 +1,10 @@
+import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
+import { components } from "./_generated/api";
+import { ConvexError, v } from "convex/values";
+const limiter = new RateLimiter(components.rateLimiter, {
+  tests: { kind: "token bucket", rate: 5, period: MINUTE, capacity: 5 },
+});
 import { getProjectDraft } from "./lib/drafts";
-import { v } from "convex/values";
 import {
   extractHealthCheckTarget,
   parseSpec,
@@ -13,7 +18,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { requireProjectMember } from "./lib/auth";
+import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
 import { isActive } from "./lib/identity";
 export const READINESS_TTL_MS = 15 * 60_000;
 export async function credentialSetFingerprint(
@@ -155,5 +160,15 @@ export const getCurrent = query({
         : null,
       ...(await readinessValidity(ctx, project)),
     };
+  },
+});
+
+export const authorizeTest = internalMutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { org } = await requireProjectAdmin(ctx, args.projectId);
+    if (!(await limiter.limit(ctx, "tests", { key: org._id })).ok)
+      throw new ConvexError("Connection test limit reached. Try again later.");
+    return { clerkOrgId: org.clerkOrgId };
   },
 });

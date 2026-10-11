@@ -1,10 +1,11 @@
+import { convexUrl as selectedConvexUrl } from "#/lib/control-plane";
 import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "#/lib/convex-api";
 
-const convexUrl = import.meta.env.VITE_CONVEX_URL;
+const convexUrl = selectedConvexUrl();
 
 export type EnsureMirrorResult = {
   userId: string | null;

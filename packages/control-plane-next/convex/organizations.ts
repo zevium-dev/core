@@ -1,3 +1,4 @@
+import { adjustStat } from "./lib/catalogue";
 import { v, ConvexError } from "convex/values";
 import { isValidSlug } from "@zevium/shared";
 import { mutation, query } from "./_generated/server";
@@ -41,6 +42,7 @@ export const ensureOrganization = mutation({
         lastClerkEventAt: 0,
         revision: 1,
       });
+      await adjustStat(ctx, "orgs", id, 1);
       org = (await ctx.db.get(id))!;
     }
     if (!(await isActive(ctx, org)))

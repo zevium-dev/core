@@ -1,3 +1,4 @@
+import { convexUrl as selectedConvexUrl } from "#/lib/control-plane";
 import { api } from "#/lib/convex-api";
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { isPublicIp, validateOpenApiSpec } from "@zevium/shared";
@@ -90,7 +91,7 @@ const productionRuntime: SpecImportRuntime = {
       userId: session.userId,
       orgId: session.orgId,
       convexToken,
-      convexUrl: import.meta.env.VITE_CONVEX_URL,
+      convexUrl: selectedConvexUrl(),
     };
   },
   resolveHostname: async (hostname) => {

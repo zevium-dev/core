@@ -76,6 +76,7 @@ export const walletTables = {
     ),
   })
     .index("by_owner", ["ownerKey"])
+    .index("by_balance", ["balance"])
     .index("by_gate", ["gateState"])
     .index("by_expiry", ["nextExpiryAt"]),
   walletEntries: defineTable(

@@ -1,3 +1,4 @@
+import completion from "../contracts/completion.json";
 import { inventoryDrift } from "../scripts/inventory-drift";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -53,10 +54,19 @@ describe("contract inventory coverage and isolation", () => {
         ?.appCallers,
     ).toContain("apps/gateway/src/catalogue-source.ts");
   });
-  it("forbids production imports or next URL selection before paired cutover", () => {
+  it("isolates replacement generated imports behind the explicit preview entry", () => {
+    expect(
+      readFileSync(
+        path.join(root, "apps/web/src/lib/control-plane.ts"),
+        "utf8",
+      ),
+    ).toContain('VITE_CONTROL_PLANE_MODE === "next"');
+    expect(
+      readFileSync(path.join(root, "apps/web/src/lib/convex-api.ts"), "utf8"),
+    ).toContain('"../../../../convex/_generated/api"');
     for (const folder of ["apps/web/src", "apps/gateway/src", "convex"]) {
       for (const file of files(path.join(root, folder)).filter(
-        (f) => !f.endsWith(".test.ts"),
+        (f) => !f.endsWith(".test.ts") && !f.endsWith("/convex-api.next.ts"),
       )) {
         expect(readFileSync(file, "utf8")).not.toMatch(
           /control-plane-next|next\/convex\/_generated/,
@@ -68,7 +78,26 @@ describe("contract inventory coverage and isolation", () => {
     const rate = realpathSync(
       path.join(root, "node_modules/@convex-dev/rate-limiter"),
     );
+    const resend = realpathSync(
+      path.join(root, "node_modules/@convex-dev/resend"),
+    );
+    const workpool = realpathSync(path.join(resend, "../workpool"));
     const paths = {
+      resend: path.join(resend, "src/component/schema.ts"),
+      "resend/rateLimiter": path.join(
+        resend,
+        "../rate-limiter/src/component/schema.ts",
+      ),
+      "resend/emailWorkpool": path.join(workpool, "src/component/schema.ts"),
+      "resend/callbackWorkpool": path.join(workpool, "src/component/schema.ts"),
+      "resend/emailWorkpool/batchWorker": path.join(
+        workpool,
+        "../batch-worker/src/component/schema.ts",
+      ),
+      "resend/callbackWorkpool/batchWorker": path.join(
+        workpool,
+        "../batch-worker/src/component/schema.ts",
+      ),
       rateLimiter: path.join(rate, "src/component/schema.ts"),
       "rateLimiter/batchWorker": path.join(
         rate,
@@ -151,4 +180,24 @@ describe("inventory CI boundary", () => {
       }).blocking,
     ).toBe(true);
   });
+});
+
+it("accounts for every legacy contract and verifies replacement targets", () => {
+  expect(completion.functions.map((f) => f.name).sort()).toEqual(
+    inventory.functions.map((f) => f.name).sort(),
+  );
+  for (const row of completion.functions) {
+    expect(["implemented", "replaced", "retired"]).toContain(row.status);
+    if (row.status === "retired") expect(row.reason).toBeTruthy();
+    else
+      for (const target of row.targets ?? []) {
+        const [mod, name] = target.split(":");
+        expect(
+          readFileSync(
+            path.join(root, "packages/control-plane-next/convex", mod + ".ts"),
+            "utf8",
+          ),
+        ).toMatch(new RegExp("export const " + name + "\\s*="));
+      }
+  }
 });

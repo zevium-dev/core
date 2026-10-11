@@ -76,6 +76,7 @@ vi.mock("@convex-dev/react-query", () => ({
 }));
 
 vi.mock("convex/react", () => ({
+  useAction: () => state.save,
   usePaginatedQuery: () => ({
     results: state.reviews,
     status: state.status,

@@ -1,3 +1,4 @@
+import { notificationMailer } from "./lib/notificationEmail";
 import {
   sealProjection,
   readRing,
@@ -304,4 +305,115 @@ router.route({
     }
   }),
 });
+router.route({
+  path: "/resend-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.RESEND_WEBHOOK_SECRET?.trim()) {
+      return new Response("Email webhook not configured", { status: 503 });
+    }
+    let body: string;
+    try {
+      const reader = request.body?.getReader();
+      if (!reader) return new Response("Invalid event", { status: 400 });
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 1_048_576) {
+          await reader.cancel();
+          return new Response("Payload too large", { status: 413 });
+        }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return new Response("Invalid event", { status: 400 });
+    }
+
+    try {
+      new Webhook(process.env.RESEND_WEBHOOK_SECRET).verify(body, {
+        "svix-id": request.headers.get("svix-id") ?? "",
+        "svix-timestamp": request.headers.get("svix-timestamp") ?? "",
+        "svix-signature": request.headers.get("svix-signature") ?? "",
+      });
+    } catch {
+      return new Response("Invalid signature", { status: 400 });
+    }
+    try {
+      return await notificationMailer().handleResendEventWebhook(
+        ctx,
+        new Request(request.url, {
+          method: "POST",
+          headers: request.headers,
+          body,
+        }),
+      );
+    } catch {
+      return new Response("Email event processing failed", { status: 500 });
+    }
+  }),
+});
+
+for (const path of ["/gateway-search", "/web-search"] as const)
+  router.route({
+    path,
+    method: "POST",
+    handler: httpAction(async (ctx, request) => {
+      const expected =
+        path === "/web-search"
+          ? process.env.NEXT_WEB_SEARCH_SECRET
+          : process.env.GATEWAY_INTERNAL_SECRET;
+      if (
+        !(await validInternalSecret(
+          request.headers.get("x-internal-secret"),
+          expected,
+        ))
+      )
+        return new Response("Unauthorized", { status: 401 });
+      try {
+        const args = await readBoundedJson(
+          request,
+          z.strictObject({
+            query: z.string().max(200),
+            limit: z.number().int().min(1).max(20).optional(),
+            caller: z
+              .strictObject({
+                orgId: z.string().min(1).max(256),
+                keyId: z.string().min(1).max(256),
+              })
+              .optional(),
+            anonymousKey: z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional(),
+          }),
+          16384,
+        );
+        if (
+          (path === "/web-search" && (!args.anonymousKey || args.caller)) ||
+          (path === "/gateway-search" && args.anonymousKey)
+        )
+          return new Response("Invalid search", { status: 400 });
+        return Response.json(
+          await ctx.runAction(internal.search.searchCatalogueForGateway, {
+            query: args.query,
+            limit: args.limit,
+            gatewayCaller: args.caller,
+            trustedAnonymousKey: args.anonymousKey,
+          }),
+        );
+      } catch {
+        return new Response("Search unavailable", { status: 503 });
+      }
+    }),
+  });
 export default router;

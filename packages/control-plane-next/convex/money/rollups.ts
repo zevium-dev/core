@@ -272,6 +272,11 @@ export async function recordRollups(
         await ctx.db.insert("usageRollups", {
           ...dimension,
           shard,
+          projectId:
+            dimension.dimension === "endpoint" ||
+            dimension.dimension === "project"
+              ? projectId
+              : undefined,
           kind: "daily",
           day: rowDay,
           ...delta,

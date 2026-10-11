@@ -1,3 +1,4 @@
+import type { Snapshot } from "./use-spec-draft";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { isValidSemver, type SpecIssue } from "@zevium/shared";
@@ -16,7 +17,9 @@ import {
 } from "#/components/ui/dialog";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
-import { api } from "#/lib/convex-api";
+import { api as legacyApi } from "../../../../../convex/_generated/api";
+import { api as nextApi } from "#/lib/convex-api.next";
+import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { humanError } from "#/lib/human-error";
 
 import type { SpecWorkspaceProps } from "./spec-workspace";
@@ -49,15 +52,19 @@ type PublishVersionDialogProps = Pick<
   "projectId" | "versions"
 > & {
   canPublish: boolean;
+  draftHash: string | null;
   readinessCurrent: boolean;
   onIssues: (issues: SpecIssue[]) => void;
+  onConflict: (snapshot: Snapshot) => void;
 };
 export function PublishVersionDialog({
   projectId,
+  draftHash,
   versions,
   canPublish,
   readinessCurrent,
   onIssues,
+  onConflict,
 }: PublishVersionDialogProps) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [versionTouched, setVersionTouched] = useState(false);
@@ -65,14 +72,27 @@ export function PublishVersionDialog({
   const version =
     versionInput ?? defaultNextVersion(versions.map((v) => v.version));
   const versionInputRef = useRef<HTMLInputElement>(null);
-  const publishFn = useConvexMutation(api.specs.publish);
+  const publishLegacy = useConvexMutation(legacyApi.specs.publish);
+  const publishNext = useConvexMutation(nextApi.specs.publish);
   const { mutate: publish, isPending: publishPending } = useMutation({
-    mutationFn: () =>
-      publishFn({
-        projectId,
-        version: version.trim(),
-      }),
+    mutationFn: async () =>
+      NEXT_CONTROL_PLANE
+        ? publishNext({
+            projectId,
+            version: version.trim(),
+            draftHash: draftHash ?? "",
+          })
+        : publishLegacy({ projectId, version: version.trim() }),
     onSuccess: (result) => {
+      if ("conflict" in result && result.conflict) {
+        onConflict({
+          text: result.draft,
+          hash: result.draftHash,
+          savedAt: result.lastSavedAt,
+        });
+        setPublishOpen(false);
+        return;
+      }
       onIssues(result.issues);
       if (!result.ok) {
         const first = result.issues.find((i) => i.level === "error");

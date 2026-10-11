@@ -1,3 +1,4 @@
+import { InternalHttpCatalogueSearch } from "../catalogue-search";
 import { nextOAuth } from "./oauth";
 import type { AdmissionInput } from "./wallet";
 import { z } from "zod";
@@ -119,6 +120,13 @@ export function nextDeps(env: NextEnv): WorkerDeps {
     },
   };
   return {
+    searchSource:
+      env.NEXT_CONVEX_SITE_URL && env.GATEWAY_INTERNAL_SECRET
+        ? new InternalHttpCatalogueSearch({
+            siteUrl: env.NEXT_CONVEX_SITE_URL,
+            internalSecret: env.GATEWAY_INTERNAL_SECRET,
+          })
+        : undefined,
     oauthVerifier: nextOAuth(env),
     keyVerifier: {
       verifyWithStatus,

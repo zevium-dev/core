@@ -1,10 +1,10 @@
+import type { Id } from "#/lib/convex-data-model";
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { FunctionReturnType } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "#/lib/convex-api";
-import type { Id } from "#/lib/convex-data-model";
 
 const query = vi.hoisted(() => ({ fn: vi.fn() }));
 vi.mock("@convex-dev/react-query", () => ({
@@ -27,14 +27,18 @@ const data: FunctionReturnType<typeof api.quality.getPublisherQuality> = {
   historyLimit: 24,
   probes: [
     {
-      id: "probe-2" as Id<"qualityProbeResults">,
+      id: "probe-2" as FunctionReturnType<
+        typeof api.quality.getPublisherQuality
+      >["probes"][number]["id"],
       checkedAt: 200,
       outcome: "healthy",
       statusCode: 204,
       latencyMs: 20,
     },
     {
-      id: "probe-1" as Id<"qualityProbeResults">,
+      id: "probe-1" as FunctionReturnType<
+        typeof api.quality.getPublisherQuality
+      >["probes"][number]["id"],
       checkedAt: 100,
       outcome: "timeout",
       statusCode: null,

@@ -1,3 +1,9 @@
+import { limitLifecycle, publicationNotice } from "./lifecycleNotices";
+import { upsertNotification } from "./lib/notifications";
+import { fireWebhookEvent } from "./webhooks";
+import { syncCatalogue, adjustStat } from "./lib/catalogue";
+import { setupQuality } from "./quality";
+import { internal } from "./_generated/api";
 import { getProjectDraft, draftConflict } from "./lib/drafts";
 import { v, ConvexError } from "convex/values";
 import { isValidSemver, sha256Hex } from "@zevium/shared";
@@ -132,6 +138,17 @@ export const publish = mutation({
       discoverable:
         project.visibility === "public" && project.qualityStatus === "active",
     });
+    await syncCatalogue(ctx, project, (await ctx.db.get(project._id))!);
+    if (project.status === "draft") {
+      await adjustStat(ctx, "draft", project._id, -1);
+      await adjustStat(ctx, "published", project._id, 1);
+    }
+    await setupQuality(ctx, project._id);
+    await publicationNotice(
+      ctx,
+      (await ctx.db.get(project._id))!,
+      (await ctx.db.get(id))!,
+    );
     return {
       ok: true,
       issues,
@@ -226,12 +243,49 @@ export const deprecateVersion = mutation({
     const message = args.message?.trim();
     if (message !== undefined && (!message || message.length > 1000))
       throw new ConvexError("Deprecation message must be 1 to 1000 characters");
+    if (
+      version.deprecatedAt !== undefined &&
+      version.sunsetAt === args.sunsetAt &&
+      version.deprecationMessage === (message ?? version.deprecationMessage)
+    )
+      return versionDto(version);
+    await limitLifecycle(ctx, project);
     await ctx.db.patch(version._id, {
       deprecatedAt: version.deprecatedAt ?? Date.now(),
+      noticeRevision: (version.noticeRevision ?? 0) + 1,
       sunsetAt: args.sunsetAt,
       deprecationMessage: message ?? version.deprecationMessage,
     });
     await ctx.db.patch(project._id, { revision: project.revision + 1 });
+    const changed = await ctx.db.get(version._id);
+    if (
+      changed?.deprecatedAt !== undefined &&
+      (version.deprecatedAt !== changed.deprecatedAt ||
+        version.sunsetAt !== changed.sunsetAt ||
+        version.deprecationMessage !== changed.deprecationMessage)
+    ) {
+      const body = `${project.name} version ${version.version} is deprecated. ${changed.deprecationMessage ?? "Migrate to the current version."}`;
+      await upsertNotification(ctx, {
+        organizationId: project.organizationId,
+        kind: "version_deprecated",
+        title: "Version deprecated",
+        body,
+        refId: `deprecation:${version._id}`,
+        email: version.deprecatedAt === undefined,
+      });
+      await fireWebhookEvent(ctx, project._id, "spec.deprecated", {
+        projectId: project._id,
+        version: version.version,
+      });
+      await ctx.scheduler.runAfter(0, internal.lifecycleNotices.consumers, {
+        projectId: project._id,
+        revision: changed.noticeRevision!,
+        email: version.deprecatedAt === undefined,
+        versionId: version._id,
+        cursor: null,
+        body,
+      });
+    }
     return versionDto((await ctx.db.get(version._id))!);
   },
 });
@@ -244,8 +298,10 @@ export const undeprecateVersion = mutation({
     );
     if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now())
       throw new ConvexError("A version cannot be changed after its sunset");
+    await limitLifecycle(ctx, project);
     await ctx.db.patch(version._id, {
       deprecatedAt: undefined,
+      noticeRevision: (version.noticeRevision ?? 0) + 1,
       sunsetAt: undefined,
       deprecationMessage: undefined,
     });
