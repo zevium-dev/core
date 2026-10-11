@@ -221,9 +221,7 @@ export const drainAck = freezeRequest
     sealedAt: integer,
   })
   .refine(
-    (a) =>
-      a.sealedAt >= a.requestedAt &&
-      a.settledThroughEdgeSequence === a.edgeFinalSequence,
+    (a) => a.settledThroughEdgeSequence === a.edgeFinalSequence,
     "Drain requires contiguous committed finalization watermark",
   );
 export type Snapshot = z.infer<typeof snapshot>;

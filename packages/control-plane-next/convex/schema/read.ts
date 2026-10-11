@@ -268,6 +268,7 @@ export const readTables = {
         kind: v.union(
           v.literal("transfer"),
           v.literal("transfer_orphan"),
+          v.literal("settlement_exception"),
           v.literal("account_create"),
           v.literal("foreign_stripe_event"),
           v.literal("foreign_test_payout"),

@@ -47,6 +47,17 @@ const domainHarness = readFileSync(
   .replaceAll('"../convex/', '"./')
   .replace('"./fixtures"', '"../tests/fixtures"');
 writeFileSync(new URL("convex/domainClaims.ts", scratch), domainHarness);
+cpSync(
+  new URL("../tests/moneyFixtures.ts", import.meta.url),
+  new URL("tests/moneyFixtures.ts", scratch),
+);
+const moneyHarness = readFileSync(
+  new URL("../tests/moneyRacesHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replace('"./moneyFixtures"', '"../tests/moneyFixtures"');
+writeFileSync(new URL("convex/moneyRaces.ts", scratch), moneyHarness);
 for (const name of ["convex.json", "tsconfig.json", "package.json"]) {
   cpSync(new URL(name, base), new URL(name, scratch));
 }
@@ -85,6 +96,15 @@ assertLocal();
 run(["init"]);
 assertLocal();
 run(["env", "set", "CLERK_JWT_ISSUER_DOMAIN", "https://clerk.invalid"]);
+run(["env", "set", "NEXT_DEPLOYMENT_ID", "next-fixture"]);
+run([
+  "env",
+  "set",
+  "NEXT_ADMISSION_SECRET",
+  "test-only-secret-never-use-in-production",
+]);
 run(["dev", "--once", "--typecheck", "enable", "--run", "testClaims:races"]);
 
 run(["run", "domainClaims:races"]);
+
+run(["run", "moneyRaces:races"]);

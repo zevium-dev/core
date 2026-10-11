@@ -22,6 +22,8 @@ const paymentAdjustmentFields = {
   appliedWalletCredits: v.number(),
   appliedPublisherCredits: v.number(),
   cursor: v.optional(v.string()),
+  closeId: v.optional(v.string()),
+  closeGeneration: v.optional(v.number()),
   createdAt: v.number(),
   updatedAt: v.number(),
 };
@@ -60,6 +62,11 @@ export const walletTables = {
         edgeFinalSequence: v.optional(v.number()),
         settledThrough: v.optional(v.number()),
         ackAt: v.optional(v.number()),
+        ackFingerprint: v.optional(v.string()),
+        abandoned: v.optional(v.boolean()),
+        command: v.optional(
+          v.object({ credits: v.number(), fingerprint: v.string() }),
+        ),
       }),
     ),
   })
@@ -89,6 +96,8 @@ export const walletTables = {
         lotId: v.id("fundingLots"),
         originLotId: v.id("fundingLots"),
         paymentId: v.optional(v.id("payments")),
+        requestFingerprint: v.optional(v.string()),
+        closeId: v.optional(v.string()),
         adjustment: v.union(
           v.object({
             kind: v.literal("payment"),
@@ -133,6 +142,8 @@ export const walletTables = {
       "sequence",
     ]),
   fundingLots: defineTable({
+    // Filled with own ID before the creating mutation commits; Convex cannot index _id directly.
+    orderKey: v.optional(v.id("fundingLots")),
     walletId: v.id("wallets"),
     sourceRef: v.string(),
     sourceKind: sourceKind,
@@ -166,7 +177,13 @@ export const walletTables = {
     ),
   })
     .index("by_source", ["sourceRef"])
-    .index("by_spend", ["walletId", "state", "priority", "createdAt"])
+    .index("by_spend", [
+      "walletId",
+      "state",
+      "priority",
+      "createdAt",
+      "orderKey",
+    ])
     .index("by_payment", ["paymentId"])
     .index("by_merge_target", [
       "walletId",
@@ -174,7 +191,9 @@ export const walletTables = {
       "sourceKind",
       "refundable",
       "priority",
+      "state",
       "createdAt",
+      "orderKey",
     ])
     .index("by_merge_due", ["merge.state"])
     .index("by_expiry", ["state", "expiresAt"]),

@@ -70,7 +70,13 @@ describe("signed Clerk identity boundary", () => {
     expect(state.user?.signupPersonalOrganizationId).toBe(ensured._id);
     expect(state.org?.name).toBe("Newest");
     expect(state.org?.personalForClerkUserId).toBe("user_one");
-    expect(state.wallets).toEqual([]); // Money side belongs to PR 3, never an ad-hoc balance write.
+    expect(state.wallets).toHaveLength(1);
+    expect(state.wallets[0]).toMatchObject({
+      balance: 10_000,
+      promoCredits: 10_000,
+      sequence: 1,
+    });
+    expect(state.user?.signupGrant?.refId).toBe("signup:user_one");
     expect(
       (
         await webhook(
@@ -285,24 +291,12 @@ it("exposes a PR 3 grant candidate only for an unclaimed active signup binding",
     "organization.created",
     created("org_one", { created_at: 2000 }),
   );
-  const candidate = await t.run((ctx) => signupGrantCandidate(ctx, "user_one"));
-  expect(candidate).toMatchObject({
-    credits: 10_000,
-    refId: "signup:user_one",
-    clerkUserId: "user_one",
-  });
-  await t.run(async (ctx) => {
-    await ctx.db.patch(candidate!.userId, {
-      signupGrant: {
-        organizationId: candidate!.organizationId,
-        refId: candidate!.refId,
-        grantedAt: Date.now(),
-      },
-    });
-  });
   expect(
     await t.run((ctx) => signupGrantCandidate(ctx, "user_one")),
   ).toBeNull();
+  expect(
+    (await t.run((ctx) => ctx.db.query("users").first()))?.signupGrant?.refId,
+  ).toBe("signup:user_one");
 });
 
 it("archives access immediately while retaining wallet and immutable publication history", async () => {

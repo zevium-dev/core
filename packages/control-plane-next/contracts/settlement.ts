@@ -151,7 +151,7 @@ export const ingestUsage = z
 export const settlementOutcome = z.union([
   z.strictObject({
     refId: identity,
-    status: z.enum(["applied", "already_applied"]),
+    status: z.enum(["applied", "already_applied", "exception"]),
   }),
   z.strictObject({
     refId: identity,

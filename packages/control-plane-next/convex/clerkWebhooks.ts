@@ -1,3 +1,4 @@
+import { requestClose } from "./money/barrier";
 import { v, ConvexError } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -72,6 +73,19 @@ export const apply = internalMutation({
               args.sourceTimestamp,
             ),
           });
+          const wallet = await ctx.db
+            .query("wallets")
+            .withIndex("by_owner", (q) =>
+              q.eq("ownerKey", `org:${args.objectId}`),
+            )
+            .unique();
+          if (wallet?.gateState === "open")
+            await requestClose(
+              ctx,
+              wallet._id,
+              `archive:${org._id}`,
+              "archive",
+            );
           await ctx.scheduler.runAfter(0, internal.clerkWebhooks.archivePage, {
             organizationId: org._id,
             cursor: null,
