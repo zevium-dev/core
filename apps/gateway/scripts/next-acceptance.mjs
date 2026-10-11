@@ -1,7 +1,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -238,7 +238,7 @@ try {
   );
   // Actual OAuth DO binding, provider HTTP seam, Convex identity and metered MCP call.
   const oauth = await convex("seed", { run: `edge-oauth-${run}` });
-  const bearer = `oat_${createHash("sha256").update(oauth.secret).digest("hex")}`;
+  const bearer = `oat_${randomBytes(32).toString("hex")}`;
   oauthTokens.set(bearer, oauth);
   const mcp = (token) =>
     fetch(`http://127.0.0.1:${worker.port}/mcp`, {
