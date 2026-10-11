@@ -1,69 +1,77 @@
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
-
 const crons = cronJobs();
-
 crons.interval(
-  "resume-catalogue-projection-backfill",
-  { minutes: 5 },
-  internal.catalogue.resumeCatalogueProjectionBackfill,
-);
-
-/** Hourly low-balance check — one notification per org per UTC day. */
-crons.hourly(
-  "low-balance-check",
-  { minuteUTC: 0 },
-  internal.cronTasks.checkLowBalances,
+  "recover provider key revocation",
+  { minutes: 1 },
+  internal.keyRecovery.recoverDue,
   {},
 );
-
-crons.hourly(
-  "retire-sunset-projects",
-  { minuteUTC: 30 },
-  internal.projects.retireSunsetProjects,
-);
-
-/** Credential-free public upstream probes. Batch size and network time are bounded. */
+for (const state of ["pending", "moving"] as const)
+  crons.interval(
+    `recover ${state} dust merges`,
+    { minutes: 1 },
+    internal.wallets.recoverMerges,
+    { state, cursor: null },
+  );
 crons.interval(
-  "probe-published-upstreams",
+  "recover Stripe receipts",
+  { minutes: 1 },
+  internal.stripeEvents.recover,
+  {},
+);
+crons.interval(
+  "reconcile payment sources",
+  { minutes: 1 },
+  internal.billing.recoverAdjustments,
+  {},
+);
+crons.interval(
+  "release earning buckets",
+  { minutes: 1 },
+  internal.payouts.releaseDue,
+  {},
+);
+crons.interval(
+  "recover publisher transfers",
+  { minutes: 1 },
+  internal.payouts.recoverTransfers,
+  {},
+);
+crons.interval(
+  "recover Connect operations",
+  { minutes: 1 },
+  internal.connect.recover,
+  {},
+);
+crons.interval(
+  "recover drained edge maintenance",
+  { minutes: 1 },
+  internal.edgeMaintenance.recover,
+  { cursor: null },
+);
+crons.interval(
+  "discover wallet dust",
   { minutes: 5 },
+  internal.edgeMaintenance.discoverDust,
+  { cursor: null },
+);
+crons.interval(
+  "probe published upstreams",
+  { minutes: 1 },
   internal.quality.runDueProbes,
+  {},
 );
-
-/**
- * Hourly release of risk-held earnings that have matured past their hold.
- * Each org is released in its own transaction with per-org error isolation,
- * so a single org failing cannot block the rest.
- */
-crons.hourly(
-  "release-mature-earnings",
-  { minuteUTC: 15 },
-  internal.payouts.releaseMatureEarningsGlobal,
-);
-
-// Scheduled actions are at-most-once. Lease recovery closes crash windows
-// without asking Stripe to redeliver an event we already acknowledged.
 crons.interval(
-  "stripe-event-recovery",
+  "recover publisher webhooks",
   { minutes: 1 },
-  internal.billing.recoverStripeEvents,
+  internal.webhooks.recover,
+  {},
 );
-
 crons.interval(
-  "publisher-reconciliation-recovery",
-  { minutes: 1 },
-  internal.billing.recoverPublisherReconciliations,
-);
-
-crons.interval(
-  "publisher-transfer-dispatch-recovery",
-  { minutes: 1 },
-  internal.payouts.recoverPublisherTransferDispatches,
-);
-
-crons.interval(
-  "connect-operation-pii-cleanup",
-  { hours: 1 },
-  internal.payouts.cleanupConnectOperationPii,
+  "clean import leases",
+  { minutes: 5 },
+  internal.specImportLimits.cleanup,
+  {},
 );
 export default crons;

@@ -1,4 +1,3 @@
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Menu } from "lucide-react";
 import { useState } from "react";
@@ -21,9 +20,7 @@ const NAV: { to: string; label: string }[] = [
   { to: "/admin/projects", label: "Projects" },
   { to: "/admin/reviews", label: "Reviews" },
   { to: "/admin/payouts", label: "Payouts" },
-  ...(NEXT_CONTROL_PLANE
-    ? [{ to: "/admin/operations", label: "Exceptions" }]
-    : []),
+  { to: "/admin/operations", label: "Exceptions" },
 ];
 
 const navLinkClass =

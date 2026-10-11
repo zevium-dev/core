@@ -1,3 +1,5 @@
+> HISTORICAL ONLY (2026-10-11): PR 7 deletes the legacy x402 runtime and schema. These setup steps cannot activate current code. A new reviewed implementation and owner approval are required. See [cutover activation](convex-activation.md).
+
 # x402 future enablement runbook
 
 > Updated: 2026-10-11 · Status: runbook only; x402 disabled by owner decision, enforcement #424 pending; activation P2 #109

@@ -1,3 +1,5 @@
+> Updated 2026-10-11: root `convex/` is canonical. Never use the old shared local env to validate this cutover. `pnpm schema:check` and `pnpm test:races` create guarded anonymous `.tmp/` backends. `pnpm ci:control-plane` replaces `ci:next`. Provider activation remains owner-only: [runbook](convex-activation.md). Existing provider credentials and example historical setup below are not permission to configure or deploy providers.
+
 # Dev environment
 
 > Updated: 2026-10-10 (seed runner, local Convex CSP, discovery origins; #384, #387, #392)
@@ -51,7 +53,7 @@ Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 - Seed procedure: after `mise exec -- pnpm install --frozen-lockfile`, provide `CLERK_SECRET_KEY` for the Clerk test instance through the process environment or `apps/web/.env.local`, then run `mise exec -- pnpm seed`. The command uses the installed `tsx` runner and idempotently ensures the test user, `test-org`, and its admin membership. Existing users' passwords are not reset; use the password-reset procedure below if needed. This only seeds Clerk; it does not fund wallets or publish APIs.
 - `mise exec -- pnpm seed --check` loads the seed imports without reading credentials or contacting Clerk. CI runs this smoke check to catch runner/module-resolution and deleted-export regressions.
 - Seed sign-in: `test+clerk_test@zevium.dev` / `zevium-test-password`, OTP `424242`.
-- Test org wallet is funded on BOTH planes (Convex `grantCredits` + gateway `/internal/grant`, refId `e2e:manual:grant:1`).
+- Legacy manual dual-plane funding is retired. Local tests seed canonical source-backed grants through scratch-only harnesses; production has no `/internal/grant` endpoint. The wallet DO bootstraps from signed Convex snapshots.
 
 ## Clerk quirks
 

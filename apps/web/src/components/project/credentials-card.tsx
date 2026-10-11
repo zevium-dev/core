@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff, KeyRound, Trash2 } from "lucide-react";
@@ -23,18 +24,14 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
-import type { Doc, Id } from "#/lib/convex-data-model";
+import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { formatRelativeTime } from "#/lib/relative-time";
 import {
   SettingsCardSkeleton,
   SettingsQueryErrorCard,
 } from "./settings-query-state";
-export function UpstreamCredentialsCard({
-  project,
-}: {
-  project: Doc<"projects">;
-}) {
+export function UpstreamCredentialsCard({ project }: { project: ProjectView }) {
   const credentialsQuery = useQuery(
     convexQuery(api.upstreamCredentials.listForProject, {
       projectId: project._id,

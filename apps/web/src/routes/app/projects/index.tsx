@@ -1,10 +1,7 @@
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
-import { api as legacyApi } from "../../../../../../convex/_generated/api";
-import { api as nextApi } from "#/lib/convex-api.next";
 import type { FunctionReturnType } from "convex/server";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth, usePaginatedQuery } from "convex/react";
 import { FolderPlus, Plus } from "lucide-react";
@@ -29,37 +26,9 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
-import { ensureMirrorOnServer } from "#/lib/ensure-mirror";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
-import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/app/projects/")({
-  loader: async ({ context }) => {
-    const { queryClient, orgSlug } = context as RouterContext;
-    if (!orgSlug || NEXT_CONTROL_PLANE) return;
-
-    const queryOpts = convexQuery(legacyApi.projects.list, { orgSlug });
-
-    // Components wait for verified browser auth before subscribing. Cached
-    // titles still morph; a cold list reveals its skeleton until data is ready.
-    if (typeof window !== "undefined") return;
-
-    try {
-      // Mirror user/org rows before authed list so first SSR doesn't 500
-      // on "Organization not found".
-      const mirror = await ensureMirrorOnServer();
-      if (!mirror.mirrored) return;
-      try {
-        await queryClient.ensureQueryData(queryOpts);
-      } catch {
-        // Drop failed cache entry so dehydrate doesn't ship InternalServerError
-        // and client can retry once mirror/auth settles.
-        queryClient.removeQueries({ queryKey: queryOpts.queryKey });
-      }
-    } catch {
-      // Auth redirect or missing org — component handles empty/loading UI.
-    }
-  },
   component: ProjectsIndexPage,
   pendingMs: 1000,
   head: () => ({
@@ -92,24 +61,14 @@ function ProjectsIndexPage() {
 
   return (
     <Suspense fallback={<ProjectsListSkeleton />}>
-      {NEXT_CONTROL_PLANE ? (
-        <NextProjectsList orgSlug={orgSlug} />
-      ) : (
-        <LegacyProjectsList orgSlug={orgSlug} />
-      )}
+      <PaginatedProjectsList orgSlug={orgSlug} />
     </Suspense>
   );
 }
 
-function LegacyProjectsList({ orgSlug }: { orgSlug: string }) {
-  const { data: projects } = useSuspenseQuery(
-    convexQuery(legacyApi.projects.list, { orgSlug }),
-  );
-  return <ProjectsList orgSlug={orgSlug} projects={projects} />;
-}
-function NextProjectsList({ orgSlug }: { orgSlug: string }) {
+function PaginatedProjectsList({ orgSlug }: { orgSlug: string }) {
   const page = usePaginatedQuery(
-    nextApi.projects.list,
+    api.projects.list,
     { orgSlug },
     { initialNumItems: 25 },
   );
@@ -136,7 +95,7 @@ function ProjectsList({
   projects,
 }: {
   orgSlug: string;
-  projects: FunctionReturnType<typeof legacyApi.projects.list>;
+  projects: FunctionReturnType<typeof api.projects.list>["page"];
 }) {
   const queryClient = useQueryClient();
   const { membership } = useOrganization();

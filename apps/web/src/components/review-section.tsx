@@ -1,6 +1,3 @@
-import { api as legacyApi } from "../../../../convex/_generated/api";
-import { api as nextApi } from "#/lib/convex-api.next";
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { formatDate } from "#/lib/format";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -77,9 +74,7 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
     { initialNumItems: REVIEW_PAGE_SIZE },
   );
 
-  const upsertLegacy = useConvexMutation(legacyApi.reviews.upsert);
-  const upsertNext = useAction(nextApi.reviews.upsert);
-  const upsertReview = NEXT_CONTROL_PLANE ? upsertNext : upsertLegacy;
+  const upsertReview = useAction(api.reviews.upsert);
   const withdrawReview = useConvexMutation(api.reviews.withdraw);
   const reportReview = useConvexMutation(api.reviews.report);
   const respond = useConvexMutation(api.reviews.respondAsPublisher);

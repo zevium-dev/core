@@ -1,7 +1,7 @@
 # Platform admin
 
-> Status: partial (#363 list/presentation fixes complete) · Updated: 2026-10-11
-> Code: `convex/admin.ts`, `convex/admin.test.ts`, `convex/lib/auth.ts` (`requireAdmin`, `isAdmin`), `apps/web/src/routes/admin.tsx`, `apps/web/src/routes/admin/index.tsx`, `apps/web/src/routes/admin/orgs.tsx`, `apps/web/src/routes/admin/projects.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/routes/admin/reviews.tsx`, `apps/web/src/routes/admin/-reviews-ui.tsx`, `apps/web/src/components/admin-header.tsx`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{admin,operators}.ts`, `apps/web/src/components/operator-console.tsx`, `apps/web/src/routes/admin/operations.tsx`, `tests/readSurfaces.test.ts`
 > Related: [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [reviews](reviews.md), [earnings-payouts](earnings-payouts.md), [wallet-billing](wallet-billing.md), [webhooks-notifications](webhooks-notifications.md), [upstream-credentials](upstream-credentials.md), [accounts-orgs](accounts-orgs.md)
 
 Staff-only `/admin` surface for Zevium operators: moderation, quality gates, user/org support, billing ops, and platform metrics. Access is an env allowlist of Clerk user ids checked server-side in Convex.
@@ -22,39 +22,9 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 
 ## Tech
 
-### PR #442 review fixes — 2026-10-11
+The staff-only exception console is always available after cutover; no preview switch. Realtime paged cases/evidence, frozen wallets and needs_review payments expose verified provider adoption/quarantine, signed-final evidence recovery, exception resolution/void, same-generation retries, wakes and drained/no-effect admin-close abandonment. Irreversible actions confirm wallet/case, amount, effect and audit note. Server allowlist checks are mandatory; resolution never invents debits/earnings or bypasses drain. Details expand inline, so no list/detail transition is needed.
 
-**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
-
-Next console defaults to open cases and subscribes to evidence only while expanded. Adoption, void, drained-close abandonment and exact-final recovery require stock shadcn AlertDialog confirmation showing case/wallet ID, amount, effect and note. Curated ConvexError data reaches the operator; unknown/internal exceptions use a generic message. Rejected and exception settlement outcomes never toast success. Moderation offers report dismissal with generation fencing. Code: `apps/web/src/components/operator-console.tsx`, `apps/web/src/routes/admin/-reviews-ui.tsx`, `packages/control-plane-next/convex/{admin,reviews}.ts`.
-
-### Isolated rebuild PR 6 — 2026-10-11
-
-**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
-
-Next-only `/admin/operations` uses realtime paginated cases, evidence, needs-review payments and wallet close states. Server staff checks protect provider adoption/quarantine, retained rejected-final export/recovery, resolve/void (no debit or earnings), same-generation payment retry and drained/no-effect admin abandonment. Actor/reason audit notes are retained. Details expand inline; no list/detail navigation. Legacy remains default.
-
-Code pointers: `apps/web/src/components/operator-console.tsx`; `packages/control-plane-next/convex/operators.ts`; `packages/control-plane-next/convex/admin.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
-
-- **Realtime lists (#363)**: orgs, projects, and transfer operations use native Convex `usePaginatedQuery`; filter/URL changes reset cursors in the same render. Loaded rows update or disappear after mutations without client merge effects, row copies, or forced refetches. `ListBoundary` contains query errors and retries by remounting the subscription. Stock Table, common UTC/money/credits formatters, and HTTP StatusBadge replace local copies. Test-only org-map helpers were removed from `admin-filters.ts`.
-
-### Implementation notes
-
-- **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
-
-### Code map (observed)
-
-- `requireAdmin` reads comma-separated `ADMIN_USER_IDS`; throws when unset/empty (fails closed — nobody is admin). `isAdmin` / `admin.isAdminQuery` is the non-throwing check the `/admin` layout uses after Convex auth loads.
-- `/admin` (overview): `platformStats` — org count, projects total + draft/published, calls this month (`usageEvents` `by_at` from UTC month start, capped `USAGE_STATS_CAP = 50_000`); `recentUsage` feed + summed recent credits.
-- `/admin/orgs`: `listOrgs` paginated (handle, name, slug, wallet balance).
-- `/admin/projects`: `listProjects` with status/visibility filters; `setProjectVisibility` forces private/public, notifies owning org and fires `project.visibility_changed` webhook on actual transitions only; unchanged retries return current state without duplicate notifications or webhooks (#393).
-- `/admin/payouts`: `listPublisherTransfers`, `retryPublisherTransfer`, `reconcilePublisherTransfer`, finance reconciliation cases (`listFinanceReconciliationCases`, `getFinanceReconciliationCase`, `resolvePublisherTransferReconciliation`, `resolveConnectAccountReconciliation`) — details in [earnings-payouts](earnings-payouts.md).
-- `/admin/reviews`: review moderation, hide/restore requires a recorded reason — details in [reviews](reviews.md).
-- Migration/rollout and legacy transfer repair operators were deleted for fresh deployments (#354). Runtime payout reconciliation and retry operators remain.
-
-### Runbook
-
-- `ADMIN_USER_IDS` Convex env currently = seed test user. Set real admin Clerk user ids for prod.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

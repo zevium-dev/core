@@ -1,10 +1,20 @@
+import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
+import { components, internal } from "./_generated/api";
+const emailLimiter = new RateLimiter(components.rateLimiter, {
+  recipientPages: {
+    kind: "token bucket",
+    rate: 30,
+    period: MINUTE,
+    capacity: 2,
+  },
+});
+import { isActive } from "./lib/identity";
 import { v } from "convex/values";
 import {
   internalMutation,
   internalQuery,
   type QueryCtx,
 } from "./_generated/server";
-import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   notificationMailer,
@@ -31,19 +41,8 @@ async function pendingPage(ctx: QueryCtx, args: PageArgs) {
     notification.emailState !== "pending"
   )
     return null;
-  const org = await ctx.db
-    .query("organizations")
-    .withIndex("by_clerk_org", (q) =>
-      q.eq("clerkOrgId", notification.clerkOrgId),
-    )
-    .unique();
-  const tombstone = await ctx.db
-    .query("organizationTombstones")
-    .withIndex("by_clerk_org", (q) =>
-      q.eq("clerkOrgId", notification.clerkOrgId),
-    )
-    .unique();
-  if (!org || org.archivedAt !== undefined || tombstone) return null;
+  const org = await ctx.db.get(notification.organizationId);
+  if (!org || !(await isActive(ctx, org))) return null;
   return { notification, org };
 }
 
@@ -76,6 +75,15 @@ export const tick = internalMutation({
       console.info("Notification email skipped: email configuration missing", {
         notificationId: args.notificationId,
       });
+      return;
+    }
+    const admission = await emailLimiter.limit(ctx, "recipientPages");
+    if (!admission.ok) {
+      await ctx.scheduler.runAfter(
+        Math.max(2000, admission.retryAfter),
+        internal.notificationEmail.tick,
+        args,
+      );
       return;
     }
     const attempts = current.notification.emailAttempts ?? 0;
@@ -111,7 +119,7 @@ export const enqueueRecipient = internalMutation({
       .query("notificationPreferences")
       .withIndex("by_org_user", (q) =>
         q
-          .eq("clerkOrgId", current.notification.clerkOrgId)
+          .eq("clerkOrgId", current.org.clerkOrgId)
           .eq("clerkUserId", args.clerkUserId),
       )
       .unique();
@@ -163,7 +171,7 @@ export const completePage = internalMutation({
       emailOffset: args.nextOffset,
       emailAttempts: 0,
     });
-    await ctx.scheduler.runAfter(0, internal.notificationEmail.tick, {
+    await ctx.scheduler.runAfter(2000, internal.notificationEmail.tick, {
       notificationId: args.notificationId,
       revision: args.revision,
       offset: args.nextOffset,

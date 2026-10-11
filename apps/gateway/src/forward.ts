@@ -1,6 +1,7 @@
 import { filterRequestHeaders } from "./headers";
 import { scopeUpstreamIdempotencyKey } from "./idempotency";
-import type { Admission } from "./admit";
+import type { PublishedSpec } from "./spec-source";
+import type { VerifiedKey } from "./key-verifier";
 
 const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
 export type ForwardResult = { response: Response } | { timedOut: boolean };
@@ -8,8 +9,10 @@ export type ForwardResult = { response: Response } | { timedOut: boolean };
 /** Forward once, preserving the request body stream and bounded header wait. */
 export async function forward(
   request: Request,
-  admission: Pick<Admission, "published" | "verified" | "upstreamUrl"> & {
-    tokenRequest?: Admission["tokenRequest"];
+  admission: {
+    published: PublishedSpec;
+    verified: VerifiedKey;
+    upstreamUrl: URL;
   },
   fetchImpl: typeof fetch = fetch,
   prepareResponse?: (response: Response) => Promise<Response>,
@@ -37,8 +40,7 @@ export async function forward(
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = admission.tokenRequest?.body ?? request.body;
-    if (admission.tokenRequest) upstreamHeaders.delete("content-length");
+    init.body = request.body;
     // Required by fetch when body is a stream.
     init.duplex = "half";
   }

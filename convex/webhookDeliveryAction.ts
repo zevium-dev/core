@@ -3,11 +3,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import {
-  decryptSecret,
-  requireEncryptedSecret,
-  webhookBinding,
-} from "./lib/credentialCrypto";
+import { decryptSecret, webhookBinding } from "./lib/credentialCrypto";
 import { postWebhook } from "./lib/webhookDelivery";
 import { deliverPinnedHttps } from "./lib/webhookTransport";
 
@@ -44,7 +40,7 @@ export const deliverWebhook = internalAction({
     let signingSecret: string;
     try {
       signingSecret = await decryptSecret(
-        requireEncryptedSecret(info.encryptedSecret),
+        info.encryptedSecret,
         webhookBinding(info.projectId, info.secretVersion),
       );
     } catch {
@@ -81,7 +77,7 @@ export const deliverWebhook = internalAction({
         data: parsed.data,
         // Retry bodies get fresh signed attempt time while retaining stable id.
         timestamp: Date.now(),
-        deliveryId: String(args.deliveryId),
+        deliveryId: info.deliveryId,
         secretVersion: info.secretVersion,
       },
       deliverPinnedHttps,

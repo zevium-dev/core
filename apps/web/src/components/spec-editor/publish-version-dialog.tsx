@@ -17,9 +17,7 @@ import {
 } from "#/components/ui/dialog";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
-import { api as legacyApi } from "../../../../../convex/_generated/api";
-import { api as nextApi } from "#/lib/convex-api.next";
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
+import { api as nextApi } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 
 import type { SpecWorkspaceProps } from "./spec-workspace";
@@ -72,17 +70,14 @@ export function PublishVersionDialog({
   const version =
     versionInput ?? defaultNextVersion(versions.map((v) => v.version));
   const versionInputRef = useRef<HTMLInputElement>(null);
-  const publishLegacy = useConvexMutation(legacyApi.specs.publish);
   const publishNext = useConvexMutation(nextApi.specs.publish);
   const { mutate: publish, isPending: publishPending } = useMutation({
     mutationFn: async () =>
-      NEXT_CONTROL_PLANE
-        ? publishNext({
-            projectId,
-            version: version.trim(),
-            draftHash: draftHash ?? "",
-          })
-        : publishLegacy({ projectId, version: version.trim() }),
+      publishNext({
+        projectId,
+        version: version.trim(),
+        draftHash: draftHash ?? "",
+      }),
     onSuccess: (result) => {
       if ("conflict" in result && result.conflict) {
         onConflict({

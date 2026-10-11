@@ -1,8 +1,7 @@
 # Publisher analytics
 
-> Status: #398 fixed; partial (P0) · Updated: 2026-10-11
-> Rebuild status: isolated PR 3 settlement projection implemented; production reads and cutover unchanged.
-> Code: `packages/control-plane-next/convex/money/rollups.ts`, `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/components/publisher-earnings-display.test.tsx`, `convex/earnings.test.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{analytics,earnings,usage}.ts`, `convex/money/rollups.ts`, `apps/web/src/lib/analytics-view.ts`, `tests/readSurfaces.test.ts`
 > Related: [wallet-billing](wallet-billing.md) (usage ingest pipe), [gateway](gateway.md), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
 Per-project dashboards for publishers: calls, revenue, tail latency, and error breakdown per endpoint, live-updating. Built from per-call usage events emitted by the gateway. Positioned to beat the dead incumbent's analytics. Usage events arrive through the usage ingest pipe owned by [wallet-billing](wallet-billing.md).
@@ -27,43 +26,9 @@ Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)"
 
 ## Tech
 
-### PR #442 review fixes — 2026-10-11
+Accepted settlement commits exact financial/call rollups once per ref. Summary queries use finite shard fan-in; project analytics use indexed project/day rows. Execution-day analytics and acceptance-day risk inventory are separate. p50/p95/p99 are labeled histogram bounds, overflow 30 seconds or more. Detail scans are bounded and marked partial; newest-day billing caps and per-project earnings remain scoped. Member usage redacts peers; earnings/analytics aggregates require org admin.
 
-**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
-
-Next project endpoint reads use `by_project_dimension_day(kind,scope,scopeId,projectId,dimension,day)` with newest-day ordering before the 4,000-row cap; `recordRollups` writes the project prefix. Billing breakdowns also read newest days first, retaining explicit truncation flags. All earnings aggregate reads now require org admin, consistent with analytics permissions. Code: `packages/control-plane-next/convex/{analytics,earnings}.ts`, `lib/billingRead.ts`, `money/rollups.ts`, `schema/settlement.ts`.
-
-### Isolated rebuild PR 6 — 2026-10-11
-
-**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
-
-Next project analytics is admin-only. Exact daily shard totals are independent of event volume; latency percentiles report histogram bounds with explicit UI labels. Endpoint detail is bounded to 4,000 dimension rows and flags partial results. Consumer overview uses org totals for admins and own-member rollups/redacted recent rows for members.
-
-Code pointers: `packages/control-plane-next/convex/analytics.ts`; `packages/control-plane-next/convex/lib/readRollups.ts`; `apps/web/src/routes/app/projects/$projectSlug.tsx`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
-
-### Isolated rebuild PR 3 — 2026-10-11
-
-Settlement now writes sharded daily/lifetime call, gross/net and fixed-bucket latency metrics with usage. Call metrics use execution day; publisher total/project risk inventory uses acceptance day. Free successful calls retain consumer-project eligibility. Read surfaces and histogram labeling remain PR 6. [Implementation and handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
-
-- **Earnings precision (#398)**: analytics sums canonical `publisherNetAtoms` and converts once with `atomsToCredits`, matching statement and payout-ledger reads. Analytics, project earnings, and organization earnings use `formatPublisherCredits` (fixed two decimals); USD equivalents use the shared `formatCreditsAsUsd`. Two 7-credit calls display 13.30 net credits everywhere.
-
-- **Shared presentation (#363)**: daily and endpoint tables use stock shadcn Table; day labels use shared UTC `lib/format.ts`. Visibility mutations rely on Convex subscriptions without manual cache invalidation.
-  **Dogfood — 2026-10-10**
-
-- **P2 #398:** two 7-credit calls produced 13.30 publisher credits in the earnings ledger, but Analytics rounded that figure to 13. Calls, success rate and gross spend agreed; this finding concerns display precision, not a ledger discrepancy.
-  Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
-
-### Domain
-
-- `usageEvents` (per-call: project, endpoint, org, credits, latency, status) + rollup tables via cron (publisher analytics p95/p99 come from here)
-
-### Code map (observed)
-
-- `analytics.projectAnalytics({ orgSlug, projectSlug, rangeDays })`: `requireOrgMemberBySlug` then `requireOrgAdmin`. `rangeDays` default 7, clamped to ≤90; UI offers 7 / 30 / 90 (`ANALYTICS_RANGES`). Scans `usageEvents` `by_project_at` from UTC day window start, capped at `PROJECT_SCAN_CAP = 10_000` (`truncated` flag returned).
-- Returns: `calls`, `credits`, `netCredits` (publisher net after platform fee), `successRate`, `p50`/`p95`/`p99`, `errors4xx`, `errors5xx`, per-endpoint `EndpointStats` (method, endpoint, calls, credits, errors4xx, errors5xx, success, p50/p95/p99), `callsByDay` (oldest→newest, length `rangeDays`).
-- Percentiles: linear-interpolated over sorted latencies, computed in-query. Status classes: 2xx–3xx ok, 4xx, 5xx, other.
-- Live updates come from Convex query reactivity (no polling).
-- `analytics.orgOverview` (wallet + today/cycle usage + recent 20, `ORG_SCAN_CAP = 5_000`) feeds the consumer `/app` dashboard, not publisher analytics.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

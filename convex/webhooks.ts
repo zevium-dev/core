@@ -1,440 +1,199 @@
 import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import {
-  internalMutation,
-  internalQuery,
-  mutation,
   query,
+  mutation,
+  internalMutation,
   type MutationCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import { requireProjectAdmin } from "./lib/auth";
+import { isActive } from "./lib/identity";
 import {
-  getActiveOrgById,
-  requireOrgAdmin,
-  requireProjectAdmin,
-  requireProjectMember,
-} from "./lib/auth";
-import {
-  decryptSecret,
   encryptSecret,
-  requireEncryptedSecret,
+  decryptSecret,
   webhookBinding,
-  type EncryptedSecret,
-  type StoredEncryptedSecret,
 } from "./lib/credentialCrypto";
-import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
-import { publicReference } from "./lib/publicIds";
-
+import { createNotification } from "./lib/notifications";
 export { validateWebhookUrl } from "./lib/webhookDelivery";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Max delivery attempts before marking failed. */
-export const MAX_WEBHOOK_ATTEMPTS = 3;
-
-/** Backoff seconds between retries: after attempt 1 → 60s, after attempt 2 → 300s. */
-export const WEBHOOK_BACKOFF_SECONDS = [60, 300] as const;
-export const DEFAULT_WEBHOOK_SECRET_GRACE_SECONDS = 60 * 60;
-export const MAX_WEBHOOK_SECRET_GRACE_SECONDS = 24 * 60 * 60;
-
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
-
-/** Generate a random signing secret. */
-function generateSecret(): string {
-  return `${crypto.randomUUID()}.${crypto.randomUUID()}`;
-}
-
-export type WebhookEndpointMetadata = {
-  url: string;
-  active: boolean;
-  secretVersion: number;
-  createdAt: number;
-};
-
-function endpointMetadata(
-  endpoint: Doc<"webhookEndpoints">,
-): WebhookEndpointMetadata {
-  return {
-    url: endpoint.url,
-    active: endpoint.active,
-    secretVersion: endpoint.secretVersion ?? 1,
-    createdAt: endpoint.createdAt,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Webhook event firing (called from other modules' mutations)
-// ---------------------------------------------------------------------------
-
-/**
- * Queue a webhook delivery for a project's endpoint.
- * No-op when endpoint missing or inactive.
- * Called from specs.publish, specs.deprecateVersion, admin.setProjectVisibility.
- */
+const metadata = (w: NonNullable<Doc<"projects">["webhook"]>) => ({
+  url: w.url,
+  active: w.active,
+  secretVersion: w.secretVersion,
+  createdAt: w.createdAt,
+});
+const status = (state: Doc<"webhookDeliveries">["state"]) =>
+  state === "complete"
+    ? ("ok" as const)
+    : state === "needs_review"
+      ? ("failed" as const)
+      : state === "processing"
+        ? ("delivering" as const)
+        : ("pending" as const);
 export async function fireWebhookEvent(
   ctx: MutationCtx,
   projectId: Id<"projects">,
   event: string,
   data: unknown,
-): Promise<void> {
-  const project = await ctx.db.get(projectId);
+) {
+  const p = await ctx.db.get(projectId),
+    org = p && (await ctx.db.get(p.organizationId));
   if (
-    project === null ||
-    (await getActiveOrgById(ctx, project.organizationId)) === null
-  ) {
+    !p?.webhook?.active ||
+    p.retirement?.state === "retired" ||
+    !org ||
+    !(await isActive(ctx, org))
+  )
     return;
-  }
-  const endpoint = await ctx.db
-    .query("webhookEndpoints")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (endpoint === null || !endpoint.active) return;
-
-  const timestamp = Date.now();
-  const payload = JSON.stringify({ event, data, timestamp });
-  const secretVersion = endpoint.secretVersion ?? 1;
-  const deliveryId = await ctx.db.insert("webhookDeliveries", {
-    endpointId: endpoint._id,
-    secretVersion,
+  const deliveryId = crypto.randomUUID();
+  const id = await ctx.db.insert("webhookDeliveries", {
+    projectId,
+    deliveryId,
     event,
-    status: "pending",
+    payload: JSON.stringify({ event, data, timestamp: Date.now() }),
+    secretVersion: p.webhook.secretVersion,
+    state: "pending",
     attempts: 0,
-    createdAt: timestamp,
-    payload,
+    nextAttemptAt: Date.now(),
+    createdAt: Date.now(),
   });
-
   await ctx.scheduler.runAfter(
     0,
     internal.webhookDeliveryAction.deliverWebhook,
-    {
-      deliveryId,
-    },
+    { deliveryId: id },
   );
 }
-
-// ---------------------------------------------------------------------------
-// Public API — endpoint CRUD
-// ---------------------------------------------------------------------------
-
-/**
- * Create or update the webhook endpoint for a project (one per project).
- * Secret auto-generated on create, preserved on update.
- */
+export const getEndpoint = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    return project.webhook ? metadata(project.webhook) : null;
+  },
+});
 export const upsertEndpoint = mutation({
   args: {
     projectId: v.id("projects"),
     url: v.string(),
     active: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<WebhookEndpointMetadata> => {
-    await requireProjectAdmin(ctx, args.projectId);
-
-    const url = args.url.trim();
-    if (!validateWebhookUrl(url)) {
-      throw new Error("URL must be a public https endpoint");
-    }
-
-    const existing = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-
-    if (existing === null) {
-      let encryptedSecret: EncryptedSecret;
-      try {
-        encryptedSecret = await encryptSecret(
-          generateSecret(),
-          webhookBinding(args.projectId),
-        );
-      } catch {
-        throw new Error("Signing secret could not be created");
-      }
-      const id = await ctx.db.insert("webhookEndpoints", {
-        projectId: args.projectId,
-        url,
-        ...encryptedSecret,
-        secretVersion: 1,
-        active: args.active ?? true,
-        createdAt: Date.now(),
-      });
-      const created = await ctx.db.get(id);
-      if (created === null) throw new Error("Failed to create endpoint");
-      return endpointMetadata(created);
-    }
-    if (existing.retiringAt !== undefined) {
-      throw new Error("Webhook endpoint is being deleted");
-    }
-
-    await ctx.db.patch(existing._id, {
-      url,
-      active: args.active ?? existing.active,
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId),
+      url = args.url.trim();
+    if (url.length > 2048 || !validateWebhookUrl(url))
+      throw new ConvexError("URL must be a public HTTPS endpoint");
+    const secretVersion = project.revision + 1;
+    const webhook = project.webhook
+      ? {
+          ...project.webhook,
+          url,
+          active: args.active ?? project.webhook.active,
+        }
+      : {
+          url,
+          active: args.active ?? true,
+          current: await encryptSecret(
+            `${crypto.randomUUID()}.${crypto.randomUUID()}`,
+            webhookBinding(project._id, secretVersion),
+          ),
+          secretVersion,
+          createdAt: Date.now(),
+        };
+    await ctx.db.patch(project._id, {
+      webhook,
+      revision: project.revision + 1,
     });
-    const updated = await ctx.db.get(existing._id);
-    if (updated === null) throw new Error("Failed to load endpoint");
-    return endpointMetadata(updated);
+    return metadata(webhook);
   },
 });
-
-/** Fetch non-secret webhook endpoint metadata for an admin. */
-export const getEndpoint = query({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<WebhookEndpointMetadata | null> => {
-    await requireProjectAdmin(ctx, args.projectId);
-    const endpoint = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    return endpoint === null || endpoint.retiringAt !== undefined
-      ? null
-      : endpointMetadata(endpoint);
-  },
-});
-
-/** Explicit, ephemeral signing-secret reveal. Never returned from CRUD reads. */
 export const revealSecret = mutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<{ secret: string } | null> => {
-    await requireProjectAdmin(ctx, args.projectId);
-    const endpoint = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (endpoint === null || endpoint.retiringAt !== undefined) return null;
-    if (endpoint.secretRevealedAt !== undefined) return null;
-
-    try {
-      const secret = await decryptSecret(
-        requireEncryptedSecret(endpoint),
-        webhookBinding(args.projectId, endpoint.secretVersion ?? 1),
-      );
-      await ctx.db.patch(endpoint._id, { secretRevealedAt: Date.now() });
-      return {
-        secret,
-      };
-    } catch {
-      throw new Error("Signing secret is unavailable");
-    }
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId),
+      w = project.webhook;
+    if (!w || w.revealedAt !== undefined) return null;
+    const secret = await decryptSecret(
+      w.current,
+      webhookBinding(project._id, w.secretVersion),
+    );
+    await ctx.db.patch(project._id, {
+      webhook: { ...w, revealedAt: Date.now() },
+    });
+    return { secret };
   },
 });
-
-/** Rotate signing material. Returned cleartext is the sole reveal for this version. */
 export const rotateSecret = mutation({
-  args: {
-    projectId: v.id("projects"),
-    graceSeconds: v.optional(v.number()),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    secret: string;
-    secretVersion: number;
-    previousValidUntil: number;
-  }> => {
-    await requireProjectAdmin(ctx, args.projectId);
-    const graceSeconds =
-      args.graceSeconds ?? DEFAULT_WEBHOOK_SECRET_GRACE_SECONDS;
-    if (
-      !Number.isSafeInteger(graceSeconds) ||
-      graceSeconds < 0 ||
-      graceSeconds > MAX_WEBHOOK_SECRET_GRACE_SECONDS
-    ) {
-      throw new Error("Webhook secret grace must be 0 to 86400 seconds");
-    }
-    const endpoint = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (endpoint === null || endpoint.retiringAt !== undefined) {
-      throw new Error("Webhook endpoint not found");
-    }
-    if ((endpoint.previousValidUntil ?? 0) > Date.now()) {
-      throw new Error("Previous webhook secret grace period is still active");
-    }
-    const currentVersion = endpoint.secretVersion ?? 1;
-    try {
-      await decryptSecret(
-        requireEncryptedSecret(endpoint),
-        webhookBinding(args.projectId, currentVersion),
-      );
-    } catch {
-      throw new Error("Signing secret is unavailable");
-    }
-
-    const secretVersion = currentVersion + 1;
-    const secret = generateSecret();
-    let encrypted: EncryptedSecret;
-    try {
-      encrypted = await encryptSecret(
-        secret,
-        webhookBinding(args.projectId, secretVersion),
-      );
-    } catch {
-      throw new Error("Signing secret could not be rotated");
-    }
-    const now = Date.now();
-    const previousValidUntil = now + graceSeconds * 1000;
-    await ctx.db.patch(endpoint._id, {
-      ...encrypted,
-      secret: undefined,
-      secretVersion,
-      // Rotation response is the one-time reveal.
-      secretRevealedAt: now,
-      previousCiphertext: endpoint.ciphertext,
-      previousIv: endpoint.iv,
-      previousKeyVersion: endpoint.keyVersion,
-      previousSealedCiphertext: endpoint.sealedCiphertext,
-      previousSealedIv: endpoint.sealedIv,
-      previousSealedKeyVersion: endpoint.sealedKeyVersion,
-      previousSealedVersion: endpoint.sealedVersion === "v2" ? "v2" : undefined,
-      previousSecretVersion: currentVersion,
-      previousValidUntil,
+  args: { projectId: v.id("projects"), graceSeconds: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId),
+      w = project.webhook;
+    if (!w) throw new ConvexError("Webhook endpoint not found");
+    const grace = args.graceSeconds ?? 3600;
+    if (!Number.isSafeInteger(grace) || grace < 0 || grace > 86400)
+      throw new ConvexError("Secret grace must be between 0 and 86400 seconds");
+    const secret = `${crypto.randomUUID()}.${crypto.randomUUID()}`,
+      secretVersion = Math.max(project.revision, w.secretVersion) + 1,
+      previousValidUntil = Date.now() + grace * 1000;
+    await ctx.db.patch(project._id, {
+      revision: secretVersion,
+      webhook: {
+        ...w,
+        current: await encryptSecret(
+          secret,
+          webhookBinding(project._id, secretVersion),
+        ),
+        secretVersion,
+        revealedAt: Date.now(),
+        previous: w.current,
+        previousVersion: w.secretVersion,
+        previousValidUntil,
+      },
     });
     return { secret, secretVersion, previousValidUntil };
   },
 });
-
-/** Delete the webhook endpoint for a project. */
 export const deleteEndpoint = mutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<{ deleted: boolean }> => {
-    await requireProjectAdmin(ctx, args.projectId);
-    const existing = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (existing === null) return { deleted: false };
-    await ctx.db.patch(existing._id, { active: false });
-    await ctx.db.delete(existing._id);
-    return { deleted: true };
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    await ctx.db.patch(project._id, {
+      webhook: undefined,
+      revision: project.revision + 1,
+    });
+    return { deleted: project._id };
   },
 });
-
-/** Paginated delivery log for a project's endpoint, newest first. */
 export const listDeliveries = query({
   args: {
     projectId: v.id("projects"),
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
-    const { claims } = await requireProjectMember(ctx, args.projectId);
-    requireOrgAdmin(claims);
-    const endpoint = await ctx.db
-      .query("webhookEndpoints")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (endpoint === null) {
-      return {
-        page: [] as Array<{
-          id: string;
-          event: string;
-          status: Doc<"webhookDeliveries">["status"];
-          attempts: number;
-          lastError?: string;
-          createdAt: number;
-          secretVersion: number;
-        }>,
-        isDone: true,
-        continueCursor: "",
-      };
-    }
-    const result = await ctx.db
+    await requireProjectAdmin(ctx, args.projectId);
+    const rows = await ctx.db
       .query("webhookDeliveries")
-      .withIndex("by_endpoint", (q) => q.eq("endpointId", endpoint._id))
+      .withIndex("by_project_time", (q) => q.eq("projectId", args.projectId))
       .order("desc")
-      .paginate(args.paginationOpts);
+      .paginate({
+        ...args.paginationOpts,
+        numItems: Math.min(50, Math.max(1, args.paginationOpts.numItems)),
+        maximumRowsRead: 51,
+      });
     return {
-      ...result,
-      page: await Promise.all(
-        result.page.map(async (delivery) => ({
-          id: await publicReference("webhook-delivery", String(delivery._id)),
-          event: delivery.event,
-          status: delivery.status,
-          attempts: delivery.attempts,
-          lastError: delivery.lastError,
-          createdAt: delivery.createdAt,
-          secretVersion: delivery.secretVersion ?? 1,
-        })),
-      ),
+      ...rows,
+      page: rows.page.map((d) => ({
+        id: d.deliveryId,
+        event: d.event,
+        status: status(d.state),
+        attempts: d.attempts,
+        lastError: d.lastErrorCode,
+        createdAt: d.createdAt,
+        secretVersion: d.secretVersion,
+      })),
     };
   },
 });
-
-// ---------------------------------------------------------------------------
-// Internal — delivery lifecycle
-// ---------------------------------------------------------------------------
-
-const WEBHOOK_DELIVERY_LEASE_MS = 30_000;
-
-function currentSecretEnvelope(
-  endpoint: Doc<"webhookEndpoints">,
-): StoredEncryptedSecret {
-  return {
-    ciphertext: endpoint.ciphertext,
-    iv: endpoint.iv,
-    keyVersion: endpoint.keyVersion,
-    sealedCiphertext: endpoint.sealedCiphertext,
-    sealedIv: endpoint.sealedIv,
-    sealedKeyVersion: endpoint.sealedKeyVersion,
-    sealedVersion: endpoint.sealedVersion,
-    secret: endpoint.secret,
-  };
-}
-
-function previousSecretEnvelope(
-  endpoint: Doc<"webhookEndpoints">,
-): StoredEncryptedSecret {
-  return {
-    ciphertext: endpoint.previousCiphertext,
-    iv: endpoint.previousIv,
-    keyVersion: endpoint.previousKeyVersion,
-    sealedCiphertext: endpoint.previousSealedCiphertext,
-    sealedIv: endpoint.previousSealedIv,
-    sealedKeyVersion: endpoint.previousSealedKeyVersion,
-    sealedVersion: endpoint.previousSealedVersion,
-  };
-}
-
-/** Load delivery + endpoint join state for cleanup assertions. */
-export const getDeliveryForAction = internalQuery({
-  args: { deliveryId: v.id("webhookDeliveries") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    url: string;
-    active: boolean;
-    event: string;
-    status: Doc<"webhookDeliveries">["status"];
-  } | null> => {
-    const delivery = await ctx.db.get(args.deliveryId);
-    if (delivery === null) return null;
-    const endpoint = await ctx.db.get(delivery.endpointId);
-    if (endpoint === null) return null;
-    const project = await ctx.db.get(endpoint.projectId);
-    if (
-      project === null ||
-      project.retiredAt !== undefined ||
-      project.deletionState !== undefined
-    ) {
-      return null;
-    }
-    return {
-      url: endpoint.url,
-      active: endpoint.active,
-      event: delivery.event,
-      status: delivery.status,
-    };
-  },
-});
-
-/** Transactional claim prevents concurrent scheduled actions from double-POSTing. */
 export const claimDelivery = internalMutation({
   args: {
     deliveryId: v.id("webhookDeliveries"),
@@ -442,100 +201,81 @@ export const claimDelivery = internalMutation({
     expectedExpiredLeaseToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    if (args.leaseToken.length < 16 || args.leaseToken.length > 128) {
-      throw new Error("Webhook delivery lease is invalid");
-    }
-    const delivery = await ctx.db.get(args.deliveryId);
+    const d = await ctx.db.get(args.deliveryId),
+      now = Date.now();
     if (
-      delivery === null ||
-      delivery.status === "ok" ||
-      delivery.status === "failed"
-    ) {
+      !d ||
+      d.state === "complete" ||
+      d.state === "needs_review" ||
+      (d.state === "processing" && (d.leaseUntil ?? 0) > now) ||
+      (d.nextAttemptAt ?? 0) > now
+    )
       return null;
-    }
-    const now = Date.now();
     if (
       args.expectedExpiredLeaseToken !== undefined &&
-      (delivery.status !== "delivering" ||
-        delivery.leaseToken !== args.expectedExpiredLeaseToken ||
-        (delivery.leaseUntil ?? 0) > now)
-    ) {
+      (d.state !== "processing" ||
+        d.leaseToken !== args.expectedExpiredLeaseToken)
+    )
       return null;
-    }
-    if (delivery.status === "delivering" && (delivery.leaseUntil ?? 0) > now) {
-      return null;
-    }
-    const endpoint = await ctx.db.get(delivery.endpointId);
-    if (endpoint === null) {
-      await ctx.db.patch(delivery._id, {
-        status: "failed",
-        attempts: delivery.attempts + 1,
-        lastError: "Endpoint retired",
-        leaseToken: undefined,
-        leaseUntil: undefined,
-      });
-      return null;
-    }
-    const project = await ctx.db.get(endpoint.projectId);
+    const p = await ctx.db.get(d.projectId),
+      w = p?.webhook,
+      org = p && (await ctx.db.get(p.organizationId));
+    const encryptedSecret =
+      w &&
+      (d.secretVersion === w.secretVersion
+        ? w.current
+        : d.secretVersion === w.previousVersion &&
+            (w.previousValidUntil ?? 0) > now
+          ? w.previous
+          : undefined);
     if (
-      project === null ||
-      project.retiredAt !== undefined ||
-      project.deletionState !== undefined
+      !p ||
+      !w ||
+      !encryptedSecret ||
+      p.retirement?.state === "retired" ||
+      !org ||
+      !(await isActive(ctx, org)) ||
+      d.attempts >= 3
     ) {
-      return null;
-    }
-    const secretVersion = delivery.secretVersion ?? 1;
-    const currentVersion = endpoint.secretVersion ?? 1;
-    let encryptedSecret: StoredEncryptedSecret;
-    if (secretVersion === currentVersion) {
-      encryptedSecret = currentSecretEnvelope(endpoint);
-    } else if (
-      secretVersion === endpoint.previousSecretVersion &&
-      (endpoint.previousValidUntil ?? 0) > now
-    ) {
-      encryptedSecret = previousSecretEnvelope(endpoint);
-    } else {
-      await ctx.db.patch(delivery._id, {
-        status: "failed",
-        attempts: delivery.attempts + 1,
-        lastError: "Signing secret generation expired",
+      await ctx.db.patch(d._id, {
+        state: "needs_review",
+        lastErrorCode: "Endpoint or signing generation unavailable",
         leaseToken: undefined,
         leaseUntil: undefined,
       });
+      if (p && org && (await isActive(ctx, org)))
+        await createNotification(ctx, {
+          organizationId: p.organizationId,
+          kind: "webhook_failed",
+          title: "Webhook delivery needs review",
+          body: `Delivery of ${d.event} exhausted its lease or signing generation.`,
+          refId: `webhook_failed:${d._id}`,
+        });
       return null;
     }
-    const leaseUntil = now + WEBHOOK_DELIVERY_LEASE_MS;
-    await ctx.db.patch(delivery._id, {
-      status: "delivering",
+    await ctx.db.patch(d._id, {
+      state: "processing",
+      attempts: d.attempts + 1,
       leaseToken: args.leaseToken,
-      leaseUntil,
+      leaseUntil: now + 30000,
+      nextAttemptAt: undefined,
     });
-    // Lost claimant recovery. Wake-up can reacquire only after exact expiry.
     await ctx.scheduler.runAfter(
-      WEBHOOK_DELIVERY_LEASE_MS,
+      30000,
       internal.webhookDeliveryAction.deliverWebhook,
-      {
-        deliveryId: delivery._id,
-        recoveryLeaseToken: args.leaseToken,
-      },
+      { deliveryId: d._id, recoveryLeaseToken: args.leaseToken },
     );
     return {
-      url: endpoint.url,
+      url: w.url,
+      deliveryId: d.deliveryId,
       encryptedSecret,
-      secretVersion,
-      projectId: endpoint.projectId,
-      active: endpoint.active && endpoint.retiringAt === undefined,
-      event: delivery.event,
-      payload: delivery.payload,
-      attempts: delivery.attempts,
+      secretVersion: d.secretVersion,
+      projectId: p._id,
+      active: w.active && w.retiringAt === undefined,
+      payload: d.payload,
     };
   },
 });
-
-/**
- * Record a delivery attempt result and manage retry/failure state machine.
- * On final failure, marks delivery failed + fires webhook_failed notification.
- */
 export const recordDeliveryAttempt = internalMutation({
   args: {
     deliveryId: v.id("webhookDeliveries"),
@@ -544,70 +284,68 @@ export const recordDeliveryAttempt = internalMutation({
     retryable: v.optional(v.boolean()),
     leaseToken: v.string(),
   },
-  handler: async (ctx, args): Promise<void> => {
-    const delivery = await ctx.db.get(args.deliveryId);
-    if (delivery === null) return;
-    // Duplicate actions can race after both read `pending`. Convex retries this
-    // mutation on OCC, so re-check makes result/schedule/notification exact-once.
-    if (
-      delivery.status !== "delivering" ||
-      delivery.leaseToken !== args.leaseToken
-    ) {
+  handler: async (ctx, args) => {
+    const d = await ctx.db.get(args.deliveryId);
+    if (!d || d.state !== "processing" || d.leaseToken !== args.leaseToken)
       return;
-    }
-
-    const nextAttempts = delivery.attempts + 1;
-
-    if (args.ok) {
-      await ctx.db.patch(args.deliveryId, {
-        status: "ok",
-        attempts: nextAttempts,
-        leaseToken: undefined,
-        leaseUntil: undefined,
-      });
-      return;
-    }
-
-    if (args.retryable !== false && nextAttempts < MAX_WEBHOOK_ATTEMPTS) {
-      await ctx.db.patch(args.deliveryId, {
-        status: "pending",
-        attempts: nextAttempts,
-        lastError: args.error,
-        leaseToken: undefined,
-        leaseUntil: undefined,
-      });
-      const backoffIndex = nextAttempts - 1;
-      const backoffSec = WEBHOOK_BACKOFF_SECONDS[backoffIndex] ?? 300;
-      await ctx.scheduler.runAfter(
-        backoffSec * 1000,
-        internal.webhookDeliveryAction.deliverWebhook,
-        { deliveryId: args.deliveryId },
-      );
-      return;
-    }
-
-    // Final failure — mark failed + notify publisher org.
-    await ctx.db.patch(args.deliveryId, {
-      status: "failed",
-      attempts: nextAttempts,
-      lastError: args.error,
+    const retry = !args.ok && args.retryable !== false && d.attempts < 3,
+      nextAttemptAt = retry
+        ? Date.now() + (d.attempts === 1 ? 60000 : 300000)
+        : undefined;
+    await ctx.db.patch(d._id, {
+      state: args.ok ? "complete" : retry ? "retry" : "needs_review",
       leaseToken: undefined,
       leaseUntil: undefined,
+      nextAttemptAt,
+      lastErrorCode: args.ok ? undefined : "Delivery failed",
     });
-
-    const endpoint = await ctx.db.get(delivery.endpointId);
-    if (endpoint === null) return;
-    const project = await ctx.db.get(endpoint.projectId);
-    if (project === null) return;
-    const org = await ctx.db.get(project.organizationId);
-    if (org === null) return;
-
-    await createNotification(ctx, {
-      clerkOrgId: org.clerkOrgId,
-      kind: "webhook_failed",
-      title: "Webhook delivery failed",
-      body: `Delivery of "${delivery.event}" failed after ${nextAttempts} attempt${nextAttempts === 1 ? "" : "s"}${args.error !== undefined ? `: ${args.error}` : ""}.`,
-      refId: `webhook_failed:${args.deliveryId}`,
-    });
+    if (retry)
+      await ctx.scheduler.runAt(
+        nextAttemptAt!,
+        internal.webhookDeliveryAction.deliverWebhook,
+        { deliveryId: d._id },
+      );
+    else if (!args.ok) {
+      const p = await ctx.db.get(d.projectId);
+      if (p)
+        await createNotification(ctx, {
+          organizationId: p.organizationId,
+          kind: "webhook_failed",
+          title: "Webhook delivery failed",
+          body: `Delivery of ${d.event} failed after ${d.attempts} attempts.`,
+          refId: `webhook_failed:${d._id}`,
+        });
+    }
+  },
+});
+export const recover = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    for (const state of ["pending", "retry"] as const) {
+      const rows = await ctx.db
+        .query("webhookDeliveries")
+        .withIndex("by_due", (q) =>
+          q.eq("state", state).lte("nextAttemptAt", Date.now()),
+        )
+        .take(25);
+      for (const d of rows)
+        await ctx.scheduler.runAfter(
+          0,
+          internal.webhookDeliveryAction.deliverWebhook,
+          { deliveryId: d._id },
+        );
+    }
+    const rows = await ctx.db
+      .query("webhookDeliveries")
+      .withIndex("by_lease", (q) =>
+        q.eq("state", "processing").lte("leaseUntil", Date.now()),
+      )
+      .take(25);
+    for (const d of rows)
+      await ctx.scheduler.runAfter(
+        0,
+        internal.webhookDeliveryAction.deliverWebhook,
+        { deliveryId: d._id, recoveryLeaseToken: d.leaseToken },
+      );
   },
 });

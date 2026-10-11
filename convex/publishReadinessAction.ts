@@ -1,7 +1,5 @@
 "use node";
 
-import { isPrivilegedOrgRole } from "@zevium/shared";
-
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -28,20 +26,10 @@ export type ConnectionResult = {
 export const testConnection = action({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<ConnectionResult> => {
-    const identity = await ctx.auth.getUserIdentity();
-    const raw = identity as Record<string, unknown> | null;
-    const clerkOrgId = typeof raw?.org_id === "string" ? raw.org_id : undefined;
-    if (!clerkOrgId)
-      throw new Error("Choose an organization before testing a connection");
-    if (
-      !isPrivilegedOrgRole(
-        typeof raw?.org_role === "string" ? raw.org_role : undefined,
-      )
-    ) {
-      throw new Error(
-        "Only organization admins can test upstream reachability",
-      );
-    }
+    const { clerkOrgId } = await ctx.runMutation(
+      internal.publishReadiness.authorizeTest,
+      args,
+    );
     const target = await ctx.runQuery(internal.publishReadiness.getTarget, {
       projectId: args.projectId,
       clerkOrgId,
@@ -71,6 +59,7 @@ export const testConnection = action({
       await ctx.runMutation(internal.publishReadiness.recordPassingTest, {
         projectId: args.projectId,
         draftHash: target.draftHash,
+        credentialFingerprint: target.credentialFingerprint,
         healthCheckUrl: target.url,
         healthCheckMethod: target.method,
       });

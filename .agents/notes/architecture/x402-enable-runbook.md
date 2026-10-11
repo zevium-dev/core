@@ -1,3 +1,5 @@
+> Historical only after PR 7 (2026-10-11): legacy x402 runtime and schema are deleted. Current code cannot enable this rail. A new implementation review and owner approval are required; see [cutover activation](convex-activation.md).
+
 # Re-enable x402 wallet payments
 
 > Updated: 2026-10-11 · Status: disabled by owner decision; implementation retained

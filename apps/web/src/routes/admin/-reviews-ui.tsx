@@ -1,6 +1,3 @@
-import { api as nextApi } from "#/lib/convex-api.next";
-import { api as legacyApi } from "../../../../../convex/_generated/api";
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { formatDateTime } from "#/lib/format";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -84,17 +81,7 @@ export function AdminReviewsQueue({
       ...(cursor === null ? {} : { cursor }),
     }),
   );
-  const moderateLegacy = useConvexMutation(legacyApi.reviews.moderate);
-  const moderateNext = useConvexMutation(nextApi.reviews.moderate);
-  const moderate = (
-    args: Omit<ModerationTarget, "projectName"> & { reason: string },
-  ) =>
-    NEXT_CONTROL_PLANE
-      ? moderateNext(args)
-      : moderateLegacy({
-          ...args,
-          action: args.action === "dismissed" ? "restored" : args.action,
-        });
+  const moderate = useConvexMutation(api.reviews.moderate);
   const moderation = useMutation({
     mutationFn: async (input: ModerationTarget & { reason: string }) => {
       await moderate({
@@ -256,27 +243,25 @@ export function AdminReviewsQueue({
                           {item.latestAction.reason}
                         </p>
                       ) : null}
-                      {NEXT_CONTROL_PLANE &&
-                        row.kind !== "history" &&
-                        item.reportCount > 0 && (
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              moderation.reset();
-                              setTarget({
-                                reviewId: item.reviewId,
-                                action: "dismissed",
-                                projectName: item.projectName,
-                                expectedModerationGeneration:
-                                  item.expectedModerationGeneration,
-                                expectedContentRevision:
-                                  item.expectedContentRevision,
-                              });
-                            }}
-                          >
-                            Dismiss reports
-                          </Button>
-                        )}
+                      {row.kind !== "history" && item.reportCount > 0 && (
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            moderation.reset();
+                            setTarget({
+                              reviewId: item.reviewId,
+                              action: "dismissed",
+                              projectName: item.projectName,
+                              expectedModerationGeneration:
+                                item.expectedModerationGeneration,
+                              expectedContentRevision:
+                                item.expectedContentRevision,
+                            });
+                          }}
+                        >
+                          Dismiss reports
+                        </Button>
+                      )}
                       {row.kind !== "history" ? (
                         <Button
                           type="button"

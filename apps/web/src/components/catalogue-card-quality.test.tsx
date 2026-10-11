@@ -30,6 +30,7 @@ const quality: QualitySnapshotContract = {
   freshness: { publishedAt: 1, measuredAt: 100, ageMs: 0, status: "fresh" },
 };
 const item = {
+  houseOperated: false,
   name: "Quality API",
   slug: "api",
   description: "API description",

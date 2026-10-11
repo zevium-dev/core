@@ -1,8 +1,7 @@
 # Accounts & organizations
 
-> Status: partial (signup credit #317 uses first signed org creation, once per user) · Updated: 2026-10-11
-> Rebuild status: PR #437 review fixes implemented (2026-10-11). Isolated rebuild PR 2 implements signed Clerk lifecycle and first-created-org identity; PR 3 now atomically commits the 10,000-credit promo ledger/lot/source with the signed creator claim; replacement cutover remains pending.
-> Code: `packages/control-plane-next/convex/lib/identity.ts`, `packages/control-plane-next/tests/money.test.ts`, `packages/control-plane-next/convex/{http,clerkWebhooks,organizations}.ts`, `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/signup-credit.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{clerkWebhooks,organizations,users}.ts`, `convex/lib/{auth,identity}.ts`, `tests/{identity,money}.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
 Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped: every user belongs to at least one org (a personal org is created at signup), the org owns the wallet, and org roles decide who may run lifecycle, money, and secret actions. Auth, orgs, invitations, and roles are bought from Clerk; Convex mirrors orgs/users for app data.
@@ -55,55 +54,9 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 
 ## Tech
 
-### Isolated rebuild PR 2 — 2026-10-11
+Verified Svix events atomically retain receipt ordering, terminal user/org tombstones, creator claims and the once-per-user 10,000-credit promo lot/source/journal. Only signed organization.created.created_by selects the first processed creator org. Ensure calls grant nothing. Signed active-org JWTs own tenant/role checks; archive denies new reads/admissions while finance and admitted settlements remain recoverable.
 
-Review fixes: deletion ordering uses signed envelope/Svix time instead of stale object update time. Missing/invalid Clerk slugs and absent JWT `org_slug` derive deterministic handles from Clerk org identity; mirror creation and signed creator claims still complete. User deletion schedules bounded cross-org key revocation via `apiKeys.by_owner`; tombstones deny access before cleanup. Regression coverage: `packages/control-plane-next/tests/{identity,keys}.test.ts`.
-
-The isolated replacement verifies Svix on `/clerk-webhook`, records receipt content identity atomically, orders mirrors by provider timestamps, reserves archived handles and retains deleted-user signup claims without profile PII. Only signed `organization.created.created_by` claims the first organization for its creator. First processed creation wins; updates, metadata, joins and ensure calls cannot nominate a recipient. The creator claim and PR 3 atomic 10,000-credit grant handoff live in [rebuild PR 2 status](../architecture/convex-rebuild.md#pr-2-implementation-and-handoff--2026-10-11). Code: `packages/control-plane-next/convex/{http,clerkWebhooks,organizations,users}.ts`, `lib/{auth,identity,dto}.ts`, `tests/identity.test.ts`.
-
-### Signup grant integration — 2026-10-11
-
-PR 3 completes money inside `lib/identity.claimSignupOrganization`: eligibility, retained user claim, promo lot/source and wallet journal commit together. Replays and later-created orgs cannot grant again. The accepted first-created-org policy supersedes the earlier strict #426 proof proposal. [PR 3 handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
-
-### Current implementation
-
-**Dogfood — 2026-10-10**
-
-- **P2 #397:** authenticated sidebar lacks a navigation landmark and settings skip heading levels. Separate publisher/consumer orgs were created successfully under one test identity; this does not validate cross-user RBAC.
-- Local isolated-backend loading blocker **#387** is owned by [dev-environment](../architecture/dev-environment.md).
-
-Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
-
-### Why Clerk
-
-- Org-scoped billing is a product decision ([product overview](../product/overview.md)); Clerk ships prebuilt `<OrganizationSwitcher/>`, `<OrganizationProfile/>`, invitations, roles — weeks of UI we don't build
-- **Machine API Keys GA (2026-04-06)**: Clerk's [2026-04-17 changelog](https://clerk.com/changelog/2026-04-17-api-keys-ga) says availability began April 6. End-user keys are scoped to user or organization. Replaces the Better Auth apikey plugin
-- Deepest Convex auth integration (`ConvexProviderWithClerk`, JWT templates)
-- Vendor lock is accepted for a greenfield product with no users; current package compatibility is proved by repository typecheck/build tests, not this document
-- **Clerk Billing is not used**: Zevium's current funds flow is implemented with prepaid credits and publisher settlement through Stripe
-- **Lifecycle webhooks**: configure the Clerk instance's Svix endpoint at `{CONVEX_SITE_URL}/clerk-webhook` for `user.created`, `user.updated`, `user.deleted`, `organization.created`, `organization.updated`, `organization.deleted`, and `organizationMembership.deleted`. Set that endpoint's signing secret as `CLERK_WEBHOOK_SIGNING_SECRET` in the same Convex deployment. These events maintain mirrors and terminal organization/member revocation; browser mirror initialization does not replace deletion delivery. Confirm actual provider delivery after setup or secret rotation. Replay missed events, or canonically archive only provider-confirmed deleted records.
-
-### Domain
-
-- `organizations` (mirror of Clerk orgs via webhook; Clerk is auth truth, Convex holds app data keyed by Clerk org id)
-
-### Implementation notes
-
-- **Signup credit (#317)**: signed `organization.created.created_by` identifies the creator; the first processed eligible creation claims the user's one lifetime grant. Clerk automatic creation supplies the signup personal org. `signupCreditGrants` and deletion tombstones survive mirrors; browser initialization, user snapshots, org updates, metadata and membership events cannot nominate recipients. The owner accepts first-processed delivery winning if two creation webhooks race. Exact rules live in [wallet-billing](wallet-billing.md#implementation-notes).
-
-- **Org-role authorization**: Clerk's active-org JWT claims are authoritative. Members may read org/project state and collaborate on spec drafts. Exact `org:admin` is required server-side before project lifecycle/visibility/deletion, immutable publication/deprecation, webhook configuration/signing-secret reads, wallet top-ups, and Stripe Connect onboarding/transfers. Missing or unknown roles fail closed; cross-org resource mutations return the same not-found class as missing resources. Matching client gates hide unusable controls but never replace server authorization.
-- **Authentication loading**: sign-in/up routes mount Clerk directly so their loading skeletons do not wait behind the authenticated Convex principal boundary. CSP derives the exact Clerk Frontend API origin from the build's publishable key, allowing production custom domains as well as development instances and Clerk's documented abuse-protection hosts. Client navigation to home starts catalogue teaser fetching without blocking the page shell; SSR still awaits data for hydration.
-
-### Code map (observed)
-
-- Clerk webhook router: `convex/http.ts` `/clerk-webhook` → `organizations.applyOrganizationWebhook` / `archiveFromClerk` / `deleteFromClerk`, `users.upsertFromClerk` / `deleteFromClerk`. Tests in `convex/clerk-webhook.test.ts` cover user personal-data deletion, org archive preserving financial/audit/project history, webhook-authoritative profile fields vs browser overwrite, minimal public org DTOs, Svix-id dedupe + stale-event rejection.
-- Browser mirror init: `use-ensure-mirror.ts` calls `users.ensureUser` then `organizations.ensureOrganization`.
-- Org-less guard: `useOrgLessGuard` in `apps/web/src/routes/app.tsx` pushes users with no active org and zero memberships to `/app/org/create` (skipped under `/app/org` to avoid redirect loop). Comment states Clerk auto-org-creation is enabled instance-wide for new signups.
-- Role check: `requireOrgAdmin` (`convex/lib/auth.ts`) → `isPrivilegedOrgRole` (`packages/shared/src/org-capabilities.ts`) accepts `org:owner` or `org:admin`.
-- Org page `/app/org`: Clerk `<OrganizationProfile/>` embed (with API-keys link to `/app/settings/keys`), public publisher handle card (`organizations.setPublicHandle`, `checkPublicHandleAvailability`), Connect payout status card; `<OrganizationList/>` + create CTA when no active org.
-- Account settings `/app/settings`: Clerk `<UserProfile/>` embed (`apiKeysProps.hide`); tabs Account / API keys / Activity.
-- Sidebar: Clerk `<OrganizationSwitcher organizationProfileMode="navigation" organizationProfileUrl="/app/org">`.
-- Auth routes: `<SignIn/>` / `<SignUp/>` with `fallbackRedirectUrl` from a sanitized return path; `/app` dashboard renders onboarding checklist via `apps/web/src/lib/onboarding.ts`.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

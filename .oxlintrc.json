@@ -57,10 +57,6 @@
     "apps/web/src/routeTree.gen.ts",
     "convex/_generated/**",
     ".claude/**",
-    "packages/control-plane-next/node_modules/**",
-    "packages/control-plane-next/.turbo/**",
-    "packages/control-plane-next/.convex/**",
-    "packages/control-plane-next/convex/_generated/**",
     "**/.tmp/**"
   ],
   "rules": {

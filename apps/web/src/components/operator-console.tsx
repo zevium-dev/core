@@ -20,7 +20,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import type { FunctionReturnType } from "convex/server";
 import { toast } from "sonner";
-import { api } from "#/lib/convex-api.next";
+import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 import { Button } from "#/components/ui/button";
 import {

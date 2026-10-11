@@ -1,7 +1,7 @@
 # Mock sandbox
 
-> Status: built (P1 #14; #363 shared synthesis); generated Try it form #427 pending · Updated: 2026-10-11
-> Code: `apps/gateway/src/mock.ts`, `packages/shared/src/mock.ts` (`generateMockResponse`), `packages/shared/src/openapi.ts` (`matchOperation`), `apps/web/src/components/catalogue-detail.tsx` (Try it panel), `apps/web/src/lib/landing.ts` (`tryItBaseUrl`), `apps/web/src/lib/catalogue-detail-search.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `apps/gateway/src/mock.ts`, `apps/gateway/src/next/pipeline.ts`, `apps/web/src/components/catalogue-detail.tsx`, `apps/gateway/test/mock.test.ts`
 > Related: [gateway](gateway.md), [catalogue-search](catalogue-search.md), [pricing](pricing.md), [agent-surface](agent-surface.md), [listing-lifecycle](listing-lifecycle.md)
 
 Free, anonymous, spec-generated responses for any published API: exercise the API shape before spending credits or getting a key. Never executes the upstream, so it is the one deliberate exception to "every call is key-authenticated and credit-gated".
@@ -28,19 +28,9 @@ Free, anonymous, spec-generated responses for any published API: exercise the AP
 
 ## Tech
 
-### Accepted changes — implementation pending (2026-10-11)
+Keyless mocks read credential-free public signed route projections, synthesize from priced-operation response schemas and charge zero without contacting upstream or wallet admission. Private, retired, malformed, token and unpriced operations fail closed. The browser playground uses the paired gateway origin. Generated-form improvements remain separate backlog.
 
-P1 #427 will replace raw-text-only playground input with fields generated from the immutable published spec. Current `catalogue-detail.tsx` / `lib/try-it.ts` preserve request synthesis and mock/real selection; a generated form is not yet shipped. Link converter work #428 and respect token-listing disablement #425.
-
-### Current implementation
-
-- **Shared examples (#363)**: `packages/shared/src/mock.ts` exports bounded `synthesize` for gateway mocks, reference responses, and playground request bodies. Explicit examples/defaults and local component refs share one implementation; boolean/date/depth behavior no longer drifts in `lib/try-it.ts`. Realtime quality refreshes preserve playground inputs/results; selecting another operation resets its defaults. CopyButton keeps curl authorization as a placeholder.
-- **Unpriced routes (#316)**: shared `matchOperation` returns no match for a missing `x-zevium-cost`; `/mock` returns its usual `404 route_not_found`. Explicit zero and positive-priced operations remain available as zero-credit, keyless mocks.
-
-- **Payment-required errors** (mock part): `/mock` is keyless and free; project, spec, and route failures return generic `404` responses
-- **Gateway CORS**: `/gateway`, `/mock`, `/discovery`, `/mcp` all allow wildcard origin. Safe because auth is bearer-key only, never cookie-based — a wildcard origin doesn't widen the attack surface for a bearer-token API
-
-Code facts (`mock.ts`): resolves the public published spec, applies `isPublishedSpecPublicCopyAllowed`, matches method + path, returns `generateMockResponse` output with `x-zevium-mock: 1`, `x-zevium-cost: 0`, `x-zevium-request-id`. No key verifier, no wallet, no usage event. Try-it panel defaults to `mode: "mock"`; `tryItBaseUrl` switches `/mock` ↔ `/gateway`.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

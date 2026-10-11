@@ -5,12 +5,7 @@ import {
 } from "cloudflare:test";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
-import worker, {
-  __setTestPipelineDeps,
-  __setTestGrantsFetcher,
-  __setTestUsageMutation,
-  type Env,
-} from "../src/index";
+import worker, { __setTestPipelineDeps, type Env } from "../src/index";
 import { ClerkMcpOAuthVerifier, MCP_SCOPES } from "../src/mcp-oauth";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import type { CatalogueSearchSource } from "../src/catalogue-search";
@@ -39,12 +34,13 @@ beforeAll(async () => {
 });
 afterEach(() => {
   __setTestPipelineDeps(null);
-  __setTestGrantsFetcher(null);
-  __setTestUsageMutation(null);
 });
 
 async function fixture(
-  options: { credits?: number; cap?: number; disabled?: boolean } = {},
+  options: {
+    tokenState?: Record<string, unknown>;
+    userInfo?: Record<string, unknown>;
+  } = {},
 ) {
   const orgId = `org_oauth_${crypto.randomUUID()}`;
   let now = Date.now();
@@ -123,25 +119,6 @@ async function fixture(
     catalogueSource: new FixtureCatalogueSource([]),
     fetchImpl: upstream,
   });
-  const credits = options.credits ?? 10;
-  __setTestGrantsFetcher(async (requestedOrg) => ({
-    wallet: {
-      clerkOrgId: requestedOrg,
-      balance: requestedOrg === orgId ? credits : 0,
-      sequence: 0,
-    },
-    keySettings: [
-      {
-        keyId,
-        familyId: keyId,
-        disabled: options.disabled ?? false,
-        monthlyCapCredits: options.cap,
-      },
-    ],
-  }));
-  __setTestUsageMutation(async () => {});
-  const wallet = env.WALLET.get(env.WALLET.idFromName(orgId));
-  if (credits) await wallet.grant(`grant_${orgId}`, credits);
   async function token(overrides: JWTPayload = {}, typ = "at+jwt") {
     return new SignJWT({
       sub: userId,
@@ -160,7 +137,6 @@ async function fixture(
   }
   return {
     orgId,
-    wallet,
     token,
     verifier,
     remote,
@@ -263,88 +239,12 @@ describe("Clerk MCP OAuth resource server", () => {
     );
   });
 
-  it("meters the consumer org and existing key; repeat calls do not fetch Clerk or Convex", async () => {
-    const f = await fixture();
-    const token = await f.token();
-    for (let i = 0; i < 2; i++) {
-      const res = await request("/mcp", token, call());
-      expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({
-        result: { content: expect.any(Array) },
-      });
-    }
-    expect((await f.wallet.getState()).balance).toBe(4);
-    expect(f.upstream).toHaveBeenCalledTimes(2);
-    expect(f.remote).toHaveBeenCalledTimes(2); // one JWKS, one identity mapping
-    expect(f.identityRequests).toEqual([{ userId, orgId: f.orgId }]);
-  });
-
-  it.each(["JWT", "opaque"])(
-    "preserves query parameters on paid %s OAuth calls",
-    async (format) => {
-      const f = await fixture();
-      const token = format === "JWT" ? await f.token() : "oat_test_secret";
-      const response = await request(
-        "/mcp",
-        token,
-        call("/paid?inline=kept", { query: { term: "paid & query" } }),
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).not.toMatchObject({
-        result: { isError: true },
-      });
-      expect(f.upstream).toHaveBeenCalledOnce();
-      const input = f.upstream.mock.calls[0]![0];
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      expect(url.pathname).toBe("/paid");
-      expect(url.searchParams.get("inline")).toBe("kept");
-      expect(url.searchParams.get("term")).toBe("paid & query");
-      expect((await f.wallet.getState()).balance).toBe(7);
-    },
-  );
-
-  it.each(["JWT", "opaque", "API key"])(
-    "attributes semantic discovery to the verified %s identity",
-    async (format) => {
-      const f = await fixture();
-      const token =
-        format === "JWT"
-          ? await f.token()
-          : format === "opaque"
-            ? "oat_test_secret"
-            : "zev_oauth_api_key";
-      const response = await request("/mcp", token, {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: {
-          name: "search_apis",
-          arguments: {
-            query: "weather",
-            caller: { orgId: "org_spoofed", keyId: "key_spoofed" },
-          },
-        },
-      });
-      expect(response.status).toBe(200);
-      expect(await response.json()).not.toMatchObject({
-        result: { isError: true },
-      });
-      expect(f.search).toHaveBeenCalledExactlyOnceWith("weather", {
-        orgId: f.orgId,
-        keyId,
-      });
-      expect(f.upstream).not.toHaveBeenCalled();
-      expect((await f.wallet.getState()).balance).toBe(10);
-    },
-  );
-
-  it("meters revocable opaque tokens and caches provider verification and org lookup", async () => {
+  it("verifies revocable opaque tokens and caches provider verification and org lookup", async () => {
     const f = await fixture();
     for (let i = 0; i < 2; i++)
       expect((await request("/mcp", "oat_test_secret", call())).status).toBe(
         200,
       );
-    expect((await f.wallet.getState()).balance).toBe(4);
     expect(f.remote).toHaveBeenCalledTimes(3); // verify, userinfo, mapping
   });
 
@@ -390,30 +290,6 @@ describe("Clerk MCP OAuth resource server", () => {
     f.unmap();
     f.advance();
     expect((await request("/mcp", token, call())).status).toBe(401);
-  });
-
-  it("keeps bearer API keys working without contacting OAuth services", async () => {
-    const f = await fixture();
-    const res = await request("/mcp", "zev_oauth_api_key", call());
-    expect(res.status).toBe(200);
-    expect((await f.wallet.getState()).balance).toBe(7);
-    expect(f.remote).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["expired", { exp: 1 }],
-    ["foreign issuer", { iss: "https://other.test" }],
-    ["wrong resource", { aud: "https://other.test/mcp" }],
-    ["no audience", { aud: undefined }],
-    ["no org", { org_id: undefined }],
-    ["future token", { iat: 9_999_999_999 }],
-    ["not yet valid", { nbf: 9_999_999_999 }],
-  ])("rejects %s before paid execution", async (_label, claims) => {
-    const f = await fixture();
-    expect((await request("/mcp", await f.token(claims), call())).status).toBe(
-      401,
-    );
-    expect(f.upstream).not.toHaveBeenCalled();
   });
 
   it("requests consent for missing spending scope with HTTP 403", async () => {
@@ -490,40 +366,10 @@ describe("Clerk MCP OAuth resource server", () => {
     ).toBe(503);
   });
 
-  it.each([
-    ["empty wallet", { credits: 0 }, "/paid"],
-    ["empty wallet with free operation", { credits: 0 }, "/free"],
-    ["monthly cap", { cap: 2 }, "/paid"],
-    ["disabled key", { disabled: true }, "/paid"],
-  ])(
-    "blocks %s through the existing wallet gate",
-    async (_label, options, path) => {
-      const f = await fixture(options);
-      const res = await request("/mcp", await f.token(), call(path));
-      expect(await res.json()).toMatchObject({ result: { isError: true } });
-      expect(f.upstream).not.toHaveBeenCalled();
-    },
-  );
-
   it("keeps OAuth restricted to MCP and declines the optional SSE listener", async () => {
     const f = await fixture();
     const token = await f.token();
-    expect(
-      (await request("/gateway/publisher/api/paid", token, undefined, "GET"))
-        .status,
-    ).toBe(402);
     expect((await request("/mcp", token, undefined, "GET")).status).toBe(405);
-    expect(f.upstream).not.toHaveBeenCalled();
-  });
-
-  it("does not let tool arguments replace the OAuth billing identity", async () => {
-    const f = await fixture();
-    const res = await request(
-      "/mcp",
-      await f.token(),
-      call("/paid", { key: "zev_other" }),
-    );
-    expect(await res.json()).toMatchObject({ result: { isError: true } });
     expect(f.upstream).not.toHaveBeenCalled();
   });
 });

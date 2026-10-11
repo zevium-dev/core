@@ -11,7 +11,6 @@ it("requires the internal secret and deployment binding before exposing exact fa
   });
   const get = vi.fn(() => ({ failureEvidence }));
   const env: NextEnv = {
-    CONTROL_PLANE_MODE: "next",
     NEXT_DEPLOYMENT_ID: "next-fixture",
     GATEWAY_INTERNAL_SECRET: "test-only-internal-secret-never-production",
     NEXT_WALLET: {
