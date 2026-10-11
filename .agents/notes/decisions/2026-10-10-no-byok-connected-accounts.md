@@ -1,6 +1,6 @@
 # No BYOK for now; explore connected accounts (OAuth on behalf of user)
 
-> Date: 2026-10-10 · Status: BYOK rejected for now; connected accounts = exploring, unprioritized · Decided by: user
+> Date: 2026-10-10 · Status: BYOK rejected for now; connected accounts prioritized 2026-10-11 ([decision](2026-10-11-connected-accounts-oauth.md)) · Decided by: user
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
 
 ## Decision

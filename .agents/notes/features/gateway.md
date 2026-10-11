@@ -57,6 +57,8 @@ Rebuild #353/#430 owns accepted authority/funding changes; a 30s executable auth
 
 - x402 wallet sessions use the same request gate and admission proofs, scoped to the stable payer wallet; see [machine-payments](machine-payments.md).
 
+- **Connected accounts (branch `feat/connected-accounts`)**: operations secured by a provider-bound OAuth scheme (`x-zevium-oauth-provider`) run with the caller org's connected account. `admit()` refuses upstream hosts outside the provider's API hosts (422 `connection_upstream_not_allowed`), then resolves the token after route matching and before any reservation (missing → 403 `connection_required`, several → 409, cost 0); `forward()` sets `Authorization: Bearer` over any publisher `authorization`; `x-zevium-connection` selects and reports the connection. `/connections` routes manage connections with an API key; `/connections/callback` is the provider redirect. Token cache 60 s per isolate. The `next` pipeline returns 503 `connections_unavailable` for required-connection operations, cost 0. [connected-accounts](connected-accounts.md)
+
 - **Per-token pricing (#329, PR #413): deferred/disabled (2026-10-11).** Shared `isTokenPricingEnabled()` defaults to false: `extractPricing` treats token-priced operations as unpriced, hiding them from public references, discovery/MCP docs/search pricing and preventing gateway/mock execution. Publishing remains allowed with a warning; editor retains rates but marks operations unavailable. Fixed scalar prices (including zero) are unchanged. Metering and settlement code remains for revival and in-flight settlement. [Switch, rollout, and future policy](pricing.md#deferred-llm-pricing-and-future-policy).
 - **Explicit pricing (#316)**: shared `matchOperation` rejects an unpriced match as `null` before wallet access; `admit.ts` returns the same `404 route_not_found` as an unknown route. No upstream call, charge, or usage event. Explicit zero still requires key authorization and a positive wallet balance, and charges zero.
 
@@ -110,6 +112,7 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 
 - 2026-10-11 — ACCEPTED and built in PR #441: bounded synchronous single-flight cold fills; 1s issuance-only clock skew. Negative results do not retain polling identities; idle state cleanup and per-isolate cold budgets bound abuse. [Decision](../decisions/2026-10-11-edge-cold-fill-and-clock-skew.md).
 
+- 2026-10-11 — ACCEPTED: connected accounts (API only); Zevium owns one OAuth client per provider; tokens only to provider API hosts. [Decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md).
 - 2026-10-11 — ACCEPTED: DO spend authority and 30s snapshot design; freeze/drain before negative adjustments, no fixed-price consumer debt. #353/#430. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
 - 2026-10-11 — ACCEPTED: Exactly one upstream per listing; publisher owns multi-provider failover. #327/#328 P2. [Decision](../decisions/2026-10-11-capability-routing-deferred.md).
 - 2026-10-11 — ACCEPTED: Rail off by policy; P1 #424 gate pending, activation P2 #109. [Decision](../decisions/2026-10-11-x402-disabled.md).

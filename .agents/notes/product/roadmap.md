@@ -78,19 +78,20 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 
 ### P1 — the agent-first bet + trust plumbing
 
-| #   | Item                                                                             | Feature                                                         |
-| --- | -------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 8   | Org-scoped wallets                                                               | [wallet-billing](../features/wallet-billing.md)                 |
-| 9   | Per-API agent tooling + machine-readable discovery/pricing index                 | [agent-surface](../features/agent-surface.md)                   |
-| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109           | [machine-payments](../features/machine-payments.md)             |
-| 11  | Free tier enforcement (publisher-funded) + tiered pricing                        | [pricing](../features/pricing.md)                               |
-| 12  | Spend caps, threshold alerts, budget webhooks                                    | [wallet-billing](../features/wallet-billing.md)                 |
-| 13  | Key-management API with zero-downtime rotation                                   | [api-keys](../features/api-keys.md)                             |
-| 14  | Mock/sandbox mode                                                                | [mock-sandbox](../features/mock-sandbox.md)                     |
-| 15  | Deprecation/unpublish lifecycle                                                  | [listing-lifecycle](../features/listing-lifecycle.md)           |
-| 16  | Publisher webhooks                                                               | [webhooks-notifications](../features/webhooks-notifications.md) |
-| 16a | #427 OpenAPI-generated Try it form; current raw-text input replaced in follow-up | [mock-sandbox](../features/mock-sandbox.md)                     |
-| 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                | [agent-surface](../features/agent-surface.md)                   |
+| #   | Item                                                                              | Feature                                                         |
+| --- | --------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 8   | Org-scoped wallets                                                                | [wallet-billing](../features/wallet-billing.md)                 |
+| 9   | Per-API agent tooling + machine-readable discovery/pricing index                  | [agent-surface](../features/agent-surface.md)                   |
+| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109            | [machine-payments](../features/machine-payments.md)             |
+| 11  | Free tier enforcement (publisher-funded) + tiered pricing                         | [pricing](../features/pricing.md)                               |
+| 12  | Spend caps, threshold alerts, budget webhooks                                     | [wallet-billing](../features/wallet-billing.md)                 |
+| 13  | Key-management API with zero-downtime rotation                                    | [api-keys](../features/api-keys.md)                             |
+| 14  | Mock/sandbox mode                                                                 | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 15  | Deprecation/unpublish lifecycle                                                   | [listing-lifecycle](../features/listing-lifecycle.md)           |
+| 16  | Publisher webhooks                                                                | [webhooks-notifications](../features/webhooks-notifications.md) |
+| 16a | #427 OpenAPI-generated Try it form; current raw-text input replaced in follow-up  | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                 | [agent-surface](../features/agent-surface.md)                   |
+| 16c | #351 Connected accounts (YouTube, TikTok, Instagram); activation #445, media #444 | [connected-accounts](../features/connected-accounts.md)         |
 
 ### P2 — cutting edge
 

@@ -75,6 +75,8 @@ P0 #428 owns shared OpenAPI conversion and missing CLI/docs generation; existing
 
 ### Current implementation
 
+- **Connected-account schemes (branch `feat/connected-accounts`)**: `oauth2` schemes with an `authorizationCode` flow **and** `x-zevium-oauth-provider` are validated on save/publish: known provider (`youtube`, `tiktok`, `instagram`), `authorizationUrl`/`tokenUrl` equal to the registry's, only provider-allowed scopes, `servers[0].url` host among the provider's API hosts, ≤ 4 schemes, one scheme per operation. Other OAuth schemes stay documentation only. `parseSpec` keeps root `security`. Operations they secure need a consumer connection. [connected-accounts](connected-accounts.md)
+
 **Dogfood — 2026-10-10**
 
 - **P0 #389:** credentials stored before publication cause repeated `Run a new credential-free reachability test before publishing.` even after a passing probe. Readiness and publication compare different credential revision representations.
@@ -112,6 +114,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 
 - 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
+- 2026-10-11 — ACCEPTED: `oauth2` authorization-code schemes with `x-zevium-oauth-provider` declare connected accounts; endpoints come from Zevium's registry. [Decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md).
 - 2026-10-11 — ACCEPTED: Publisher spec is the contract; generated surfaces #428, existing MCP #110, form playground #427. Zevium writes house specs. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
 - 2026-10-11 — ACCEPTED: Ordinary house publisher org/95/5 ledger (#314); RapidAPI excluded (#313); cap optional P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).
 - 2026-10-11 — ACCEPTED: Hide and disable per-token LLM listings #425; code retained, revival P2 #431. [Decision](../decisions/2026-10-11-llm-deferred.md).
