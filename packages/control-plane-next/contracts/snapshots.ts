@@ -10,12 +10,45 @@ import {
 } from "./money";
 
 export const envelope = z.strictObject({
-  ciphertext: identity,
+  ciphertext: z.string().min(1).max(16_384),
   iv: identity,
   keyVersion: identity,
   format: z.literal("aes-gcm-aad-v1"),
 });
 const gate = z.enum(["open", "closing", "closed"]);
+/** Preserve the current gateway catalogue fields; pricing remains scalar. */
+export const catalogueListing = z.strictObject({
+  projectId: identity,
+  publisherHandle: identity,
+  slug: identity,
+  name: identity,
+  description: z.string().max(4096).optional(),
+  tags: z.array(identity).max(64),
+  orgName: identity,
+  publishedAt: integer.nullable(),
+  houseOperated: z.boolean(),
+  specDigest: digest,
+  routeRevision: integer,
+  pricing: z.strictObject({
+    minCost: integer,
+    maxCost: integer,
+    endpointCount: integer.positive(),
+    hasFreeTier: z.boolean(),
+  }),
+});
+const routeAdmission = z.discriminatedUnion("mode", [
+  z.strictObject({
+    mode: z.literal("open"),
+    policyRevision: integer,
+    allowed: z.literal(true),
+  }),
+  z.strictObject({
+    mode: z.literal("entitled_only"),
+    policyRevision: integer,
+    allowed: z.boolean(),
+    consumerClerkOrgId: identity,
+  }),
+]);
 export const keyPolicy = z.strictObject({
   keyId: identity,
   secretSha256: digest,
@@ -125,8 +158,10 @@ export const snapshot = z
       kind: z.literal("route"),
       payload: z.strictObject({
         organizationId: identity,
+        clerkOrgId: identity,
         projectId: identity,
         specVersionId: identity,
+        version: identity,
         specDigest: digest,
         publisherHandle: identity,
         projectSlug: identity,
@@ -134,6 +169,12 @@ export const snapshot = z
         credentialRevision: integer,
         visibility: z.enum(["private", "public"]),
         retired: z.boolean(),
+        admission: routeAdmission,
+        // Retain the gateway's epoch-second deprecation/sunset wire fields.
+        deprecatedAt: integer.optional(),
+        sunsetAt: integer.optional(),
+        deprecationMessage: z.string().max(4096).optional(),
+        retiredAt: integer.optional(),
         spec: z.string().max(1_048_576),
         upstreamHeaders: envelope.optional(),
       }),
@@ -142,21 +183,7 @@ export const snapshot = z
       ...snapshotBase,
       kind: z.literal("catalogue"),
       payload: z.strictObject({
-        items: z
-          .array(
-            z.strictObject({
-              projectId: identity,
-              publisherHandle: identity,
-              projectSlug: identity,
-              name: identity,
-              description: z.string().max(4096),
-              specDigest: digest,
-              routeRevision: integer,
-              minCost: integer,
-              hasFreeTier: z.boolean(),
-            }),
-          )
-          .max(100),
+        items: z.array(catalogueListing).max(100),
       }),
     }),
   ])

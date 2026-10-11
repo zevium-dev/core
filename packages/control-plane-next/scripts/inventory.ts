@@ -63,7 +63,14 @@ for (const [file, tree] of trees) {
       ts.isStringLiteral(n.arguments[0])
         ? n.arguments[0].text
         : null;
-    const ref = match ? `${match[2]}:${match[3]}` : stringRef;
+    const gatewayRef =
+      ts.isCallExpression(n) &&
+      n.expression.getText(tree) === "queryConvex" &&
+      n.arguments[1] &&
+      ts.isStringLiteral(n.arguments[1])
+        ? n.arguments[1].text
+        : null;
+    const ref = match ? `${match[2]}:${match[3]}` : (stringRef ?? gatewayRef);
     if (ref) {
       const set = references.get(ref) ?? new Set();
       set.add(file);
@@ -284,7 +291,7 @@ const missingReferences = Array.from(references)
 const result = {
   baseline: "84f12c45",
   method:
-    "TypeScript AST registered exports and api/internal/makeFunctionReference callers; non-test source only. HTTP literal paths plus Stripe registration helper. Internal seams are changed, not promised public compatibility.",
+    "TypeScript AST registered exports and api/internal/makeFunctionReference/queryConvex callers; non-test source only. HTTP literal paths plus Stripe registration helper. Internal seams are changed, not promised public compatibility.",
   counts: {
     registeredFunctions: functions.length,
     appCalledFunctions: functions.filter((f) => f.appCallers.length).length,

@@ -1,9 +1,9 @@
 {
   "baseline": "84f12c45",
-  "method": "TypeScript AST registered exports and api/internal/makeFunctionReference callers; non-test source only. HTTP literal paths plus Stripe registration helper. Internal seams are changed, not promised public compatibility.",
+  "method": "TypeScript AST registered exports and api/internal/makeFunctionReference/queryConvex callers; non-test source only. HTTP literal paths plus Stripe registration helper. Internal seams are changed, not promised public compatibility.",
   "counts": {
     "registeredFunctions": 221,
-    "appCalledFunctions": 82,
+    "appCalledFunctions": 83,
     "historicalFunctions": 81,
     "httpRoutes": 12
   },
@@ -671,11 +671,13 @@
       "status": "changed",
       "reason": "Preserve consumed DTO/authorization; apply documented schema/protocol changes",
       "callers": [
+        "apps/gateway/src/catalogue-source.ts",
         "apps/web/src/components/catalogue-browser.tsx",
         "apps/web/src/routes/catalogue/index.tsx",
         "apps/web/src/routes/index.tsx"
       ],
       "appCallers": [
+        "apps/gateway/src/catalogue-source.ts",
         "apps/web/src/components/catalogue-browser.tsx",
         "apps/web/src/routes/catalogue/index.tsx",
         "apps/web/src/routes/index.tsx"
@@ -2946,8 +2948,8 @@
       "source": "convex/specs.ts",
       "status": "retained",
       "reason": "Preserve arguments, rendered fields, null/error and authorization semantics",
-      "callers": [],
-      "appCallers": [],
+      "callers": ["apps/gateway/src/spec-source.ts"],
+      "appCallers": ["apps/gateway/src/spec-source.ts"],
       "historical": true,
       "args": "{\n    publisherHandle: v.string(),\n    projectSlug: v.string(),\n  }",
       "returns": "inferred; implementation and consumed DTO fixture own return shape",

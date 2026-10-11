@@ -234,6 +234,84 @@ describe("owner decisions", () => {
   });
 });
 describe("authority and transport", () => {
+  it("preserves catalogue and route lifecycle fields in signed payloads", () => {
+    const listing = {
+      projectId: "project_echo",
+      publisherHandle: "publisher",
+      slug: "echo",
+      name: "Echo",
+      tags: ["echo"],
+      orgName: "Publisher",
+      publishedAt: NOW,
+      houseOperated: false,
+      specDigest: "a".repeat(64),
+      routeRevision: 1,
+      pricing: { minCost: 1, maxCost: 1, endpointCount: 1, hasFreeTier: false },
+    };
+    expect(
+      snapshot.safeParse({
+        ...unsignedSnapshot,
+        kind: "catalogue",
+        payload: { items: [listing] },
+      }).success,
+    ).toBe(true);
+    expect(
+      snapshot.safeParse({
+        ...unsignedSnapshot,
+        kind: "catalogue",
+        payload: {
+          items: [
+            {
+              ...listing,
+              pricing: { ...listing.pricing, token: { input: 1 } },
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+    const payload = {
+      organizationId: "org_id",
+      clerkOrgId: "org_publisher",
+      projectId: "project_echo",
+      specVersionId: "version_echo",
+      version: "1.0.0",
+      specDigest: "a".repeat(64),
+      publisherHandle: "publisher",
+      projectSlug: "echo",
+      publicationGeneration: 1,
+      credentialRevision: 1,
+      visibility: "public",
+      retired: false,
+      admission: {
+        mode: "entitled_only",
+        policyRevision: 1,
+        allowed: true,
+        consumerClerkOrgId: "org_consumer",
+      },
+      deprecatedAt: Math.floor(NOW / 1000),
+      sunsetAt: Math.floor(NOW / 1000) + 604800,
+      deprecationMessage: "Retiring",
+      spec: "{}",
+    };
+    expect(
+      snapshot.safeParse({ ...unsignedSnapshot, kind: "route", payload })
+        .success,
+    ).toBe(true);
+    expect(
+      snapshot.safeParse({
+        ...unsignedSnapshot,
+        kind: "route",
+        payload: {
+          ...payload,
+          admission: {
+            mode: "entitled_only",
+            policyRevision: 1,
+            allowed: true,
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
   it("requires exact drain and limits executable authority to 30 seconds", () => {
     expect(snapshot.safeParse(unsignedSnapshot).success).toBe(true);
     expect(

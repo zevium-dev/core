@@ -42,6 +42,16 @@ describe("contract inventory coverage and isolation", () => {
       inventory.functions.find((f) => f.name === "catalogue:listPublic")?.args,
     ).not.toBeNull();
   });
+  it("includes literal public-query gateway callers", () => {
+    expect(
+      inventory.functions.find((f) => f.name === "specs:getPublishedForGateway")
+        ?.appCallers,
+    ).toContain("apps/gateway/src/spec-source.ts");
+    expect(
+      inventory.functions.find((f) => f.name === "catalogue:listPublic")
+        ?.appCallers,
+    ).toContain("apps/gateway/src/catalogue-source.ts");
+  });
   it("forbids production imports or next URL selection before paired cutover", () => {
     for (const folder of ["apps/web/src", "apps/gateway/src", "convex"]) {
       for (const file of files(path.join(root, folder)).filter(
