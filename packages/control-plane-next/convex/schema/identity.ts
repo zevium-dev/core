@@ -7,6 +7,14 @@ import {
   visibility,
   qualityEvidence,
 } from "./common";
+const providerRevoke = v.optional(
+  v.object({
+    state: jobState,
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseUntil: v.optional(v.number()),
+  }),
+);
 export const identityTables = {
   organizations: defineTable({
     clerkOrgId: v.string(),
@@ -114,7 +122,7 @@ export const identityTables = {
     publishedAt: v.optional(v.number()),
     draft: v.optional(
       v.object({
-        text: v.string(),
+        revision: v.number(),
         hash: v.string(),
         savedAt: v.number(),
         readiness: v.optional(
@@ -208,6 +216,13 @@ export const identityTables = {
     .index("by_route", ["publisherHandle", "projectSlug"])
     .index("by_project", ["projectId"])
     .index("by_org", ["organizationId"]),
+  projectDrafts: defineTable({
+    projectId: v.id("projects"),
+    text: v.string(),
+    hash: v.string(),
+    revision: v.number(),
+    savedAt: v.number(),
+  }).index("by_project", ["projectId"]),
   specVersions: defineTable({
     projectId: v.id("projects"),
     version: v.string(),
@@ -253,14 +268,7 @@ export const identityTables = {
         membershipRevokedAt: v.optional(v.number()),
         edgeRevision: v.number(),
         updatedAt: v.number(),
-        providerRevoke: v.optional(
-          v.object({
-            state: jobState,
-            attempts: v.number(),
-            nextAttemptAt: v.number(),
-            leaseUntil: v.optional(v.number()),
-          }),
-        ),
+        providerRevoke: providerRevoke,
       }),
       v.object({
         kind: v.literal("rotation"),
@@ -269,6 +277,7 @@ export const identityTables = {
         operationId: v.string(),
         oldKeyId: v.string(),
         newKeyId: v.optional(v.string()),
+        providerRevoke: providerRevoke,
         state: v.union(
           v.literal("pending"),
           v.literal("complete"),
@@ -283,8 +292,10 @@ export const identityTables = {
     ),
   )
     .index("by_key", ["keyId"])
+    .index("by_new_key", ["newKeyId"])
     .index("by_hash", ["secretSha256"])
     .index("by_org_owner", ["kind", "organizationId", "ownerUserId"])
+    .index("by_owner", ["kind", "ownerUserId"])
     .index("by_org", ["kind", "organizationId"])
     .index("by_revoke", [
       "providerRevoke.state",

@@ -303,6 +303,7 @@ export const walletTables = {
     provider: v.union(v.literal("stripe"), v.literal("clerk")),
     account: v.string(),
     eventId: v.string(),
+    payloadHash: v.optional(v.string()),
     eventType: v.string(),
     objectId: v.string(),
     sourceTimestamp: v.number(),

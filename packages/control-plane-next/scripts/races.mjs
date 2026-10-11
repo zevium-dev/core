@@ -40,6 +40,13 @@ const harness = readFileSync(
   .replace('"./fixtures"', '"../tests/fixtures"')
   .replace('"../convex/_generated/dataModel"', '"./_generated/dataModel"');
 writeFileSync(new URL("convex/testClaims.ts", scratch), harness);
+const domainHarness = readFileSync(
+  new URL("../tests/domainClaimsHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replace('"./fixtures"', '"../tests/fixtures"');
+writeFileSync(new URL("convex/domainClaims.ts", scratch), domainHarness);
 for (const name of ["convex.json", "tsconfig.json", "package.json"]) {
   cpSync(new URL(name, base), new URL(name, scratch));
 }
@@ -79,3 +86,5 @@ run(["init"]);
 assertLocal();
 run(["env", "set", "CLERK_JWT_ISSUER_DOMAIN", "https://clerk.invalid"]);
 run(["dev", "--once", "--typecheck", "enable", "--run", "testClaims:races"]);
+
+run(["run", "domainClaims:races"]);

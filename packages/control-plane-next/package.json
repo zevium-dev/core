@@ -17,7 +17,9 @@
     "@convex-dev/rate-limiter": "^0.4.2",
     "@zevium/shared": "workspace:*",
     "convex": "^1.46.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "svix": "^1.96.1",
+    "@clerk/backend": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "26.6.4",

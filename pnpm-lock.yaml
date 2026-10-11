@@ -269,6 +269,9 @@ importers:
 
   packages/control-plane-next:
     dependencies:
+      '@clerk/backend':
+        specifier: ^3.22.0
+        version: 3.22.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@convex-dev/rate-limiter':
         specifier: ^0.4.2
         version: 0.4.2(@standard-schema/spec@1.1.0)(convex@1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0)(typescript@5.9.3)(zod@4.6.5)
@@ -278,6 +281,9 @@ importers:
       convex:
         specifier: ^1.46.0
         version: 1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6)
+      svix:
+        specifier: ^1.96.1
+        version: 1.96.1
       zod:
         specifier: ^4.6.5
         version: 4.6.5
