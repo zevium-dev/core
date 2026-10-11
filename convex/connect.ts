@@ -434,6 +434,8 @@ export async function onboarding(
       use_case: {
         type: "account_onboarding",
         account_onboarding: {
+          // Dahlia still requires recipient scope; Endive removes this field.
+          // @ts-expect-error Required by our pinned 2026-06-24.dahlia API.
           configurations: ["recipient"],
           refresh_url: `${prepared.link.origin}/app/earnings`,
           return_url: `${prepared.link.origin}/app/earnings`,

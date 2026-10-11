@@ -58,6 +58,10 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## Tech
 
+Stripe SDK 23.0.0 keeps the explicit `2026-06-24.dahlia` API pin in `convex/lib/stripe.ts`; SDK-generated Endive types require a documented compatibility directive. Signed Checkout/refund/dispute fixtures remain offline; canonical Checkout requests also assert the wire version. `tests/stripeSdk.test.ts` verifies both API and incomplete-body connection errors remain ambiguous outcomes.
+
+Activity (`apps/web/src/routes/app/settings/activity.tsx`) keys only its `ActivityCalls` list/inspector subtree by the filter window (range + authorized list arguments). The remount freezes one `Date.now()` per filter window (lazy state, no render-time clock read) while the filter selects stay mounted and keep keyboard focus.
+
 Legacy WalletSqliteDO test data is disposable by the 2026-10-11 owner decision. Exact-target discard (default) or optional pinned-release export still needs owner sign-off before v6; see the activation runbook. No existing NextWalletDO journal is covered by that discard approval.
 
 Root money modules own append-only wallet journals, materialized balances, promo/admin/paid FIFO lots and indexed original-source balances. Dust moves retain zero-delta source journals; 32-source admissions fail before upstream when fragmented. Verified test-mode Checkout grants principal atomically; refunds/disputes close/drain before paged exact-source reclamation and publisher clawback/restoration. Every page is generation fenced and globally throughput limited. Authentic unchargeable finals become retained zero-debit exceptions; no debt or synthetic grant. needs_review currently keeps the whole wallet frozen (#440). Fees remain off under #318. Full refunds return amountPaidCents; Stripe live keys/objects are refused.

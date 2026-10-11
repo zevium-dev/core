@@ -179,28 +179,6 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const search = Route.useSearch();
   const timeRange = search.range ?? "7d";
   const projectRef = search.project ?? "all";
-  const inspectorTriggerRef = useRef<HTMLElement | null>(null);
-
-  // Freeze "now" per filter change so page fetches share the same window.
-  const windowKey = JSON.stringify([
-    orgSlug,
-    timeRange,
-    projectRef,
-    search.key,
-    search.member,
-    search.endpoint,
-    search.method,
-  ]);
-  const [window, setWindow] = useState(() => ({
-    key: windowKey,
-    now: Date.now(),
-  }));
-  // Adjust during render: never issue a new-filter query with an old time window.
-  let windowNow = window.now;
-  if (window.key !== windowKey) {
-    windowNow = Date.now();
-    setWindow({ key: windowKey, now: windowNow });
-  }
 
   const accessQuery = useQuery(
     convexQuery(api.organizations.activeCapabilities, {}),
@@ -219,12 +197,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     enabled: capabilities !== null,
   });
 
-  const since = useMemo(
-    () => activitySinceMs(timeRange, windowNow),
-    [timeRange, windowNow],
-  );
-
-  const listArgs = useMemo(() => {
+  const baseListArgs = useMemo(() => {
     const args: Omit<
       FunctionArgs<typeof api.usage.listForOrg>,
       "paginationOpts"
@@ -236,23 +209,11 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     if (attributionSearch.member) args.memberId = attributionSearch.member;
     if (attributionSearch.endpoint) args.endpoint = attributionSearch.endpoint;
     if (attributionSearch.method) args.method = attributionSearch.method;
-    if (since !== undefined) {
-      args.since = since;
-    }
     return args;
-  }, [orgSlug, projectRef, attributionSearch, since]);
+  }, [orgSlug, projectRef, attributionSearch]);
+  // Filter changes remount only the call list, so filter controls keep focus.
+  const windowKey = JSON.stringify([timeRange, baseListArgs]);
 
-  const {
-    results: rows,
-    status,
-    loadMore,
-  } = usePaginatedQuery(
-    api.usage.listForOrg,
-    capabilities === null
-      ? "skip"
-      : { ...listArgs, expectedRole: capabilities.role },
-    { initialNumItems: ACTIVITY_PAGE_SIZE },
-  );
   const cycle = cycleQuery.data;
   const cycleProjectionMatches = capabilityProjectionsMatch(
     capabilities,
@@ -296,27 +257,6 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           project.projectRef !== null,
       )
     : [];
-  const firstPagePending =
-    accessQuery.isPending ||
-    (capabilities !== null &&
-      (cycleQuery.isPending || status === "LoadingFirstPage"));
-  const loadMorePending = status === "LoadingMore";
-  const canLoadMore = status === "CanLoadMore";
-  const selectedFromRows = search.event
-    ? (rows.find((event) => event.eventId === search.event) ?? null)
-    : null;
-  const eventQuery = useQuery({
-    ...convexQuery(api.usage.getForOrgById, {
-      orgSlug,
-      eventId: search.event ?? "invalid",
-    }),
-    enabled:
-      capabilities !== null &&
-      search.event !== undefined &&
-      selectedFromRows === null,
-  });
-  const queriedEvent = eventQuery.data ?? null;
-  const selectedEvent = selectedFromRows ?? queriedEvent;
   const serverProjectionRejected =
     (!accessQuery.isPending && !accessQuery.isError && capabilities === null) ||
     (cycleQuery.data !== undefined &&
@@ -333,27 +273,6 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     attributionSearch.endpoint ||
     attributionSearch.method,
   );
-
-  const inspectEvent = (eventId: string, trigger: HTMLElement) => {
-    inspectorTriggerRef.current = trigger;
-    void navigate({ search: { ...search, event: eventId } });
-  };
-
-  const closeInspector = () => {
-    void navigate({
-      search: {
-        ...(search.range ? { range: search.range } : {}),
-        ...(search.project ? { project: search.project } : {}),
-        ...(attributionSearch.key ? { key: attributionSearch.key } : {}),
-        ...(attributionSearch.member
-          ? { member: attributionSearch.member }
-          : {}),
-        ...(search.endpoint ? { endpoint: search.endpoint } : {}),
-        ...(search.method ? { method: search.method } : {}),
-      },
-      replace: true,
-    });
-  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -485,171 +404,289 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
               </Button>
             </div>
           ) : null}
-          {firstPagePending ? (
-            <ActivityTableSkeleton />
-          ) : activityFailed && rows.length === 0 ? (
-            <Empty className="border border-dashed">
-              <EmptyHeader>
-                <EmptyTitle>Could not load activity</EmptyTitle>
-                <EmptyDescription>
-                  {serverProjectionRejected
-                    ? "We couldn’t confirm your organization access. Refresh and retry."
-                    : humanError(
-                        accessQuery.error ?? cycleQuery.error,
-                        "Activity is temporarily unavailable.",
-                      )}
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    void accessQuery.refetch();
-                    void cycleQuery.refetch();
-                  }}
-                >
-                  Retry
-                </Button>
-              </EmptyContent>
-            </Empty>
-          ) : rows.length === 0 ? (
-            <div className="space-y-4">
-              <EmptyActivity
-                filtered={hasAttributionFilter || projectRef !== "all"}
-              />
-              {canLoadMore ? (
-                <div className="flex justify-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
-                  >
-                    Search next page
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <div className="overflow-x-auto">
-                <Table className="w-full text-sm">
-                  <TableHeader>
-                    <TableRow className="border-b text-left text-muted-foreground">
-                      <TableHead scope="col" className="px-2 py-2 font-medium">
-                        Time
-                      </TableHead>
-                      <TableHead scope="col" className="px-2 py-2 font-medium">
-                        Project
-                      </TableHead>
-                      {canViewOrgUsage ? (
-                        <TableHead
-                          scope="col"
-                          className="px-2 py-2 font-medium"
-                        >
-                          Member
-                        </TableHead>
-                      ) : null}
-                      <TableHead scope="col" className="px-2 py-2 font-medium">
-                        Endpoint
-                      </TableHead>
-                      <TableHead scope="col" className="px-2 py-2 font-medium">
-                        Credits
-                      </TableHead>
-                      <TableHead scope="col" className="px-2 py-2 font-medium">
-                        Status
-                      </TableHead>
-                      <TableHead
-                        scope="col"
-                        className="px-2 py-2 font-medium text-right"
-                      >
-                        Latency
-                      </TableHead>
-                      <TableHead
-                        scope="col"
-                        className="px-2 py-2 text-right font-medium"
-                      >
-                        <span className="sr-only">Actions</span>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((event, index) => (
-                      <TableRow
-                        key={event.eventId ?? `${event.at}:${index}`}
-                        className="border-b last:border-0"
-                      >
-                        <TableCell className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                          {formatTimestamp(event.at)}
-                        </TableCell>
-                        <TableCell className="px-2 py-2.5">
-                          {event.projectName ?? event.projectSlug ?? "—"}
-                        </TableCell>
-                        {canViewOrgUsage ? (
-                          <TableCell className="px-2 py-2.5">
-                            {event.memberName ?? "Unattributed member"}
-                          </TableCell>
-                        ) : null}
-                        <TableCell className="px-2 py-2.5 font-mono text-xs">
-                          <span className="text-muted-foreground">
-                            {event.method.toUpperCase()}
-                          </span>{" "}
-                          {event.endpoint}
-                        </TableCell>
-                        <TableCell className="px-2 py-2.5 tabular-nums">
-                          {formatNumber(event.credits)}
-                        </TableCell>
-                        <TableCell className="px-2 py-2.5">
-                          <StatusBadge status={event.status} />
-                        </TableCell>
-                        <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
-                          {event.latencyMs}ms
-                        </TableCell>
-                        <TableCell className="px-2 py-2.5 text-right">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            disabled={event.eventId === null}
-                            title={
-                              event.eventId === null
-                                ? "Details are unavailable for this older call."
-                                : undefined
-                            }
-                            onClick={(clickEvent) => {
-                              if (event.eventId !== null) {
-                                inspectEvent(
-                                  event.eventId,
-                                  clickEvent.currentTarget,
-                                );
-                              }
-                            }}
-                            aria-label={`Inspect ${event.method.toUpperCase()} ${event.endpoint}`}
-                          >
-                            Inspect
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              {canLoadMore || loadMorePending ? (
-                <div className="flex justify-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={loadMorePending || !canLoadMore}
-                    onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
-                  >
-                    {loadMorePending ? "Loading…" : "Load more"}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          )}
+          <ActivityCalls
+            key={windowKey}
+            orgSlug={orgSlug}
+            baseListArgs={baseListArgs}
+            timeRange={timeRange}
+            capabilities={capabilities}
+            canViewOrgUsage={canViewOrgUsage}
+            attributionSearch={attributionSearch}
+            accessPending={accessQuery.isPending}
+            cyclePending={cycleQuery.isPending}
+            loadError={accessQuery.error ?? cycleQuery.error}
+            activityFailed={activityFailed}
+            serverProjectionRejected={serverProjectionRejected}
+            filtered={hasAttributionFilter || projectRef !== "all"}
+            onRetryAccess={() => void accessQuery.refetch()}
+            onRetryCycle={() => void cycleQuery.refetch()}
+          />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ActivityCalls({
+  orgSlug,
+  baseListArgs,
+  timeRange,
+  capabilities,
+  canViewOrgUsage,
+  attributionSearch,
+  accessPending,
+  cyclePending,
+  loadError,
+  activityFailed,
+  serverProjectionRejected,
+  filtered,
+  onRetryAccess,
+  onRetryCycle,
+}: {
+  orgSlug: string;
+  baseListArgs: Omit<
+    FunctionArgs<typeof api.usage.listForOrg>,
+    "paginationOpts"
+  >;
+  timeRange: ActivityTimeRange;
+  capabilities: ReturnType<typeof parseOrgCapabilityProjection>;
+  canViewOrgUsage: boolean;
+  attributionSearch: ReturnType<typeof authorizedAttributionSearch>;
+  accessPending: boolean;
+  cyclePending: boolean;
+  loadError: unknown;
+  activityFailed: boolean;
+  serverProjectionRejected: boolean;
+  filtered: boolean;
+  onRetryAccess: () => void;
+  onRetryCycle: () => void;
+}) {
+  const navigate = useNavigate({ from: Route.fullPath });
+  const search = Route.useSearch();
+  const inspectorTriggerRef = useRef<HTMLElement | null>(null);
+  // Every page in this filter window uses the same timestamp.
+  const [windowNow] = useState(() => Date.now());
+
+  const since = useMemo(
+    () => activitySinceMs(timeRange, windowNow),
+    [timeRange, windowNow],
+  );
+
+  const listArgs = useMemo(
+    () => (since === undefined ? baseListArgs : { ...baseListArgs, since }),
+    [baseListArgs, since],
+  );
+
+  const {
+    results: rows,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.usage.listForOrg,
+    capabilities === null
+      ? "skip"
+      : { ...listArgs, expectedRole: capabilities.role },
+    { initialNumItems: ACTIVITY_PAGE_SIZE },
+  );
+  const firstPagePending =
+    accessPending ||
+    (capabilities !== null && (cyclePending || status === "LoadingFirstPage"));
+  const loadMorePending = status === "LoadingMore";
+  const canLoadMore = status === "CanLoadMore";
+  const selectedFromRows = search.event
+    ? (rows.find((event) => event.eventId === search.event) ?? null)
+    : null;
+  const eventQuery = useQuery({
+    ...convexQuery(api.usage.getForOrgById, {
+      orgSlug,
+      eventId: search.event ?? "invalid",
+    }),
+    enabled:
+      capabilities !== null &&
+      search.event !== undefined &&
+      selectedFromRows === null,
+  });
+  const queriedEvent = eventQuery.data ?? null;
+  const selectedEvent = selectedFromRows ?? queriedEvent;
+
+  const inspectEvent = (eventId: string, trigger: HTMLElement) => {
+    inspectorTriggerRef.current = trigger;
+    void navigate({ search: { ...search, event: eventId } });
+  };
+
+  const closeInspector = () => {
+    void navigate({
+      search: {
+        ...(search.range ? { range: search.range } : {}),
+        ...(search.project ? { project: search.project } : {}),
+        ...(attributionSearch.key ? { key: attributionSearch.key } : {}),
+        ...(attributionSearch.member
+          ? { member: attributionSearch.member }
+          : {}),
+        ...(search.endpoint ? { endpoint: search.endpoint } : {}),
+        ...(search.method ? { method: search.method } : {}),
+      },
+      replace: true,
+    });
+  };
+
+  return (
+    <>
+      {firstPagePending ? (
+        <ActivityTableSkeleton />
+      ) : activityFailed && rows.length === 0 ? (
+        <Empty className="border border-dashed">
+          <EmptyHeader>
+            <EmptyTitle>Could not load activity</EmptyTitle>
+            <EmptyDescription>
+              {serverProjectionRejected
+                ? "We couldn’t confirm your organization access. Refresh and retry."
+                : humanError(loadError, "Activity is temporarily unavailable.")}
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onRetryAccess();
+                onRetryCycle();
+              }}
+            >
+              Retry
+            </Button>
+          </EmptyContent>
+        </Empty>
+      ) : rows.length === 0 ? (
+        <div className="space-y-4">
+          <EmptyActivity filtered={filtered} />
+          {canLoadMore ? (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
+              >
+                Search next page
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="overflow-x-auto">
+            <Table className="w-full text-sm">
+              <TableHeader>
+                <TableRow className="border-b text-left text-muted-foreground">
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
+                    Time
+                  </TableHead>
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
+                    Project
+                  </TableHead>
+                  {canViewOrgUsage ? (
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
+                      Member
+                    </TableHead>
+                  ) : null}
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
+                    Endpoint
+                  </TableHead>
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
+                    Credits
+                  </TableHead>
+                  <TableHead scope="col" className="px-2 py-2 font-medium">
+                    Status
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 font-medium text-right"
+                  >
+                    Latency
+                  </TableHead>
+                  <TableHead
+                    scope="col"
+                    className="px-2 py-2 text-right font-medium"
+                  >
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((event, index) => (
+                  <TableRow
+                    key={event.eventId ?? `${event.at}:${index}`}
+                    className="border-b last:border-0"
+                  >
+                    <TableCell className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
+                      {formatTimestamp(event.at)}
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5">
+                      {event.projectName ?? event.projectSlug ?? "—"}
+                    </TableCell>
+                    {canViewOrgUsage ? (
+                      <TableCell className="px-2 py-2.5">
+                        {event.memberName ?? "Unattributed member"}
+                      </TableCell>
+                    ) : null}
+                    <TableCell className="px-2 py-2.5 font-mono text-xs">
+                      <span className="text-muted-foreground">
+                        {event.method.toUpperCase()}
+                      </span>{" "}
+                      {event.endpoint}
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5 tabular-nums">
+                      {formatNumber(event.credits)}
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5">
+                      <StatusBadge status={event.status} />
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                      {event.latencyMs}ms
+                    </TableCell>
+                    <TableCell className="px-2 py-2.5 text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={event.eventId === null}
+                        title={
+                          event.eventId === null
+                            ? "Details are unavailable for this older call."
+                            : undefined
+                        }
+                        onClick={(clickEvent) => {
+                          if (event.eventId !== null) {
+                            inspectEvent(
+                              event.eventId,
+                              clickEvent.currentTarget,
+                            );
+                          }
+                        }}
+                        aria-label={`Inspect ${event.method.toUpperCase()} ${event.endpoint}`}
+                      >
+                        Inspect
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {canLoadMore || loadMorePending ? (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loadMorePending || !canLoadMore}
+                onClick={() => loadMore(ACTIVITY_PAGE_SIZE)}
+              >
+                {loadMorePending ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       <ActivityInspector
         open={search.event !== undefined}
@@ -663,10 +700,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
         failed={
           eventQuery.isError ||
           serverProjectionRejected ||
-          (!accessQuery.isPending && capabilities === null)
+          (!accessPending && capabilities === null)
         }
         onRetry={() => {
-          void accessQuery.refetch();
+          onRetryAccess();
           void eventQuery.refetch();
         }}
         onOpenChange={(open) => {
@@ -674,7 +711,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
         }}
         restoreFocusRef={inspectorTriggerRef}
       />
-    </div>
+    </>
   );
 }
 

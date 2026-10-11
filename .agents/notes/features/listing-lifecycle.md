@@ -33,6 +33,8 @@ Related surfaces:
 
 ## Tech
 
+Project/version deadline displays use `apps/web/src/hooks/use-now.ts` (lazy initial timestamp, minute refresh, cleanup), avoiding impure clock reads during render. Server mutations retain exact seven-day notice and sunset validation.
+
 Publish reserves routes permanently in the same transaction. Metadata updates patch explicit fields and preserve suspension. Seven-day retirement notice, version deprecation, generation-fenced cleanup and permanent tombstones remain. Consumer notice/email fan-out pages successful project consumers; version notices conservatively reach project-scoped consumers. Archive immediately denies new activity and retains immutable versions/finance for admitted settlement and reconciliation.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

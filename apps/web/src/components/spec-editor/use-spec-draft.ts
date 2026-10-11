@@ -4,7 +4,14 @@ import { applyPricingEdit, type PricingEdit } from "#/lib/spec-pricing-edit";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from "react";
 import { toast } from "sonner";
 import type { SpecWorkspaceProps } from "./spec-workspace";
 import { OPENAPI_TEMPLATE } from "./template";
@@ -87,7 +94,9 @@ export function useSpecDraft({
   // Event handlers need the latest text even when several rail edits are
   // flushed in the same React batch.
   const textRef = useRef(state.text);
-  textRef.current = state.text;
+  useLayoutEffect(() => {
+    textRef.current = state.text;
+  }, [state.text]);
   const edit = useCallback((text: string) => {
     textRef.current = text;
     dispatch({ type: "edit", text });

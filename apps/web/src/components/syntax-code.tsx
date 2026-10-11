@@ -1,4 +1,4 @@
-import { highlightText, type ShjLanguage } from "@speed-highlight/core";
+import { highlightHTML, type ShjLanguage } from "@speed-highlight/core";
 import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "#/lib/utils";
@@ -23,21 +23,25 @@ type SyntaxCodeProps = {
 };
 
 export function SyntaxCode({ code, lang, className }: SyntaxCodeProps) {
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    code: string;
+    language: ShjLanguage;
+    html: string;
+  } | null>(null);
   const language = useMemo(() => syntaxLanguage(lang), [lang]);
 
   useEffect(() => {
     let cancelled = false;
-    setHighlighted(null);
 
-    void highlightText(code, language, false, {
-      hideLineNumbers: true,
+    void highlightHTML(code, language, {
+      block: false,
+      showLineNumbers: false,
     })
       .then((html) => {
-        if (!cancelled) setHighlighted(html);
+        if (!cancelled) setResult({ code, language, html });
       })
       .catch(() => {
-        if (!cancelled) setHighlighted(null);
+        if (!cancelled) setResult(null);
       });
 
     return () => {
@@ -45,6 +49,8 @@ export function SyntaxCode({ code, lang, className }: SyntaxCodeProps) {
     };
   }, [code, language]);
 
+  const highlighted =
+    result?.code === code && result.language === language ? result.html : null;
   if (highlighted === null) {
     return <code className={className}>{code}</code>;
   }

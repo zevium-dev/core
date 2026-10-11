@@ -1172,7 +1172,10 @@ describe("canonical Stripe processor with network fakes", () => {
     if (change) responses[change.target][change.field] = change.value;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new Request(input, init).headers.get("stripe-version")).toBe(
+          "2026-06-24.dahlia",
+        );
         const url = new URL(
           input instanceof Request ? input.url : String(input),
         );

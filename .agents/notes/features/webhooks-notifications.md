@@ -26,6 +26,8 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 ## Tech
 
+`apps/web/src/components/project/webhooks-card.tsx` tracks revealed secret/version in state and clears superseded/deleted secrets before render; the matching rotation metadata echo retains its one-time secret.
+
 Publisher webhook secrets are encrypted generations with one-time reveal and grace; delivery uses durable leases, bounded retries and pinned public HTTPS. Endpoint/history and webhook-failure notices are admin-only. Org-scoped inbox/preferences and permanent per-notification/revision/user email receipts survive provider retention. Low-balance alerts fire only on downward crossings of 1,000 and re-arm after replenishment. Lifecycle email excludes edits and fan-out is paced. Missing RESEND_API_KEY leaves email dormant; queued provider messages require separate cancellation.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

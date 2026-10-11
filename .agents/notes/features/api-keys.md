@@ -25,6 +25,8 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 
 ## Tech
 
+`apps/web/src/routes/app/settings/keys.tsx` mirrors revealed-key state to its event-handler ref after commit and synchronizes cap input on persisted cap changes during render. Existing principal fencing and dialog focus behavior remain.
+
 Broker-signed immutable owner/subject/org/hash projections live in apiKeys, including durable rotation-operation rows and cleanup evidence. Indexed claims prevent global key/hash/member-slot collisions. Rotation retains 24-hour grace and family caps; terminal membership/user/org revocation fences edge snapshots. The broker HMAC environment/wire names remain compatible; registry events/outbox/transport are removed. No raw key enters Convex.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

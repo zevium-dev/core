@@ -1,3 +1,4 @@
+import { useNow } from "#/hooks/use-now";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
@@ -161,9 +162,10 @@ function VersionRow({
   canAdminister: boolean;
   busy: boolean;
 }) {
+  const now = useNow();
   const deprecated = version.deprecatedAt !== undefined;
   const sunsetReached =
-    version.sunsetAt !== undefined && version.sunsetAt <= Date.now();
+    version.sunsetAt !== undefined && version.sunsetAt <= now;
 
   return (
     <li>

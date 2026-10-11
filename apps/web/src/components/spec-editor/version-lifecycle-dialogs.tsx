@@ -1,3 +1,4 @@
+import { useNow } from "#/hooks/use-now";
 import { useState } from "react";
 
 import { Button } from "#/components/ui/button";
@@ -40,7 +41,8 @@ export function DeprecateDialog({
   const sunsetAt: number | undefined = Number.isNaN(parsedSunset)
     ? undefined
     : parsedSunset;
-  const minimumSunset = Date.now() + MIN_VERSION_SUNSET_NOTICE_MS;
+  const now = useNow();
+  const minimumSunset = now + MIN_VERSION_SUNSET_NOTICE_MS;
   const sunsetValid =
     sunsetDate.length === 0 ||
     (!Number.isNaN(parsedSunset) && parsedSunset >= minimumSunset);

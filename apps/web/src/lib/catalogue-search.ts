@@ -1,6 +1,6 @@
 import {
   useEffect,
-  useRef,
+  useEffectEvent,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -136,16 +136,16 @@ export function useDebouncedUrlDraft<T>(
   delayMs = CATALOGUE_SEARCH_DEBOUNCE_MS,
 ): [T, Dispatch<SetStateAction<T>>] {
   const [draft, setDraft] = useState(committedValue);
-  const commitRef = useRef(onCommit);
-  commitRef.current = onCommit;
-
-  useEffect(() => {
-    setDraft(committedValue);
-  }, [committedValue]);
+  const commit = useEffectEvent(onCommit);
+  const [previousValue, setPreviousValue] = useState(committedValue);
+  if (!Object.is(previousValue, committedValue)) {
+    setPreviousValue(() => committedValue);
+    setDraft(() => committedValue);
+  }
 
   useEffect(() => {
     if (Object.is(draft, committedValue)) return;
-    const handle = window.setTimeout(() => commitRef.current(draft), delayMs);
+    const handle = window.setTimeout(() => commit(draft), delayMs);
     return () => window.clearTimeout(handle);
   }, [committedValue, delayMs, draft]);
 
