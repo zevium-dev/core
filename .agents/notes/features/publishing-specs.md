@@ -58,6 +58,8 @@ Sign up → Create org → Create project
 
 Draft bodies live in projectDrafts; small project metadata/readiness avoids oversized list/lifecycle reads. Paginated project lists and public DTO types are canonical in web. Publication requires the current draftHash and credential-bound reachability evidence, commits immutable versions and permanent route reservation atomically, and retains reload/overwrite conflict UX. Scalar prices only; unpriced/token operations do not become callable. House display metadata has no pricing exemption.
 
+Optional house subsidy cap #429: assessed and skipped on 2026-10-11 under the owner's simplicity condition. Upstream billable execution is not preserved independently of consumer outcomes; exception settlements bypass ordinary rollups. Accurate accounting would require forwarding/finalization and settlement changes beyond a modest counter/gate. No cap is enforced. [Assessment and future proposal](../sessions/2026-10-11-house-subsidy-cap-assessment.md).
+
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions

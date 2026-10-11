@@ -105,7 +105,7 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 | —   | Verified reviews                                                                                                                      | [reviews](../features/reviews.md)                       |
 | —   | #350 Generated SDKs                                                                                                                   | [landing-docs](../features/landing-docs.md)             |
 | —   | #109 x402 activation deferred; feature-off follow-up P1 #424 and enablement runbook                                                   | [machine-payments](../features/machine-payments.md)     |
-| —   | #429 Optional $100/month total house subsidy cap, only if simple; otherwise skip                                                      | [publishing-specs](../features/publishing-specs.md)     |
+| —   | #429 Optional $100/month total house subsidy cap — assessed and skipped 2026-10-11; upstream-cost evidence needs broader changes      | [publishing-specs](../features/publishing-specs.md)     |
 
 Several P1/P2 items shipped ahead of their tag (payouts via Stripe Connect, mock mode, webhooks, free-tier enforcement, verified reviews). Feature notes carry the real status.
 
