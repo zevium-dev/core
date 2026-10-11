@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "./pricing-policy";
 import { extractPricing, parseSpec, matchOperation } from "./openapi";
 import { parseTokenPricing, tokenCredits } from "./pricing";
 import { collectOpenApiSpecIssues } from "./validate";
+
+afterEach(() => vi.restoreAllMocks());
 
 const rates = {
   per: "token" as const,
@@ -10,7 +13,51 @@ const rates = {
   maxPerCall: 1000,
 };
 describe("token pricing", () => {
-  it("parses immutable spec rates and charges weighted usage", () => {
+  it("defaults off, preserves fixed prices, and never falls through to a priced template", () => {
+    expect(pricingPolicy.isTokenPricingEnabled()).toBe(false);
+    expect(extractPricing({ "x-zevium-cost": rates })).toBeNull();
+    expect(
+      extractPricing({ "x-zevium-cost": { ...rates, input: 0, output: 0 } }),
+    ).toBeNull();
+    expect(extractPricing({ "x-zevium-cost": 0 })).toEqual({ cost: 0 });
+    expect(extractPricing({ "x-zevium-cost": 7 })).toEqual({ cost: 7 });
+    const spec = parseSpec(
+      JSON.stringify({
+        paths: {
+          "/chat": { post: { "x-zevium-cost": rates } },
+          "/{id}": { post: { "x-zevium-cost": 7 } },
+        },
+      }),
+    );
+    expect(matchOperation(spec, "POST", "/chat")).toBeNull();
+    expect(matchOperation(spec, "POST", "/other")?.pricing.cost).toBe(7);
+  });
+
+  it.each([false, true])(
+    "allows publication with an unavailable warning only when disabled: %s",
+    (enabled) => {
+      if (enabled)
+        vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
+      const issues = collectOpenApiSpecIssues(
+        JSON.stringify({
+          openapi: "3.1.0",
+          servers: [{ url: "https://example.com" }],
+          paths: { "/chat": { post: { "x-zevium-cost": rates } } },
+        }),
+      );
+      expect(issues.filter((issue) => issue.level === "error")).toEqual([]);
+      expect(
+        issues.some(
+          (issue) =>
+            issue.level === "warning" &&
+            issue.message.includes("Per-token pricing is currently disabled"),
+        ),
+      ).toBe(!enabled);
+    },
+  );
+
+  it("parses immutable spec rates and charges weighted usage when enabled", () => {
+    vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
     expect(extractPricing({ "x-zevium-cost": rates })).toEqual({
       cost: 1000,
       token: rates,

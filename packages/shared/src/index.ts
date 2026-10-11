@@ -10,6 +10,8 @@ export const PLATFORM_CUT = 0.05;
 /** Hard cap shared by gateway queue batches and Convex usage ingestion. */
 export const MAX_USAGE_INGEST_EVENTS = 100;
 
+export { isTokenPricingEnabled } from "./pricing-policy.js";
+
 export {
   MAX_DAILY_FREE_TIER_CALLS,
   MAX_ENDPOINT_COST_CREDITS,

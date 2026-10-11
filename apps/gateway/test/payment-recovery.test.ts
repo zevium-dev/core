@@ -4,6 +4,7 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "../../../packages/shared/src/pricing-policy";
 import worker, {
   __setTestPipelineDeps,
   __setTestGrantsFetcher,
@@ -88,6 +89,7 @@ const machine: MachinePaymentDeps = {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   __setTestPipelineDeps(null);
   __setTestGrantsFetcher(null);
 });
@@ -149,6 +151,8 @@ describe.each([
   it.each(scenarios)(
     "preserves safe message and actions across direct/MCP: $name",
     async (scenario) => {
+      if (scenario.token)
+        vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
       const org = `recovery-${crypto.randomUUID()}`;
       const specs = new FixtureSpecSource();
       specs.set("acme", "demo", {

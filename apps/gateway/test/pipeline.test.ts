@@ -5,7 +5,8 @@ import {
   runDurableObjectAlarm,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as pricingPolicy from "../../../packages/shared/src/pricing-policy";
 import worker, {
   __setTestPipelineDeps,
   __setTestGrantsFetcher,
@@ -1488,6 +1489,10 @@ describe("gateway pipeline", () => {
 });
 
 describe("token-priced gateway calls", () => {
+  beforeEach(() => {
+    vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
+  });
+  afterEach(() => vi.restoreAllMocks());
   const tokenSpec = JSON.stringify({
     openapi: "3.1.0",
     servers: [{ url: "https://upstream.test" }],
@@ -1521,6 +1526,30 @@ describe("token-priced gateway calls", () => {
       env as Env,
       ctx,
     );
+
+  it("blocks disabled token pricing without upstream execution, reservation, charge, or usage", async () => {
+    vi.restoreAllMocks(); // Exercise the shipped default, not a mocked false value.
+    const org = "token-disabled";
+    const mock = makeFetchMock(() => new Response("must not execute"));
+    await installFixtures({
+      clerkOrgId: org,
+      credits: 1000,
+      spec: tokenSpec,
+      fetchImpl: mock.fetchImpl,
+    });
+    await walletStub(org).syncGrants(org);
+    const before = await walletStub(org).getState();
+    const ctx = createExecutionContext();
+    const response = await call(ctx);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: "route_not_found",
+      message: "No available priced endpoint matches this method and path",
+    });
+    await waitOnExecutionContext(ctx);
+    expect(mock.calls).toHaveLength(0);
+    expect(await walletStub(org).getState()).toEqual(before);
+  });
 
   it("returns stream bytes before final usage, then settles actual and releases hold", async () => {
     const org = "token-stream";
@@ -1710,11 +1739,11 @@ describe("explicit operation pricing", () => {
         const unknownBody = await unknown.json();
         expect(body).toMatchObject({
           error: "route_not_found",
-          message: "No endpoint matches this method and path",
+          message: "No available priced endpoint matches this method and path",
         });
         expect(unknownBody).toMatchObject({
           error: "route_not_found",
-          message: "No endpoint matches this method and path",
+          message: "No available priced endpoint matches this method and path",
         });
         expect(after).toEqual(before);
         expect(mock.calls).toHaveLength(0);

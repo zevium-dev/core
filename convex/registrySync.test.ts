@@ -405,13 +405,19 @@ describe("canonical registry producer", () => {
   });
 });
 
-it("registry catalogue pricing excludes unpriced operations and their free tiers", async () => {
+it("registry catalogue pricing excludes unpriced and disabled token operations and their free tiers", async () => {
   const t = convexTest(schema, modules);
   const { projectId, versionId } = await seedPublished(t);
   await t.run(async (ctx) => {
     await ctx.db.patch(versionId, {
       spec: JSON.stringify({
         paths: {
+          "/chat": {
+            post: {
+              "x-zevium-cost": { per: "token", input: 2000, output: 8000 },
+              "x-zevium-free-tier": 50,
+            },
+          },
           "/hidden": { get: { "x-zevium-free-tier": 10 } },
           "/free": { get: { "x-zevium-cost": 0 } },
           "/paid": { post: { "x-zevium-cost": 7 } },
