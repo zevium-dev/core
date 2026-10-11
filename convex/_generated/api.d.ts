@@ -34,6 +34,7 @@ import type * as lib_publisherLedger from "../lib/publisherLedger.js";
 import type * as lib_qualityContract from "../lib/qualityContract.js";
 import type * as lib_readinessTransport from "../lib/readinessTransport.js";
 import type * as lib_settlementIdentity from "../lib/settlementIdentity.js";
+import type * as lib_signupCredit from "../lib/signupCredit.js";
 import type * as lib_stripePlatform from "../lib/stripePlatform.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
@@ -94,6 +95,7 @@ declare const fullApi: ApiFromModules<{
   "lib/qualityContract": typeof lib_qualityContract;
   "lib/readinessTransport": typeof lib_readinessTransport;
   "lib/settlementIdentity": typeof lib_settlementIdentity;
+  "lib/signupCredit": typeof lib_signupCredit;
   "lib/stripePlatform": typeof lib_stripePlatform;
   "lib/validate": typeof lib_validate;
   "lib/webhookDelivery": typeof lib_webhookDelivery;

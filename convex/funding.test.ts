@@ -233,7 +233,18 @@ describe("universal wallet funding", () => {
   it("settles a signup-funded free-tier call and unlocks reviews without a payment", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "signup_free");
-    await t.mutation(internal.organizations.upsertFromClerk, {
+    await t.mutation(internal.users.recordSignupFromClerk, {
+      clerkUserId: "user_signup_free",
+      personalOrganization: {
+        clerkOrgId: "org_consumer_signup_free",
+        createdAt: 100,
+      },
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      svixId: "msg_user_signup_free",
+      eventTimestamp: 100,
+      eventType: "organization.created",
+      clerkCreatedAt: 100,
       clerkOrgId: "org_consumer_signup_free",
       name: "Consumer",
       slug: "consumer-signup-free",
@@ -273,7 +284,18 @@ describe("universal wallet funding", () => {
   it("consumes signup credit first and refunds only card-funded inventory", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "promo");
-    await t.mutation(internal.organizations.upsertFromClerk, {
+    await t.mutation(internal.users.recordSignupFromClerk, {
+      clerkUserId: "user_signup_promo",
+      personalOrganization: {
+        clerkOrgId: "org_consumer_promo",
+        createdAt: 100,
+      },
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      svixId: "msg_user_signup_promo",
+      eventTimestamp: 100,
+      eventType: "organization.created",
+      clerkCreatedAt: 100,
       clerkOrgId: "org_consumer_promo",
       name: "Consumer",
       slug: "consumer-promo",

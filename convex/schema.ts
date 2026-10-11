@@ -25,6 +25,9 @@ export default defineSchema({
   organizations: defineTable({
     clerkOrgId: v.string(),
     walletKind: v.optional(v.literal("anonymous")),
+    /** Immutable creation facts from organization.created, never browser mirrors. */
+    signupCreatorClerkUserId: v.optional(v.string()),
+    signupClerkCreatedAt: v.optional(v.number()),
     name: v.string(),
     /** Clerk identity mirror; never emitted into public routing contracts. */
     slug: v.string(),
@@ -43,6 +46,15 @@ export default defineSchema({
     .index("by_clerk_org", ["clerkOrgId"])
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
+
+  /** Frozen user.created proof, retained even when the user or org is deleted. */
+  signupCreditEligibility: defineTable({
+    clerkUserId: v.string(),
+    clerkOrgId: v.optional(v.string()),
+    organizationCreatedAt: v.optional(v.number()),
+    recordedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+  }).index("by_clerk_user", ["clerkUserId"]),
 
   /** Permanent anti-farming claims; independent of deletable user mirrors. */
   signupCreditGrants: defineTable({

@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { grantSignupCredit } from "./lib/signupCredit";
 
 export const upsertFromClerk = internalMutation({
   args: {
@@ -30,10 +31,66 @@ export const upsertFromClerk = internalMutation({
   },
 });
 
+/** Only /clerk-webhook user.created supplies this frozen signup snapshot. */
+export const recordSignupFromClerk = internalMutation({
+  args: {
+    clerkUserId: v.string(),
+    personalOrganization: v.optional(
+      v.object({
+        clerkOrgId: v.string(),
+        createdAt: v.number(),
+      }),
+    ),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    if (!args.clerkUserId.trim()) throw new Error("Invalid Clerk user ID");
+    const personal = args.personalOrganization;
+    if (
+      personal !== undefined &&
+      (!personal.clerkOrgId.trim() ||
+        !Number.isSafeInteger(personal.createdAt) ||
+        personal.createdAt <= 0)
+    )
+      throw new Error("Invalid Clerk signup organization");
+    const existing = await ctx.db
+      .query("signupCreditEligibility")
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+    // Empty or ambiguous signup snapshots are final too. Later organizations,
+    // user.updated events, and replays cannot turn them into eligible signups.
+    if (existing !== null) return;
+    await ctx.db.insert("signupCreditEligibility", {
+      clerkUserId: args.clerkUserId,
+      clerkOrgId: personal?.clerkOrgId,
+      organizationCreatedAt: personal?.createdAt,
+      recordedAt: Date.now(),
+    });
+    if (personal === undefined) return;
+    const organization = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", personal.clerkOrgId))
+      .unique();
+    if (organization !== null) await grantSignupCredit(ctx, organization._id);
+  },
+});
+
 /** Remove Clerk's personal-data mirror. Safe for webhook retries. */
 export const deleteFromClerk = internalMutation({
   args: { clerkUserId: v.string() },
   handler: async (ctx, args): Promise<void> => {
+    const eligibility = await ctx.db
+      .query("signupCreditEligibility")
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+    if (eligibility === null) {
+      await ctx.db.insert("signupCreditEligibility", {
+        clerkUserId: args.clerkUserId,
+        recordedAt: Date.now(),
+        deletedAt: Date.now(),
+      });
+    } else if (eligibility.deletedAt === undefined) {
+      await ctx.db.patch(eligibility._id, { deletedAt: Date.now() });
+    }
     const existing = await ctx.db
       .query("users")
       .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
