@@ -1,3 +1,4 @@
+import { getConvexSize } from "convex/values";
 import type { MutationCtx } from "../convex/_generated/server";
 import type { Id } from "../convex/_generated/dataModel";
 import { facts } from "../convex/money/walletLedger";
@@ -8,7 +9,8 @@ export async function measure<T>(
   let writes = 0,
     argumentBytes = 0,
     readBytes = 0,
-    documentWriteBytes = 0;
+    documentWriteBytes = 0,
+    convexDocumentWriteBytes = 0;
   const bytes = (value: unknown) =>
     new TextEncoder().encode(JSON.stringify(facts(value ?? null))).length;
   const readRowsByIndex: Record<string, number> = {};
@@ -71,8 +73,11 @@ export async function measure<T>(
             property === "insert" ? value : params[0]
           ) as Id<"usageEvents">;
           // Charge the full post-write document for every write, including repeated patches.
-          if (property !== "delete")
-            documentWriteBytes += bytes(await target.get(id));
+          if (property !== "delete") {
+            const document = await target.get(id);
+            documentWriteBytes += bytes(document);
+            convexDocumentWriteBytes += getConvexSize(document);
+          }
           return value;
         };
       return member.bind(target);
@@ -85,6 +90,7 @@ export async function measure<T>(
     argumentBytes,
     readBytes,
     documentWriteBytes,
+    convexDocumentWriteBytes,
     readRowsByIndex,
   };
 }

@@ -1,3 +1,10 @@
+import {
+  financePage,
+  FINANCE_PAGE_INTERVAL_MS,
+  FINANCE_TRANSIENT_RETRY_MS,
+  FINANCE_THROTTLE_RETRY_MS,
+  isTransientFinanceError,
+} from "./money/throughput";
 import { atomsToCredits } from "./accounting";
 import { onboarding, verifiedAccount } from "./connect";
 import { v, ConvexError } from "convex/values";
@@ -222,14 +229,29 @@ export const initiatePublisherTransfer = action({
 });
 export const releaseOne = internalMutation({
   args: { id: v.id("publisherEarnings") },
-  handler: (ctx, a) => releaseEarning(ctx, a.id),
+  handler: (ctx, a) =>
+    financePage(ctx, (bounded) => releaseEarning(bounded, a.id)),
 });
 export const releaseSafely = internalAction({
   args: { id: v.id("publisherEarnings") },
   handler: async (ctx, a) => {
     try {
-      await ctx.runMutation(internal.payouts.releaseOne, a);
-    } catch {
+      const result = await ctx.runMutation(internal.payouts.releaseOne, a);
+      if (result === "throttled")
+        await ctx.scheduler.runAfter(
+          FINANCE_THROTTLE_RETRY_MS,
+          internal.payouts.releaseSafely,
+          a,
+        );
+    } catch (error) {
+      if (isTransientFinanceError(error)) {
+        await ctx.scheduler.runAfter(
+          FINANCE_TRANSIENT_RETRY_MS,
+          internal.payouts.releaseSafely,
+          a,
+        );
+        return;
+      }
       await ctx.runMutation(internal.payouts.releaseFailure, a);
     }
   },
@@ -257,14 +279,16 @@ export const releaseDue = internalMutation({
         q.eq("state", "pending").lte("releaseAfter", Date.now()),
       )
       .take(25);
+    let delay = 0;
     for (const e of rows) {
       await ctx.db.patch(e._id, { releaseAfter: Date.now() + 60000 });
-      await ctx.scheduler.runAfter(0, internal.payouts.releaseSafely, {
+      await ctx.scheduler.runAfter(delay, internal.payouts.releaseSafely, {
         id: e._id,
       });
+      delay += FINANCE_PAGE_INTERVAL_MS;
     }
     if (rows.length === 25)
-      await ctx.scheduler.runAfter(0, internal.payouts.releaseDue, {});
+      await ctx.scheduler.runAfter(delay, internal.payouts.releaseDue, {});
   },
 });
 export const recoverTransfers = internalMutation({

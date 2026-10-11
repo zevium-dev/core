@@ -1,3 +1,10 @@
+import {
+  financePage,
+  FINANCE_PAGE_INTERVAL_MS,
+  FINANCE_TRANSIENT_RETRY_MS,
+  FINANCE_THROTTLE_RETRY_MS,
+  isTransientFinanceError,
+} from "./money/throughput";
 import { v, ConvexError } from "convex/values";
 import {
   action,
@@ -315,7 +322,9 @@ export const paymentForCharge = internalQuery({
 export const reconcilePage = internalMutation({
   args: { paymentId: v.id("payments"), generation: v.number() },
   handler: (ctx, args) =>
-    reconcilePaymentPage(ctx, args.paymentId, args.generation),
+    financePage(ctx, (bounded) =>
+      reconcilePaymentPage(bounded, args.paymentId, args.generation),
+    ),
 });
 export const reconcile = internalAction({
   args: { paymentId: v.id("payments"), generation: v.number() },
@@ -325,9 +334,24 @@ export const reconcile = internalAction({
         internal.billing.reconcilePage,
         args,
       );
-      if (result === "more")
-        await ctx.scheduler.runAfter(0, internal.billing.reconcile, args);
-    } catch {
+      if (result === "more" || result === "throttled")
+        await ctx.scheduler.runAfter(
+          result === "throttled"
+            ? FINANCE_THROTTLE_RETRY_MS
+            : FINANCE_PAGE_INTERVAL_MS,
+          internal.billing.reconcile,
+          args,
+        );
+    } catch (error) {
+      if (isTransientFinanceError(error)) {
+        // If scheduling also fails, the committed recovery deadline remains due.
+        await ctx.scheduler.runAfter(
+          FINANCE_TRANSIENT_RETRY_MS,
+          internal.billing.reconcile,
+          args,
+        );
+        return;
+      }
       await ctx.runMutation(internal.billing.reconcileFailure, args);
     }
   },
@@ -366,6 +390,7 @@ export const reconcileFailure = internalMutation({
 export const recoverAdjustments = internalMutation({
   args: {},
   handler: async (ctx) => {
+    let delay = 0;
     for (const state of ["pending", "retry", "processing"] as const) {
       const rows = await ctx.db
         .query("payments")
@@ -382,10 +407,11 @@ export const recoverAdjustments = internalMutation({
             nextAttemptAt: Date.now() + 60000,
           },
         });
-        await ctx.scheduler.runAfter(0, internal.billing.reconcile, {
+        await ctx.scheduler.runAfter(delay, internal.billing.reconcile, {
           paymentId: p._id,
           generation: p.reconciliation.generation,
         });
+        delay += FINANCE_PAGE_INTERVAL_MS;
       }
     }
   },

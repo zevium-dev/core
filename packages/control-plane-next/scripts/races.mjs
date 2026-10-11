@@ -5,14 +5,19 @@ import {
   existsSync,
   symlinkSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const base = new URL("../", import.meta.url);
-const scratch = new URL("../.tmp/races/", import.meta.url);
-mkdirSync(scratch, { recursive: true });
+// Match CI's clean database on every invocation; retain failed runs for diagnosis.
+mkdirSync(new URL("../.tmp/", import.meta.url), { recursive: true });
+const scratch = pathToFileURL(
+  mkdtempSync(fileURLToPath(new URL("../.tmp/races-", import.meta.url))) + "/",
+);
+console.log("Disposable anonymous race deployment:", fileURLToPath(scratch));
 if (!existsSync(new URL("node_modules", scratch)))
   symlinkSync(
     fileURLToPath(new URL("node_modules", base)),
@@ -130,7 +135,6 @@ run([
 ]);
 run(["env", "set", "NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_fixture"]);
 run(["dev", "--once", "--typecheck", "enable"]);
-run(["run", "financeRaces:reset"]);
 run(["run", "testClaims:races"]);
 
 run(["run", "domainClaims:races"]);

@@ -37,6 +37,7 @@ import type * as money_reconciliationCases from "../money/reconciliationCases.js
 import type * as money_rollups from "../money/rollups.js";
 import type * as money_settle from "../money/settle.js";
 import type * as money_sourceAdjustments from "../money/sourceAdjustments.js";
+import type * as money_throughput from "../money/throughput.js";
 import type * as money_transfers from "../money/transfers.js";
 import type * as money_walletLedger from "../money/walletLedger.js";
 import type * as organizations from "../organizations.js";
@@ -91,6 +92,7 @@ declare const fullApi: ApiFromModules<{
   "money/rollups": typeof money_rollups;
   "money/settle": typeof money_settle;
   "money/sourceAdjustments": typeof money_sourceAdjustments;
+  "money/throughput": typeof money_throughput;
   "money/transfers": typeof money_transfers;
   "money/walletLedger": typeof money_walletLedger;
   organizations: typeof organizations;

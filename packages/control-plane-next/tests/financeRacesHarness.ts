@@ -1,4 +1,8 @@
-import schema from "../convex/schema";
+import {
+  financePage,
+  FINANCE_PAGE_INTERVAL_MS,
+  FINANCE_PAGE_WRITE_BYTES,
+} from "../convex/money/throughput";
 import { makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
 import {
@@ -84,6 +88,17 @@ export const page = internalMutation({
   handler: (ctx, a) =>
     measure(ctx, (c) => reconcilePaymentPage(c, a.paymentId, a.generation)),
 });
+// Exercise the same admission + byte guard as billing.reconcilePage.
+export const pacedPage = internalMutation({
+  args: { paymentId: v.id("payments"), generation: v.number() },
+  handler: (ctx, a) =>
+    measure(ctx, (c) =>
+      financePage(c, (bounded) =>
+        reconcilePaymentPage(bounded, a.paymentId, a.generation),
+      ),
+    ),
+});
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export const release = internalMutation({
   args: { publisherId: v.id("organizations") },
   handler: async (ctx, a) => {
@@ -174,6 +189,7 @@ export const races = internalAction({
         argumentBytes: number;
         readBytes: number;
         documentWriteBytes: number;
+        convexDocumentWriteBytes: number;
       }
     >("financeRaces:page");
     const releaseRef = makeFunctionReference<
@@ -350,43 +366,47 @@ export const largeSeed = internalMutation({
 export const largeSeedPage = internalMutation({
   args: { earningJson: v.string(), offset: v.number() },
   handler: async (ctx, a) => {
-    const e = JSON.parse(
-      a.earningJson,
-    ) as import("../convex/_generated/dataModel").Doc<"publisherEarnings">;
-    const { _id, _creationTime, ...base } = e;
-    for (let i = a.offset; i < Math.min(10001, a.offset + 100); i++) {
-      const day = new Date(Date.UTC(1990, 0, 1) + i * 86400000)
-        .toISOString()
-        .slice(0, 10);
-      await ctx.db.insert("publisherEarnings", {
-        ...base,
-        day,
-        grossCredits: 1,
-        netAtoms: 9500,
-        platformFeeAtoms: 500,
-      });
-      for (const dimension of ["total", "project"] as const)
-        await ctx.db.insert("usageRollups", {
-          kind: "daily",
-          scope: "publisher",
-          scopeId: e.publisherOrganizationId,
-          dimension,
-          dimensionKey: dimension === "total" ? "all" : e.projectId,
-          shard: dimension === "total" ? e.shard : e.shard % 16,
+    const measured = await measure(ctx, async (ctx) => {
+      const e = JSON.parse(
+        a.earningJson,
+      ) as import("../convex/_generated/dataModel").Doc<"publisherEarnings">;
+      const { _id, _creationTime, ...base } = e;
+      for (let i = a.offset; i < Math.min(10001, a.offset + 100); i++) {
+        const day = new Date(Date.UTC(1990, 0, 1) + i * 86400000)
+          .toISOString()
+          .slice(0, 10);
+        await ctx.db.insert("publisherEarnings", {
+          ...base,
           day,
-          calls: 0,
-          grossCredits: 0,
-          netAtoms: 0,
-          pendingRiskAtoms: 9500,
-          reversedAtoms: 0,
-          failedAtoms: 0,
-          success: 0,
-          errors4xx: 0,
-          errors5xx: 0,
-          latencyHistogram: Array<number>(12).fill(0),
-          updatedAt: Date.now(),
+          grossCredits: 1,
+          netAtoms: 9500,
+          platformFeeAtoms: 500,
         });
-    }
+        for (const dimension of ["total", "project"] as const)
+          await ctx.db.insert("usageRollups", {
+            kind: "daily",
+            scope: "publisher",
+            scopeId: e.publisherOrganizationId,
+            dimension,
+            dimensionKey: dimension === "total" ? "all" : e.projectId,
+            shard: dimension === "total" ? e.shard : e.shard % 16,
+            day,
+            calls: 0,
+            grossCredits: 0,
+            netAtoms: 0,
+            pendingRiskAtoms: 9500,
+            reversedAtoms: 0,
+            failedAtoms: 0,
+            success: 0,
+            errors4xx: 0,
+            errors5xx: 0,
+            latencyHistogram: Array<number>(12).fill(0),
+            updatedAt: Date.now(),
+          });
+      }
+    });
+    if (measured.convexDocumentWriteBytes > 256 * 1024)
+      throw new Error("Seed batch exceeded write budget");
   },
 });
 export const largeAudit = internalQuery({
@@ -426,8 +446,11 @@ export const largeStart = internalAction({
     const { f, earningJson } = await ctx.runMutation(start, {
       run: crypto.randomUUID(),
     });
-    for (let offset = 0; offset < 10001; offset += 100)
+    for (let offset = 0; offset < 10001; offset += 100) {
       await ctx.runMutation(seedPage, { earningJson, offset });
+      // 300 small documents/batch; reserve <= 256 KiB each 200 ms.
+      await pause(200);
+    }
     const generation = await ctx.runMutation(reverseRef, {
       paymentId: f.paymentId,
     });
@@ -442,6 +465,7 @@ export const largeStart = internalAction({
         argumentBytes: 0,
         readBytes: 0,
         documentWriteBytes: 0,
+        convexDocumentWriteBytes: 0,
       },
     };
   },
@@ -457,6 +481,7 @@ export const largeBatch = internalAction({
       argumentBytes: v.number(),
       readBytes: v.number(),
       documentWriteBytes: v.number(),
+      convexDocumentWriteBytes: v.number(),
     }),
   },
   handler: async (ctx, a) => {
@@ -469,8 +494,9 @@ export const largeBatch = internalAction({
         argumentBytes: number;
         readBytes: number;
         documentWriteBytes: number;
+        convexDocumentWriteBytes: number;
       }
-    >("financeRaces:page");
+    >("financeRaces:pacedPage");
     const auditRef = makeFunctionReference<
       "query",
       { paymentId: Id<"payments"> }
@@ -482,6 +508,8 @@ export const largeBatch = internalAction({
         paymentId: a.paymentId,
         generation: a.generation,
       });
+      await pause(FINANCE_PAGE_INTERVAL_MS);
+      if (page.result === "throttled") continue;
       pages++;
       for (const key of Object.keys(peak) as (keyof typeof peak)[])
         peak[key] = Math.max(peak[key], page[key]);
@@ -490,43 +518,16 @@ export const largeBatch = internalAction({
         peak.writes > 150 ||
         peak.argumentBytes > 200000 ||
         peak.readBytes > 1000000 ||
-        peak.documentWriteBytes > 1000000
+        peak.convexDocumentWriteBytes > FINANCE_PAGE_WRITE_BYTES
       )
         throw new Error("Large reconciliation budget exceeded");
       if (page.result === "done") {
-        if (pages < 1250) throw new Error("Large reconciliation skipped pages");
+        if (pages !== 1257)
+          throw new Error("Large reconciliation skipped pages");
         await ctx.runQuery(auditRef, { paymentId: a.paymentId });
         return { ...a, pages, peak, done: true };
       }
     }
     return { ...a, pages, peak, done: false };
-  },
-});
-
-// Test-only cleanup, copied solely into guarded anonymous-loopback scratch deployment.
-export const resetPage = internalMutation({
-  args: { table: v.string() },
-  handler: async (ctx, a) => {
-    if (process.env.NEXT_STRIPE_PLATFORM_ACCOUNT_ID !== "acct_fixture")
-      throw new Error("Fixture reset only");
-    if (!Object.keys(schema.tables).includes(a.table))
-      throw new Error("Unknown fixture table");
-    const rows = await ctx.db
-      .query(a.table as import("../convex/_generated/dataModel").TableNames)
-      .take(100);
-    for (const row of rows) await ctx.db.delete(row._id);
-    return rows.length;
-  },
-});
-export const reset = internalAction({
-  args: {},
-  handler: async (ctx) => {
-    const page = makeFunctionReference<"mutation", { table: string }, number>(
-      "financeRaces:resetPage",
-    );
-    for (const table of Object.keys(schema.tables)) {
-      let count = 100;
-      while (count === 100) count = await ctx.runMutation(page, { table });
-    }
   },
 });

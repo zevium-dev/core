@@ -33,6 +33,8 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 
 ## Tech
 
+PR #439 throughput hardening: isolated rebuild earning release and payment restoration/clawback share `packages/control-plane-next/convex/money/throughput.ts` admission (ten pages/second, 128 KiB full-document writes per page). Release discovery spaces workers/continuations; deployment throughput errors retry after two seconds without opening corruption cases. Existing release leases remain cron-recoverable if scheduling fails. [Budget and CI scale validation](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11).
+
 ### Isolated rebuild PR 4 — 2026-10-11
 
 `packages/control-plane-next/convex/money/{publisherLedger,financialRollups,transfers,adjustments,reconciliationCases}.ts` and `{payouts,connect,stripeEvents}.ts` implement daily risk release, source-specific 95/5 reversals/restoration, whole-cent transfer allocation, provider outcome recovery and separate bank payout projection. Publisher balances change on ledger transitions, never per settled call. Earned gross/net stay immutable; held + released + reversed equals earned. Already-paid clawbacks can make publisher available balance negative. Payment-specific reconciliation holds block transfers from temporary restoration balances.
