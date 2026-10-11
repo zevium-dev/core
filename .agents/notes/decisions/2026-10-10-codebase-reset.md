@@ -14,6 +14,10 @@
 
 Order: tooling prune and Convex deletion first (cheap, unblock everything), then gateway restructure (admit → forward → finalize, needed by x402/routing/LLM), then Convex rebuild behind the same web-facing functions, then web fixes.
 
+Plan: [Convex rebuild — contracts, schema, money core and seven PRs](../architecture/convex-rebuild.md) (ready to execute for #353 after owner answers on 2026-10-11).
+
+Implementation sizing update (2026-10-11): **31 application tables** plus separately counted rate-limiter component tables; **~2,200 non-test money-core lines**. The original ~24-table audit estimate above remains historical. The plan now includes traceable dust-lot moves, 32-source-slice admission, 30-second wallet authority/freeze-drain, once-per-user signup-personal-org credit, estimated fee/full-paid-amount refund policy, daily release and ordinary house-org 95/5. Token execution, capability routing and x402 settlement are deferred. PR 1 refreshes current contracts and creates the isolated schema/validators/fixtures/CI package. Detailed 2026-10-11 decision records are maintained separately; this update does not rewrite the accepted reset direction.
+
 ## Already done (2026-10-10)
 
 Publisher-copy claims filter and compliance doc deleted ([repo cleanup](2026-10-10-repo-cleanup.md)); all tests green after.
