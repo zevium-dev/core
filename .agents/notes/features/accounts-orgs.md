@@ -1,6 +1,7 @@
 # Accounts & organizations
 
 > Status: partial (signup credit #317 uses first signed org creation, once per user) · Updated: 2026-10-11
+> Rebuild status: Isolated rebuild PR 2 implements signed Clerk lifecycle and first-created-org identity; PR 3 grant accounting and replacement cutover remain pending.
 > Code: `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/signup-credit.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
@@ -53,6 +54,10 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 - Sidebar switcher, per-tab active org; "Choose Organization" page when none active
 
 ## Tech
+
+### Isolated rebuild PR 2 — 2026-10-11
+
+The isolated replacement verifies Svix on `/clerk-webhook`, records receipt content identity atomically, orders mirrors by provider timestamps, reserves archived handles and retains deleted-user signup claims without profile PII. Only signed `organization.created.created_by` claims the first organization for its creator. First processed creation wins; updates, metadata, joins and ensure calls cannot nominate a recipient. The creator claim and PR 3 atomic 10,000-credit grant handoff live in [rebuild PR 2 status](../architecture/convex-rebuild.md#pr-2-implementation-and-handoff--2026-10-11). Code: `packages/control-plane-next/convex/{http,clerkWebhooks,organizations,users}.ts`, `lib/{auth,identity,dto}.ts`, `tests/identity.test.ts`.
 
 ### Accepted changes — implementation pending (2026-10-11)
 

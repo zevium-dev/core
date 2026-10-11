@@ -1,6 +1,7 @@
 # Listing lifecycle
 
-> Status: partial (P1 #15 deprecation/retirement + #393 visibility webhooks built; P2 #19 version pinning + spec-diff changelog not built) · Updated: 2026-10-10
+> Status: partial (P1 #15 deprecation/retirement + #393 visibility webhooks built; P2 #19 version pinning + spec-diff changelog not built) · Updated: 2026-10-11
+> Rebuild status: Isolated rebuild PR 2 route/retirement state implemented; production notification behavior remains on existing plane.
 > Code: `convex/projects.ts` (`update`, `scheduleRetirement`, `cancelRetirement`, `remove`, `retire`, `retireSunsetProjects`, `notifyRetirementConsumersPage`), `convex/specs.ts` (`publish`, `deprecateVersion`, `undeprecateVersion`), `convex/quality.ts` (`setSubscription`), `convex/lib/publicRoutes.ts`, `convex/project-visibility-webhooks.test.ts`, `convex/deprecation.test.ts`, `convex/project-retirement.test.ts`, `convex/project-lifecycle.test.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mock.ts`, `apps/web/src/components/project/visibility-card.tsx`, `apps/web/src/components/project/danger-zone.tsx`, `apps/web/src/components/spec-editor/rail-versions.tsx`, `apps/web/src/components/spec-editor/version-lifecycle-dialogs.tsx`
 > Related: [publishing-specs](publishing-specs.md), [quality-signals](quality-signals.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [catalogue-search](catalogue-search.md), [registry-v2](../architecture/registry-v2.md), [roadmap](../product/roadmap.md)
 
@@ -32,6 +33,10 @@ Related surfaces:
 - Notifications (email + in-app): deprecation/sunset notices, listing-status changes ([webhooks-notifications](webhooks-notifications.md)).
 
 ## Tech
+
+### Isolated rebuild PR 2 — 2026-10-11
+
+Next reserves `(publisher handle, project slug)` inside publication, locks handles after any route reservation, preserves tombstones/version history, enforces seven-day notice and fences scheduled retirement by revision. Cancel/metadata patches retain quality suspension and publication generation. Terminal cleanup deletes runtime credentials/webhook config while retaining accounting. Code: `packages/control-plane-next/convex/projects.ts`, `specs.ts`, `lib/publicRoutes.ts`, `tests/publishing.test.ts`. PR 6 must attach consumer notices/fanout before cutover; PR 5 owns executable snapshot/410 behavior.
 
 - **Email (#320)**: existing lifecycle/listing notices now use optional Resend delivery, including consumer-org project-retirement notices and their changed/canceled revisions. Version-deprecation now also fans out to existing version consumers in indexed 50-row usage pages (legacy unversioned usage included), deduping notices per org and rejecting stale/restored schedules. Changed publisher deprecation content also updates its canonical notice. Setup, recipient selection, stale-job fencing, and preferences: [webhooks-notifications](webhooks-notifications.md#transactional-email-320).
 

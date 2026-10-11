@@ -1,6 +1,7 @@
 # Publishing specs
 
 > Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
+> Rebuild status: Isolated rebuild PR 2 publishing implemented; production still uses existing control plane.
 > Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`, `packages/shared/src/pricing-policy.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
@@ -55,6 +56,10 @@ Sign up → Create org → Create project
 ```
 
 ## Tech
+
+### Isolated rebuild PR 2 — 2026-10-11
+
+Next embeds draft/readiness on projects, keeps immutable `specVersions`, reserves routes inside publication, and returns explicit DTO allowlists. Draft CAS, credential-fingerprint/TTL readiness, scalar-only pricing, at most 256 operations and one root upstream are enforced. Unpriced operations remain absent from derived prices/counts. Member draft edits remain allowed; live metadata and publication require admin. Code: `packages/control-plane-next/convex/{projects,specs,publishReadiness}.ts`, `lib/{dto,specPolicy,publicRoutes}.ts`, `tests/publishing.test.ts`. PR 6 must pair the probe fingerprint and wire catalogue, quality and notification side effects before cutover; see [handoff](../architecture/convex-rebuild.md#pr-2-implementation-and-handoff--2026-10-11).
 
 ### Accepted changes — implementation pending (2026-10-11)
 

@@ -1,6 +1,7 @@
 # Upstream credentials (publisher secrets)
 
-> Status: built (P0; publication with credentials #389 fixed) · Updated: 2026-10-10
+> Status: built (P0; publication with credentials #389 fixed) · Updated: 2026-10-11
+> Rebuild status: Isolated rebuild PR 2 single-envelope credentials implemented; production dual envelopes remain until cutover.
 > Code: `convex/upstreamCredentials.ts`, `convex/lib/credentialCrypto.ts`, `convex/http.ts` (`/gateway-spec`), `apps/gateway/src/spec-source.ts`, `apps/gateway/src/pipeline.ts`, `apps/web/src/components/project/credentials-card.tsx` (`UpstreamCredentialsCard`), `apps/web/src/routes/app/projects/$projectSlug.tsx`, `apps/web/src/components/project-settings-panel.tsx`, `convex/publishReadiness.ts`, `convex/publishReadiness.test.ts`
 > Related: [gateway](gateway.md), [publishing-specs](publishing-specs.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md)
 
@@ -19,6 +20,10 @@ Publishers store the credentials their upstream API requires; the gateway attach
 - Publisher golden path step: "attach upstream credentials" before validate → Save draft → Publish.
 
 ## Tech
+
+### Isolated rebuild PR 2 — 2026-10-11
+
+Next stores one required `aes-gcm-aad-v1` envelope, with canonical versioned 32-byte key material and AAD binding purpose, project/header, monotonic generation and key version. Delete/recreate cannot reuse a generation. Limit 32 headers per project; metadata APIs return no envelope/plaintext. Credential writes invalidate readiness and increment project revision. Code: `packages/control-plane-next/convex/upstreamCredentials.ts`, `lib/credentialCrypto.ts`, `tests/publishing.test.ts`. Gateway decryption/snapshot delivery remains PR 5.
 
 **Dogfood — 2026-10-10**
 

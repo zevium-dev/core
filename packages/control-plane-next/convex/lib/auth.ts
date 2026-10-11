@@ -1,10 +1,11 @@
+import { ConvexError } from "convex/values";
 import { isPrivilegedOrgRole, projectOrgCapabilities } from "@zevium/shared";
 import type { QueryCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 
 export async function requireIdentity(ctx: Pick<QueryCtx, "auth">) {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Not authenticated");
+  if (!identity) throw new ConvexError("Not authenticated");
   const stringClaim = (primary: string, fallback: string) => {
     const value = identity[primary] ?? identity[fallback];
     return typeof value === "string" ? value : undefined;
@@ -20,7 +21,12 @@ export async function requireIdentity(ctx: Pick<QueryCtx, "auth">) {
 /** JWT identity selects tenant; mutable URL slugs never authorize it. */
 export async function requireActiveOrg(ctx: Pick<QueryCtx, "auth" | "db">) {
   const claims = await requireIdentity(ctx);
-  if (!claims.orgId) throw new Error("Organization not found");
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_clerk", (q) => q.eq("clerkUserId", claims.subject))
+    .unique();
+  if (user?.deletedAt !== undefined) throw new ConvexError("Not authenticated");
+  if (!claims.orgId) throw new ConvexError("Organization not found");
   const org = await ctx.db
     .query("organizations")
     .withIndex("by_clerk", (q) => q.eq("clerkOrgId", claims.orgId!))
@@ -30,16 +36,16 @@ export async function requireActiveOrg(ctx: Pick<QueryCtx, "auth" | "db">) {
     .withIndex("by_clerk", (q) => q.eq("clerkOrgId", claims.orgId!))
     .unique();
   if (!org || org.archivedAt !== undefined || tombstone)
-    throw new Error("Organization not found");
+    throw new ConvexError("Organization not found");
   const access = projectOrgCapabilities(claims.orgRole);
-  if (!access) throw new Error("Organization role is not supported");
+  if (!access) throw new ConvexError("Organization role is not supported");
   return { claims, org, access };
 }
 export function requireOrgAdmin(
   claims: Awaited<ReturnType<typeof requireIdentity>>,
 ) {
   if (!isPrivilegedOrgRole(claims.orgRole))
-    throw new Error("Org admin or owner role required");
+    throw new ConvexError("Org admin or owner role required");
   return claims;
 }
 export async function requireProjectMember(
@@ -53,7 +59,13 @@ export async function requireProjectMember(
     project.organizationId !== org._id ||
     project.retirement?.state === "retired"
   )
-    throw new Error("Project not found");
+    throw new ConvexError("Project not found");
+  const route = await ctx.db
+    .query("routeTombstones")
+    .withIndex("by_project", (q) => q.eq("projectId", project._id))
+    .first();
+  if (route?.retiredAt !== undefined)
+    throw new ConvexError("Project not found");
   return { claims, org, project };
 }
 export async function requireProjectAdmin(
@@ -63,4 +75,14 @@ export async function requireProjectAdmin(
   const result = await requireProjectMember(ctx, projectId);
   requireOrgAdmin(result.claims);
   return result;
+}
+
+export async function requireSpecVersionAdmin(
+  ctx: Pick<QueryCtx, "auth" | "db">,
+  versionId: Id<"specVersions">,
+) {
+  const version = await ctx.db.get(versionId);
+  if (!version) throw new ConvexError("Spec version not found");
+  const result = await requireProjectAdmin(ctx, version.projectId);
+  return { ...result, version };
 }
