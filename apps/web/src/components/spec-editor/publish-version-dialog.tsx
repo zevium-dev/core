@@ -1,3 +1,4 @@
+import type { Snapshot } from "./use-spec-draft";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { isValidSemver, type SpecIssue } from "@zevium/shared";
@@ -54,6 +55,7 @@ type PublishVersionDialogProps = Pick<
   draftHash: string | null;
   readinessCurrent: boolean;
   onIssues: (issues: SpecIssue[]) => void;
+  onConflict: (snapshot: Snapshot) => void;
 };
 export function PublishVersionDialog({
   projectId,
@@ -62,6 +64,7 @@ export function PublishVersionDialog({
   canPublish,
   readinessCurrent,
   onIssues,
+  onConflict,
 }: PublishVersionDialogProps) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [versionTouched, setVersionTouched] = useState(false);
@@ -72,7 +75,7 @@ export function PublishVersionDialog({
   const publishLegacy = useConvexMutation(legacyApi.specs.publish);
   const publishNext = useConvexMutation(nextApi.specs.publish);
   const { mutate: publish, isPending: publishPending } = useMutation({
-    mutationFn: async (): Promise<{ ok: boolean; issues: SpecIssue[] }> =>
+    mutationFn: async () =>
       NEXT_CONTROL_PLANE
         ? publishNext({
             projectId,
@@ -81,6 +84,15 @@ export function PublishVersionDialog({
           })
         : publishLegacy({ projectId, version: version.trim() }),
     onSuccess: (result) => {
+      if ("conflict" in result && result.conflict) {
+        onConflict({
+          text: result.draft,
+          hash: result.draftHash,
+          savedAt: result.lastSavedAt,
+        });
+        setPublishOpen(false);
+        return;
+      }
       onIssues(result.issues);
       if (!result.ok) {
         const first = result.issues.find((i) => i.level === "error");

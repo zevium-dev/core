@@ -1,6 +1,6 @@
 # Webhooks & notifications
 
-> Status: partial (#363 list/presentation, #397 headings, #416 bell auth recovery complete) (P1) · Updated: 2026-10-10
+> Status: partial (#363 list/presentation, #397 headings, #416 bell auth recovery complete) (P1) · Updated: 2026-10-11
 > Code: `convex/projects.ts` (`update`), `convex/admin.ts` (`setProjectVisibility`), `convex/project-visibility-webhooks.test.ts`, `convex/webhooks.ts`, `convex/webhookDeliveryAction.ts`, `convex/lib/webhookDelivery.ts`, `convex/webhooks.test.ts`, `convex/notifications.ts`, `convex/lib/notifications.ts`, `convex/notifications.test.ts`, `apps/web/src/components/project/webhooks-card.tsx`, `apps/web/src/components/project/webhook-deliveries.tsx`, `apps/web/src/components/webhook-secret.test.tsx`, `apps/web/src/components/notification-bell.tsx`, `apps/web/src/routes/docs/publishing.tsx` (Webhooks section), `apps/web/src/components/project-settings-panel.tsx`
 > Related: [wallet-billing](wallet-billing.md) (spend alerts, budget webhooks), [listing-lifecycle](listing-lifecycle.md), [upstream-credentials](upstream-credentials.md) (webhook signing-secret encryption), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
@@ -25,6 +25,12 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 - **Notifications (email + in-app)**: verification, invitations, budget thresholds, deprecation/sunset notices, payout notices, listing-status changes
 
 ## Tech
+
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next email fan-out uses one-member Clerk pages, a global 30-pages/minute token bucket (burst two), and paced continuations; bad recipients are skipped with a non-sensitive log so later pages continue. Lifecycle edits update inbox rows without emailing again. Templates escape publisher content and break automatic URL/email detection. Webhook-failure notifications are admin-only for inbox, unread/mark-all, and Clerk email selection. Lease exhaustion creates a needs-review notice. Webhook 2xx headers count as delivered and the unused body is canceled immediately, so oversized/stalled bodies cannot trigger retries. Code: `packages/control-plane-next/convex/{notifications,notificationEmail,notificationEmailAction,webhooks,lifecycleNotices}.ts`, `lib/{notifications,notificationEmail,webhookTransport}.ts`.
 
 ### Isolated rebuild PR 6 — 2026-10-11
 
@@ -82,6 +88,8 @@ PR #436 now preserves `notificationPreferences` and permanent `notificationEmail
 - Webhook signing secrets stored as encrypted envelopes — see [upstream-credentials](upstream-credentials.md) "Publisher secrets".
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 

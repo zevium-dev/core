@@ -122,15 +122,17 @@ export const projectAnalytics = query({
       total = sum(rows);
     const details = await ctx.db
       .query("usageRollups")
-      .withIndex("by_dimension_day", (q) =>
+      .withIndex("by_project_dimension_day", (q) =>
         q
           .eq("kind", "daily")
           .eq("scope", "publisher")
           .eq("scopeId", org._id)
+          .eq("projectId", project._id)
           .eq("dimension", "endpoint")
           .gte("day", utcDay(rangeStart))
           .lt("day", utcDay(end)),
       )
+      .order("desc")
       .take(4001);
     const endpoints = new Map<string, typeof rows>();
     for (const r of details.slice(0, 4000)) {

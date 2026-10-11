@@ -3,8 +3,10 @@ import { v, ConvexError } from "convex/values";
 import { RateLimiter, HOUR } from "@convex-dev/rate-limiter";
 import {
   query,
+  action,
   mutation,
   internalMutation,
+  internalQuery,
   type QueryCtx,
   type MutationCtx,
 } from "./_generated/server";
@@ -12,7 +14,7 @@ import { components, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   requireActiveOrg,
-  requireProjectMember,
+  requireProjectAdmin,
   requireAdmin,
 } from "./lib/auth";
 import { listing } from "./lib/catalogue";
@@ -34,6 +36,34 @@ const publicReview = (r: Doc<"reviews">) => ({
   response: r.response
     ? { body: r.response.body, updatedAt: r.response.updatedAt }
     : null,
+});
+const ownReview = (r: Doc<"reviews">) => ({
+  ...publicReview(r),
+  _id: r._id,
+  active: r.active,
+  hidden: r.hidden,
+});
+export const upsert = action({
+  args: {
+    projectId: v.id("projects"),
+    rating: v.number(),
+    body: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<ReturnType<typeof ownReview>> => {
+    await ctx.runAction(internal.reviewMembership.check, {
+      projectId: args.projectId,
+    });
+    return ctx.runMutation(internal.reviews.upsertVerified, args);
+  },
+});
+export const membershipTarget = internalQuery({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { claims } = await eligible(ctx, args.projectId);
+    const project = (await ctx.db.get(args.projectId))!;
+    const publisher = (await ctx.db.get(project.organizationId))!;
+    return { userId: claims.subject, publisherOrgId: publisher.clerkOrgId };
+  },
 });
 function text(value: string, min: number, max: number, label: string) {
   const result = value.trim();
@@ -87,7 +117,7 @@ async function aggregate(
     }
   await ctx.db.patch(projectId, { reviewSummary: summary });
 }
-export const upsert = mutation({
+export const upsertVerified = internalMutation({
   args: {
     projectId: v.id("projects"),
     rating: v.number(),
@@ -103,12 +133,12 @@ export const upsert = mutation({
         : text(args.body, 0, 2000, "Review") || undefined;
     const before = await ctx.db
       .query("reviews")
-      .withIndex("by_consumer_project", (q) =>
-        q.eq("consumerOrganizationId", org._id).eq("projectId", args.projectId),
+      .withIndex("by_user_project", (q) =>
+        q.eq("createdBy", claims.subject).eq("projectId", args.projectId),
       )
       .unique();
     if (before?.active && before.rating === args.rating && before.body === body)
-      return before;
+      return ownReview(before);
     const now = Date.now();
     const id = before
       ? before._id
@@ -153,21 +183,21 @@ export const upsert = mutation({
       current: content(after),
     });
     await aggregate(ctx, args.projectId, before, after);
-    return after;
+    return ownReview(after);
   },
 });
 export const withdraw = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const { org, claims } = await requireActiveOrg(ctx);
+    const { claims } = await requireActiveOrg(ctx);
     const before = await ctx.db
       .query("reviews")
-      .withIndex("by_consumer_project", (q) =>
-        q.eq("consumerOrganizationId", org._id).eq("projectId", args.projectId),
+      .withIndex("by_user_project", (q) =>
+        q.eq("createdBy", claims.subject).eq("projectId", args.projectId),
       )
       .unique();
     if (!before) throw new ConvexError("Review not found");
-    if (!before.active) return before;
+    if (!before.active) return ownReview(before);
     await ctx.db.patch(before._id, {
       active: false,
       contentRevision: before.contentRevision + 1,
@@ -187,7 +217,7 @@ export const withdraw = mutation({
       current: content(after),
     });
     await aggregate(ctx, args.projectId, before, after);
-    return after;
+    return ownReview(after);
   },
 });
 export const respondAsPublisher = mutation({
@@ -195,9 +225,9 @@ export const respondAsPublisher = mutation({
   handler: async (ctx, args) => {
     const review = await ctx.db.get(args.reviewId);
     if (!review) throw new ConvexError("Review not found");
-    const { claims } = await requireProjectMember(ctx, review.projectId),
+    const { claims } = await requireProjectAdmin(ctx, review.projectId),
       body = text(args.body, 1, 2000, "Response");
-    if (review.response?.body === body) return review.response;
+    if (review.response?.body === body) return publicReview(review).response;
     const response = {
       body,
       createdBy: review.response?.createdBy ?? claims.subject,
@@ -220,7 +250,7 @@ export const respondAsPublisher = mutation({
       previous: review.response?.body ?? null,
       current: body,
     });
-    return response;
+    return { body: response.body, updatedAt: response.updatedAt };
   },
 });
 export const report = mutation({
@@ -304,7 +334,11 @@ export const resolveReportsPage = internalMutation({
 export const moderate = mutation({
   args: {
     reviewId: v.id("reviews"),
-    action: v.union(v.literal("hidden"), v.literal("restored")),
+    action: v.union(
+      v.literal("hidden"),
+      v.literal("restored"),
+      v.literal("dismissed"),
+    ),
     reason: v.string(),
     expectedModerationGeneration: v.number(),
     expectedContentRevision: v.number(),
@@ -320,14 +354,18 @@ export const moderate = mutation({
     )
       throw new ConvexError("Moderation target is stale; refresh the queue");
     const display = await queueItem(ctx, review);
-    const hidden = args.action === "hidden";
-    if (review.hidden === hidden) return review;
+    const hidden =
+      args.action === "dismissed" ? review.hidden : args.action === "hidden";
+    if (args.action !== "dismissed" && review.hidden === hidden)
+      return ownReview(review);
     await ctx.db.patch(review._id, {
       hidden,
       moderationGeneration: review.moderationGeneration + 1,
       openReportCount: 0,
       hasOpenReports: false,
       queueSortKey: undefined,
+      latestReportReason: undefined,
+      latestReportAt: undefined,
     });
     const after = (await ctx.db.get(review._id))!;
     await ctx.db.insert("reviewEvents", {
@@ -338,7 +376,8 @@ export const moderate = mutation({
       sortKey: sortKey(),
       contentRevision: review.contentRevision,
       moderationGeneration: after.moderationGeneration,
-      action: hidden ? "hide" : "restore",
+      action:
+        args.action === "dismissed" ? "dismiss" : hidden ? "hide" : "restore",
       reason,
       snapshot: content(after),
       display: {
@@ -355,7 +394,7 @@ export const moderate = mutation({
       moderationGeneration: review.moderationGeneration,
     });
     await aggregate(ctx, review.projectId, review, after);
-    return after;
+    return ownReview(after);
   },
 });
 export const getAggregate = query({
@@ -412,6 +451,7 @@ export const getViewerState = query({
         signedIn: false,
         canReview: false,
         isPublisher: false,
+        canRespond: false,
         reason: "Sign in and choose an organization to review",
         review: null,
       };
@@ -423,6 +463,7 @@ export const getViewerState = query({
         signedIn: true,
         canReview: false,
         isPublisher: false,
+        canRespond: false,
         reason: "Active organization is unavailable",
         review: null,
       };
@@ -433,14 +474,15 @@ export const getViewerState = query({
         signedIn: true,
         canReview: false,
         isPublisher: false,
+        canRespond: false,
         reason: "Listing unavailable",
         review: null,
       };
     const review = await ctx.db
       .query("reviews")
-      .withIndex("by_consumer_project", (q) =>
+      .withIndex("by_user_project", (q) =>
         q
-          .eq("consumerOrganizationId", active.org._id)
+          .eq("createdBy", active.claims.subject)
           .eq("projectId", args.projectId),
       )
       .unique();
@@ -456,12 +498,13 @@ export const getViewerState = query({
       signedIn: true,
       canReview,
       isPublisher,
+      canRespond: isPublisher && active.access.capabilities.managePublisher,
       reason: isPublisher
         ? "Publisher organizations cannot review their own listing"
         : canReview
           ? "Eligible verified consumer"
           : "Make one successful gateway call before reviewing",
-      review,
+      review: review ? ownReview(review) : null,
     };
   },
 });
@@ -502,7 +545,9 @@ async function queueItem(ctx: QueryCtx, review: Doc<"reviews">) {
             action:
               latest.action === "hide"
                 ? ("hidden" as const)
-                : ("restored" as const),
+                : latest.action === "dismiss"
+                  ? ("dismissed" as const)
+                  : ("restored" as const),
             reason: latest.reason,
             at: latest.at,
           }
@@ -547,7 +592,9 @@ export const listModerationQueue = query({
                         action:
                           e.action === "hide"
                             ? ("hidden" as const)
-                            : ("restored" as const),
+                            : e.action === "dismiss"
+                              ? ("dismissed" as const)
+                              : ("restored" as const),
                       },
                       item: review
                         ? {
@@ -562,7 +609,9 @@ export const listModerationQueue = query({
                               action:
                                 e.action === "hide"
                                   ? ("hidden" as const)
-                                  : ("restored" as const),
+                                  : e.action === "dismiss"
+                                    ? ("dismissed" as const)
+                                    : ("restored" as const),
                               reason: e.reason,
                               at: e.at,
                             },

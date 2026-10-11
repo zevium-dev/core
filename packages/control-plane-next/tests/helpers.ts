@@ -1,3 +1,4 @@
+import rateSchema from "../node_modules/@convex-dev/rate-limiter/dist/component/schema.js";
 declare global {
   interface ImportMeta {
     glob(pattern: string): Record<string, () => Promise<unknown>>;
@@ -15,8 +16,13 @@ export const webhookSecret = ["whsec", "dGVzdC13ZWJob29rLXNlY3JldA=="].join(
   "_",
 );
 export const keySecret = "test-projection-signing-secret-at-least-32";
+const rateModules = import.meta.glob(
+  "../node_modules/@convex-dev/rate-limiter/dist/component/**/*.js",
+);
 export function harness() {
-  return convexTest(schema, modules);
+  const t = convexTest(schema, modules);
+  t.registerComponent("rateLimiter", rateSchema, rateModules);
+  return t;
 }
 export type Harness = ReturnType<typeof harness>;
 export function identity(org = "one", user = "user_one", role = "org:admin") {

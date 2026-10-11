@@ -1,6 +1,6 @@
 # Quality signals
 
-> Status: partial (P0 #7 quality signals mostly built; credential readiness mismatch #389 fixed; P2 #18 security scan + status pages not built) · Updated: 2026-10-10
+> Status: partial (P0 #7 quality signals mostly built; credential readiness mismatch #389 fixed; P2 #18 security scan + status pages not built) · Updated: 2026-10-11
 > Code: `convex/projects.ts`, `convex/project-authorization.test.ts`, `convex/project-retirement.test.ts`, `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `convex/publishReadiness.test.ts`
 > Related: [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [catalogue-search](catalogue-search.md), [platform-admin](platform-admin.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [roadmap](../product/roadmap.md)
 
@@ -34,6 +34,12 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Probe cron drains due work in 20-project pages with a one-second scheduled continuation and fixed cutoff; leases move claimed rows out of the due range. Quality samples exclude consumer/publisher self-traffic. Visibility recovery restores search embeddings; suspension removes them. Connection tests are limited to five per org per minute before probing. Code: `packages/control-plane-next/convex/{quality,publishReadiness,publishReadinessAction}.ts` and `lib/catalogue.ts`.
+
 ### Isolated rebuild PR 6 — 2026-10-11
 
 **Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
@@ -60,6 +66,8 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - UI: `QualityBadges` renders "API quality: insufficient data (n/20)", "Reachability: insufficient data (n/3)", "Data fresh|stale"; shared by API detail, catalogue cards (compact mode), and the publisher Quality tab. Finite-number guards prevent missing percentages/latencies from rendering as `undefined` or `NaN`.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - None recorded beyond PRODUCT.md rules above.
 

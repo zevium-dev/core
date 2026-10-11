@@ -54,7 +54,11 @@ async function recompute(ctx: MutationCtx, project: Doc<"projects">) {
     )
     .order("desc")
     .take(100);
-  const measured = samples.filter((s) => s.billingOutcome !== "exception");
+  const measured = samples.filter(
+    (s) =>
+      s.billingOutcome !== "exception" &&
+      s.consumerOrganizationId !== s.publisherOrganizationId,
+  );
   const health = probes.filter(
     (p): p is Extract<Doc<"qualityEvents">, { kind: "probe" }> =>
       p.kind === "probe",
@@ -129,12 +133,13 @@ export const recomputeGatewayQuality = internalMutation({
   },
 });
 export const runDueProbes = internalMutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { cutoff: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cutoff = args.cutoff ?? Date.now();
     const projects = await ctx.db
       .query("projects")
       .withIndex("by_probe", (q) =>
-        q.gt("quality.nextProbeAt", 0).lte("quality.nextProbeAt", Date.now()),
+        q.gt("quality.nextProbeAt", 0).lte("quality.nextProbeAt", cutoff),
       )
       .take(20);
     for (const p of projects) {
@@ -166,6 +171,10 @@ export const runDueProbes = internalMutation({
         { targetId: p._id, executionId },
       );
     }
+    if (projects.length === 20)
+      await ctx.scheduler.runAfter(1000, internal.quality.runDueProbes, {
+        cutoff,
+      });
   },
 });
 export const getLeasedTarget = internalQuery({

@@ -1,6 +1,6 @@
 # Platform admin
 
-> Status: partial (#363 list/presentation fixes complete) · Updated: 2026-10-10
+> Status: partial (#363 list/presentation fixes complete) · Updated: 2026-10-11
 > Code: `convex/admin.ts`, `convex/admin.test.ts`, `convex/lib/auth.ts` (`requireAdmin`, `isAdmin`), `apps/web/src/routes/admin.tsx`, `apps/web/src/routes/admin/index.tsx`, `apps/web/src/routes/admin/orgs.tsx`, `apps/web/src/routes/admin/projects.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/routes/admin/reviews.tsx`, `apps/web/src/routes/admin/-reviews-ui.tsx`, `apps/web/src/components/admin-header.tsx`
 > Related: [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [reviews](reviews.md), [earnings-payouts](earnings-payouts.md), [wallet-billing](wallet-billing.md), [webhooks-notifications](webhooks-notifications.md), [upstream-credentials](upstream-credentials.md), [accounts-orgs](accounts-orgs.md)
 
@@ -21,6 +21,12 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 - **Platform metrics**: GMV, take, active consumers/publishers, call volume, error rates
 
 ## Tech
+
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next console defaults to open cases and subscribes to evidence only while expanded. Adoption, void, drained-close abandonment and exact-final recovery require stock shadcn AlertDialog confirmation showing case/wallet ID, amount, effect and note. Curated ConvexError data reaches the operator; unknown/internal exceptions use a generic message. Rejected and exception settlement outcomes never toast success. Moderation offers report dismissal with generation fencing. Code: `apps/web/src/components/operator-console.tsx`, `apps/web/src/routes/admin/-reviews-ui.tsx`, `packages/control-plane-next/convex/{admin,reviews}.ts`.
 
 ### Isolated rebuild PR 6 — 2026-10-11
 
@@ -51,6 +57,8 @@ Code pointers: `apps/web/src/components/operator-console.tsx`; `packages/control
 - `ADMIN_USER_IDS` Convex env currently = seed test user. Set real admin Clerk user ids for prod.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - Admin access = env allowlist (`ADMIN_USER_IDS`), no roles table.
 - 2026-07-11 — Scope: full FLOW.md parity including admin.

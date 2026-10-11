@@ -1,3 +1,16 @@
+import { ConvexError } from "convex/values";
+import { settlement } from "@zevium/shared/edge/settlement";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "#/components/ui/alert-dialog";
 import { useState, type ReactNode } from "react";
 import {
   useAction,
@@ -54,11 +67,13 @@ function Operation({
   run,
   disabled = false,
   destructive = false,
+  confirmation,
 }: {
   label: string;
   run: () => Promise<unknown>;
   disabled?: boolean;
   destructive?: boolean;
+  confirmation?: { id: string; amount: string; effect: string; note: string };
 }) {
   const operation = useMutation({
     mutationFn: run,
@@ -67,7 +82,7 @@ function Operation({
         result &&
         typeof result === "object" &&
         "status" in result &&
-        (result.status === "rejected" || result.status === "retryable")
+        (result.status === "rejected" || result.status === "exception")
       ) {
         toast.error(
           "Recovery remains blocked. Review the immutable evidence and current wallet state.",
@@ -78,21 +93,56 @@ function Operation({
     },
     onError: (error) =>
       toast.error(
-        humanError(
+        operatorError(
           error,
           "Operation could not complete. Review the current record before retrying.",
         ),
       ),
   });
-  return (
+  const button = (
     <Button
       variant={destructive ? "destructive" : "outline"}
       disabled={disabled || operation.isPending}
-      onClick={() => operation.mutate()}
+      onClick={confirmation ? undefined : () => operation.mutate()}
     >
       {operation.isPending ? "Working…" : label}
     </Button>
   );
+  if (!confirmation) return button;
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>{button}</AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{label}?</AlertDialogTitle>
+          <AlertDialogDescription>{confirmation.effect}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <dl className="grid gap-2 text-sm break-all">
+          <dt>Case / wallet ID</dt>
+          <dd>{confirmation.id}</dd>
+          <dt>Amount</dt>
+          <dd>{confirmation.amount}</dd>
+          <dt>Audit note</dt>
+          <dd className="whitespace-pre-wrap">{confirmation.note}</dd>
+        </dl>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={disabled || operation.isPending}
+            onClick={() => operation.mutate()}
+          >
+            Confirm {label.toLowerCase()}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+function operatorError(error: unknown, fallback: string) {
+  // ConvexError data is deliberately curated by our staff endpoints; Error.message includes internals.
+  return error instanceof ConvexError && typeof error.data === "string"
+    ? error.data
+    : humanError(error, fallback);
 }
 function AuditNote({
   value,
@@ -197,6 +247,13 @@ function CaseDetail({ row }: { row: Case }) {
                 />
                 <Operation
                   label="Void exception"
+                  confirmation={{
+                    id: row._id,
+                    amount: "0 credits moved",
+                    effect:
+                      "Permanently records this exception as void. Wallet and publisher balances stay unchanged.",
+                    note: reason,
+                  }}
                   destructive
                   disabled={reason.trim().length < 8}
                   run={() =>
@@ -224,7 +281,23 @@ function CaseDetail({ row }: { row: Case }) {
                 {["transfer", "account_create"].includes(row.kind) && (
                   <Operation
                     label="Verify and adopt"
-                    disabled={reason.trim().length < 8 || !providerId}
+                    confirmation={{
+                      id: row._id,
+                      amount:
+                        row.transferAmountCents === null
+                          ? row.kind === "account_create"
+                            ? "Account adoption: no money moved"
+                            : "Transfer amount unavailable"
+                          : `${row.transferAmountCents} USD cents already transferred`,
+                      effect: `Adopt provider object ${providerId} after verifying its exact evidence. This permanently links the provider fact to this case.`,
+                      note: reason,
+                    }}
+                    disabled={
+                      reason.trim().length < 8 ||
+                      !providerId ||
+                      (row.kind === "transfer" &&
+                        row.transferAmountCents === null)
+                    }
                     run={() =>
                       provider({
                         caseId: row._id,
@@ -261,10 +334,24 @@ function CaseDetail({ row }: { row: Case }) {
     </div>
   );
 }
+function ExpandableCase({ row }: { row: Case }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="rounded-md border p-4"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary className="cursor-pointer text-sm font-medium">
+        {row.kind} · {row.status} · {row.operationId ?? row._id}
+      </summary>
+      {open && <CaseDetail row={row} />}
+    </details>
+  );
+}
 function Cases() {
   const rows = usePaginatedQuery(
     api.admin.listFinanceReconciliationCases,
-    {},
+    { status: "open" },
     { initialNumItems: 25 },
   );
   return (
@@ -274,14 +361,7 @@ function Cases() {
     >
       {rows.results.flatMap((row) =>
         row.rowKind === "case"
-          ? [
-              <details key={row._id} className="rounded-md border p-4">
-                <summary className="cursor-pointer text-sm font-medium">
-                  {row.kind} · {row.status} · {row.operationId ?? row._id}
-                </summary>
-                <CaseDetail row={row} />
-              </details>,
-            ]
+          ? [<ExpandableCase key={row._id} row={row} />]
           : [],
       )}
       <PageEnd {...rows} />
@@ -373,6 +453,13 @@ function Close({
             />
             <Operation
               label="Abandon drained admin decrease"
+              confirmation={{
+                id: row.id,
+                amount: `${row.balance} credits remain; 0 credits moved`,
+                effect:
+                  "Cancel this drained admin decrease and reopen the wallet. No ledger effects are applied.",
+                note: reason,
+              }}
               destructive
               disabled={reason.trim().length < 8}
               run={() =>
@@ -416,8 +503,20 @@ function RejectedFinal() {
   const evidence = useMutation({
     mutationFn: () => load({ clerkOrgId: org, settleRefId: reference }),
     onError: (error) =>
-      toast.error(humanError(error, "Could not load rejected final evidence.")),
+      toast.error(
+        operatorError(error, "Could not load rejected final evidence."),
+      ),
   });
+  const recovered = (() => {
+    try {
+      const parsed = evidence.data
+        ? settlement.safeParse(JSON.parse(evidence.data.eventJson))
+        : null;
+      return parsed?.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  })();
   const current = evidence.variables !== undefined || evidence.isSuccess;
   return (
     <Section
@@ -462,7 +561,16 @@ function RejectedFinal() {
           <AuditNote id="rejected-note" value={reason} onChange={setReason} />
           <Operation
             label="Recover exact final"
-            disabled={reason.trim().length < 8}
+            confirmation={{
+              id: recovered?.walletId ?? org,
+              amount: recovered
+                ? `${recovered.credits} credits`
+                : "Unavailable",
+              effect:
+                "Replay this exact retained settlement. Valid evidence can debit backed credits and create publisher earnings; exception outcomes record served usage without payment.",
+              note: reason,
+            }}
+            disabled={reason.trim().length < 8 || !recovered}
             run={() => recover({ ...evidence.data!, reason })}
           />
           <p className="text-sm text-muted-foreground">

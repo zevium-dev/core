@@ -201,10 +201,6 @@ export const update = mutation({
         visibility: after.visibility,
       });
     await retirementNotice(ctx, project, after);
-    if (after.discoverable)
-      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-        projectId: after._id,
-      });
     return projectDto(after);
   },
 });
@@ -251,7 +247,10 @@ async function retireProject(ctx: MutationCtx, project: Doc<"projects">) {
       cleanupPhase: "complete",
     },
   });
-  await syncCatalogue(ctx, project, (await ctx.db.get(project._id))!);
+  const after = (await ctx.db.get(project._id))!;
+  await syncCatalogue(ctx, project, after);
+  if (project.status === "published")
+    await retirementNotice(ctx, project, after);
 }
 export const retire = internalMutation({
   args: { projectId: v.id("projects") },
@@ -325,10 +324,6 @@ export const scheduleRetirement = mutation({
         visibility: after.visibility,
       });
     await retirementNotice(ctx, project, after);
-    if (after.discoverable)
-      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-        projectId: after._id,
-      });
     return projectDto(after);
   },
 });
@@ -355,10 +350,6 @@ export const cancelRetirement = mutation({
         visibility: after.visibility,
       });
     await retirementNotice(ctx, project, after);
-    if (after.discoverable)
-      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-        projectId: after._id,
-      });
     return projectDto(after);
   },
 });

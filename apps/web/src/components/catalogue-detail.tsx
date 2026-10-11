@@ -275,6 +275,10 @@ function ApiDetailBody({
             </p>
             <h1 className="w-fit min-w-0 max-w-full text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]">
               {data.project.name}
+              {"houseOperated" in data.project &&
+                data.project.houseOperated === true && (
+                  <Badge variant="secondary">Operated by Zevium</Badge>
+                )}
             </h1>
             <p className="text-sm text-muted-foreground">
               by{" "}

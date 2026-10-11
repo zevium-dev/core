@@ -243,6 +243,14 @@ export const claimDelivery = internalMutation({
         leaseToken: undefined,
         leaseUntil: undefined,
       });
+      if (p && org && (await isActive(ctx, org)))
+        await createNotification(ctx, {
+          organizationId: p.organizationId,
+          kind: "webhook_failed",
+          title: "Webhook delivery needs review",
+          body: `Delivery of ${d.event} exhausted its lease or signing generation.`,
+          refId: `webhook_failed:${d._id}`,
+        });
       return null;
     }
     await ctx.db.patch(d._id, {

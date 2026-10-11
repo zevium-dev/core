@@ -11,12 +11,15 @@ import {
 import { getFunctionName } from "convex/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailsCard } from "../project/details-card";
+import { PublishVersionDialog } from "./publish-version-dialog";
 import { PublishPanel } from "./publish-panel";
 import { SpecRailEndpoints } from "./rail-endpoints";
 import { OPENAPI_TEMPLATE } from "./template";
 
+const publish = vi.hoisted(() => vi.fn());
 vi.mock("@convex-dev/react-query", () => ({
-  useConvexMutation: () => vi.fn(),
+  useConvexMutation: (ref: Parameters<typeof getFunctionName>[0]) =>
+    getFunctionName(ref) === "specs:publish" ? publish : vi.fn(),
   convexQuery: (ref: Parameters<typeof getFunctionName>[0]) => ({
     queryKey: [getFunctionName(ref)],
     initialData: { current: true },
@@ -97,6 +100,7 @@ describe("input survives realtime", () => {
       pricing: null,
       endpointCount: 1,
       onIssues: vi.fn(),
+      onConflict: vi.fn(),
     };
     const view = render(<PublishPanel {...props} />, { wrapper });
     await waitFor(() =>
@@ -128,6 +132,39 @@ describe("input survives realtime", () => {
     expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
       "2.3.4-beta.1",
     );
+  });
+  it("hands publish conflicts to the shared draft conflict flow", async () => {
+    publish.mockResolvedValueOnce({
+      conflict: true,
+      draft: "remote draft",
+      draftHash: "remote hash",
+      lastSavedAt: 123,
+    });
+    const onConflict = vi.fn();
+    const onIssues = vi.fn();
+    render(
+      <PublishVersionDialog
+        projectId={project._id}
+        versions={[]}
+        canPublish
+        draftHash="old hash"
+        readinessCurrent
+        onConflict={onConflict}
+        onIssues={onIssues}
+      />,
+      { wrapper },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Publish" }).at(-1)!);
+    await waitFor(() =>
+      expect(onConflict).toHaveBeenCalledWith({
+        text: "remote draft",
+        hash: "remote hash",
+        savedAt: 123,
+      }),
+    );
+    expect(onIssues).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
   it("keeps an unfinished decimal through pricing write-back", () => {
     const change = vi.fn();

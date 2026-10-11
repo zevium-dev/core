@@ -57,6 +57,12 @@ Sign up → Create org → Create project
 
 ## Tech
 
+### PR #442 review fixes — 2026-10-11
+
+**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
+
+Next publish dialog handles `conflict: true` before success/issue handling, closes the publish dialog and passes the canonical snapshot into the existing draft conflict flow, which preserves local edits, pauses autosave, and offers reload/overwrite. Connection-test admission is limited to five requests/org/minute. Public detail serves a spec with unpriced operations removed, retaining explicit zero-cost operations. Code: `apps/web/src/components/spec-editor/publish-version-dialog.tsx`, `packages/control-plane-next/convex/{publishReadiness,catalogue}.ts`, `lib/specPolicy.ts`.
+
 ### Isolated rebuild PR 2 — 2026-10-11
 
 PR #437 review fixes: `projectDrafts.by_project` owns draft text/hash/revision/savedAt. Project rows retain small draft metadata and readiness; save updates both atomically and identical retries write neither. `projects.list` now requires `paginationOpts`, returns a page DTO and caps reads at 50 small rows. `specs.publish` requires `draftHash` and returns the same conflict DTO as save on mismatch, before reserving routes or inserting versions. Readiness reads the body only for target extraction. Tests cover 55 near-limit drafts through list/archive/sunset and publication after a collaborator refreshes readiness. Code: `packages/control-plane-next/convex/{specs,projects,publishReadiness}.ts`, `lib/drafts.ts`, `schema/identity.ts`, `tests/publishing.test.ts`.
@@ -103,6 +109,8 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - **Settings**: project-ID-keyed cards derive untouched fields from realtime data and retain local overrides while typing. Convex subscriptions own updates; there are no cache invalidations or manual optimistic cache writes in editor/settings. Admin/owner access follows the shared privileged-role predicate. Webhook URL input survives rotation; reveal-once version tracking remains intact.
 
 ## Decisions
+
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - 2026-10-11 — ACCEPTED: Publisher spec is the contract; generated surfaces #428, existing MCP #110, form playground #427. Zevium writes house specs. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
 - 2026-10-11 — ACCEPTED: Ordinary house publisher org/95/5 ledger (#314); RapidAPI excluded (#313); cap optional P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).

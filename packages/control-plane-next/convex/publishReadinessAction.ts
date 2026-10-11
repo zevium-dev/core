@@ -26,7 +26,7 @@ export type ConnectionResult = {
 export const testConnection = action({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<ConnectionResult> => {
-    const { clerkOrgId } = await ctx.runQuery(
+    const { clerkOrgId } = await ctx.runMutation(
       internal.publishReadiness.authorizeTest,
       args,
     );

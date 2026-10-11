@@ -1,5 +1,5 @@
-import { publicationNotice } from "./lifecycleNotices";
-import { createNotification } from "./lib/notifications";
+import { limitLifecycle, publicationNotice } from "./lifecycleNotices";
+import { upsertNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { syncCatalogue, adjustStat } from "./lib/catalogue";
 import { setupQuality } from "./quality";
@@ -149,9 +149,6 @@ export const publish = mutation({
       (await ctx.db.get(project._id))!,
       (await ctx.db.get(id))!,
     );
-    await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-      projectId: project._id,
-    });
     return {
       ok: true,
       issues,
@@ -252,6 +249,7 @@ export const deprecateVersion = mutation({
       version.deprecationMessage === (message ?? version.deprecationMessage)
     )
       return versionDto(version);
+    await limitLifecycle(ctx, project);
     await ctx.db.patch(version._id, {
       deprecatedAt: version.deprecatedAt ?? Date.now(),
       noticeRevision: (version.noticeRevision ?? 0) + 1,
@@ -267,12 +265,13 @@ export const deprecateVersion = mutation({
         version.deprecationMessage !== changed.deprecationMessage)
     ) {
       const body = `${project.name} version ${version.version} is deprecated. ${changed.deprecationMessage ?? "Migrate to the current version."}`;
-      await createNotification(ctx, {
+      await upsertNotification(ctx, {
         organizationId: project.organizationId,
         kind: "version_deprecated",
         title: "Version deprecated",
         body,
-        refId: `deprecation:${version._id}:${project.revision + 1}`,
+        refId: `deprecation:${version._id}`,
+        email: version.deprecatedAt === undefined,
       });
       await fireWebhookEvent(ctx, project._id, "spec.deprecated", {
         projectId: project._id,
@@ -281,6 +280,7 @@ export const deprecateVersion = mutation({
       await ctx.scheduler.runAfter(0, internal.lifecycleNotices.consumers, {
         projectId: project._id,
         revision: changed.noticeRevision!,
+        email: version.deprecatedAt === undefined,
         versionId: version._id,
         cursor: null,
         body,
@@ -298,6 +298,7 @@ export const undeprecateVersion = mutation({
     );
     if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now())
       throw new ConvexError("A version cannot be changed after its sunset");
+    await limitLifecycle(ctx, project);
     await ctx.db.patch(version._id, {
       deprecatedAt: undefined,
       noticeRevision: (version.noticeRevision ?? 0) + 1,

@@ -50,9 +50,12 @@ export function notificationTemplate(
       : (destinations[notification.kind] ?? "/app");
   const url = new URL(destination, origin.origin).href;
   const context = `Notification for ${organizationName}. Select this organization in Zevium to view its details.`;
+  const plain = (value: string) => value.replace(/([.:@/])/g, "$1\u200b");
+  const title = plain(notification.title),
+    body = plain(notification.body);
   return {
     subject: notification.title.replace(/[\r\n]/g, " ").slice(0, 200),
-    text: `${notification.title}\n\n${notification.body}\n\n${context}\n${url}`,
-    html: `<h1>${escapeHtml(notification.title)}</h1><p>${escapeHtml(notification.body).replaceAll("\n", "<br>")}</p><p>${escapeHtml(context)}</p><p><a href="${escapeHtml(url)}">View in Zevium</a></p>`,
+    text: `${title}\n\n${body}\n\n${context}\n${url}`,
+    html: `<h1>${escapeHtml(title)}</h1><p>${escapeHtml(body).replaceAll("\n", "<br>")}</p><p>${escapeHtml(context)}</p><p><a href="${escapeHtml(url)}">View in Zevium</a></p>`,
   };
 }

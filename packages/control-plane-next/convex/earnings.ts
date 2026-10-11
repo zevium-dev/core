@@ -1,13 +1,14 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { requireActiveOrg } from "./lib/auth";
+import { requireActiveOrg, requireOrgAdmin } from "./lib/auth";
 import { daily, lifetime, sum, monthStart, dayStart } from "./lib/readRollups";
 import { atomsToCredits } from "./accounting";
 export const forOrg = query({
   args: { orgSlug: v.string(), projectSlug: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { org } = await requireActiveOrg(ctx),
-      now = Date.now();
+    const { org, claims } = await requireActiveOrg(ctx);
+    requireOrgAdmin(claims);
+    const now = Date.now();
     const all = sum(await lifetime(ctx, "publisher", org._id)),
       month = sum(
         await daily(

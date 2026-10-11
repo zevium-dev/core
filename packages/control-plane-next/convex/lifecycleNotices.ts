@@ -1,7 +1,18 @@
-import { v } from "convex/values";
+import { RateLimiter, HOUR } from "@convex-dev/rate-limiter";
+import { components, internal } from "./_generated/api";
+import { ConvexError, v } from "convex/values";
+const limiter = new RateLimiter(components.rateLimiter, {
+  lifecycle: { kind: "token bucket", rate: 6, period: HOUR, capacity: 6 },
+});
+export async function limitLifecycle(
+  ctx: MutationCtx,
+  project: Doc<"projects">,
+) {
+  if (!(await limiter.limit(ctx, "lifecycle", { key: project._id })).ok)
+    throw new ConvexError("Lifecycle update limit reached. Try again later.");
+}
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { internal } from "./_generated/api";
 import { createNotification, upsertNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { isActive } from "./lib/identity";
@@ -28,16 +39,24 @@ export async function retirementNotice(
   after: Doc<"projects">,
 ) {
   if (before.retirement?.revision === after.retirement?.revision) return;
+  if (after.retirement?.state !== "retired") await limitLifecycle(ctx, after);
+  const email =
+    !before.retirement ||
+    !after.retirement ||
+    before.retirement.state !== after.retirement.state;
   const canceled = !after.retirement,
     body = canceled
       ? "Scheduled retirement was canceled."
-      : `${after.name} retires on ${new Date(after.retirement!.sunsetAt).toISOString()}. ${after.retirement!.message}`;
+      : after.retirement?.state === "retired"
+        ? `${after.name} has retired. ${after.retirement.message}`
+        : `${after.name} retires on ${new Date(after.retirement!.sunsetAt).toISOString()}. ${after.retirement!.message}`;
   await upsertNotification(ctx, {
     organizationId: after.organizationId,
     kind: "project_retirement",
-    title: `${after.name} retirement ${canceled ? "canceled" : "scheduled"}`,
+    title: `${after.name} retirement ${canceled ? "canceled" : after.retirement?.state === "retired" ? "completed" : "scheduled"}`,
     body,
     refId: `retirement:${after._id}`,
+    email,
   });
   await fireWebhookEvent(
     ctx,
@@ -51,6 +70,7 @@ export async function retirementNotice(
     versionId: null,
     cursor: null,
     body,
+    email,
   });
 }
 export const consumers = internalMutation({
@@ -60,6 +80,7 @@ export const consumers = internalMutation({
     versionId: v.union(v.id("specVersions"), v.null()),
     cursor: v.union(v.string(), v.null()),
     body: v.string(),
+    email: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<void> => {
     const p = await ctx.db.get(args.projectId),
@@ -91,13 +112,14 @@ export const consumers = internalMutation({
             ? `${p.name} version ${version.version} deprecated`
             : `${p.name} retirement update`,
           body: args.body,
+          email: args.email,
           refId: `consumer_notice:${args.versionId ?? p._id}:${org._id}`,
           publisherHandle: publisher.publicHandle,
           projectSlug: p.slug,
         });
       }
     if (!rows.isDone)
-      await ctx.scheduler.runAfter(0, internal.lifecycleNotices.consumers, {
+      await ctx.scheduler.runAfter(5000, internal.lifecycleNotices.consumers, {
         ...args,
         cursor: rows.continueCursor,
       });

@@ -23,6 +23,7 @@ export type CreateNotificationArgs = {
   refId: string;
   publisherHandle?: string;
   projectSlug?: string;
+  email?: boolean;
 };
 
 export type CreateNotificationResult = {
@@ -51,6 +52,7 @@ export async function createNotification(
   }
 
   const id = await ctx.db.insert("notifications", {
+    adminOnly: args.kind === "webhook_failed" ? true : undefined,
     organizationId: args.organizationId,
     kind: args.kind,
     title: args.title,
@@ -60,7 +62,7 @@ export async function createNotification(
     projectSlug: args.projectSlug,
     createdAt: Date.now(),
   });
-  await scheduleNotificationEmail(ctx, id, 1);
+  if (args.email !== false) await scheduleNotificationEmail(ctx, id, 1);
   return { created: true, id };
 }
 
@@ -90,6 +92,7 @@ export async function upsertNotification(
     return { created: false, id: existing._id };
   }
   await ctx.db.patch(existing._id, {
+    adminOnly: args.kind === "webhook_failed" ? true : undefined,
     kind: args.kind,
     title: args.title,
     body: args.body,
@@ -98,11 +101,12 @@ export async function upsertNotification(
     readAt: undefined,
     createdAt: Date.now(),
   });
-  await scheduleNotificationEmail(
-    ctx,
-    existing._id,
-    (existing.emailRevision ?? 0) + 1,
-  );
+  if (args.email !== false)
+    await scheduleNotificationEmail(
+      ctx,
+      existing._id,
+      (existing.emailRevision ?? 0) + 1,
+    );
   return { created: false, id: existing._id };
 }
 

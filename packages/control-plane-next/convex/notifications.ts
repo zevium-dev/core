@@ -9,7 +9,11 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireActiveOrg, requireOrgMemberBySlug } from "./lib/auth";
+import {
+  requireActiveOrg,
+  requireOrgMemberBySlug,
+  requireOrgAdmin,
+} from "./lib/auth";
 const NOTIFICATION_PAGE_SIZE_MAX = 50;
 const MARK_ALL_PAGE_SIZE = 100;
 
@@ -33,11 +37,20 @@ export type NotificationsPage = {
   unreadCountCapped: boolean;
 };
 
-async function unreadCounts(ctx: QueryCtx, org: Doc<"organizations">) {
+async function unreadCounts(
+  ctx: QueryCtx,
+  org: Doc<"organizations">,
+  admin: boolean,
+) {
   const unread = await ctx.db
     .query("notifications")
-    .withIndex("by_org_read", (q) =>
-      q.eq("organizationId", org._id).eq("readAt", undefined),
+    .withIndex(admin ? "by_org_read" : "by_org_audience_read", (q) =>
+      admin
+        ? q.eq("organizationId", org._id).eq("readAt", undefined)
+        : q
+            .eq("organizationId", org._id)
+            .eq("adminOnly", undefined)
+            .eq("readAt", undefined),
     )
     .take(100);
   return {
@@ -57,7 +70,7 @@ export const listForOrg = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args): Promise<NotificationsPage> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { org, access } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const numItems = Number.isSafeInteger(args.paginationOpts.numItems)
       ? Math.min(
           Math.max(args.paginationOpts.numItems, 1),
@@ -67,7 +80,15 @@ export const listForOrg = query({
 
     const result = await ctx.db
       .query("notifications")
-      .withIndex("by_org_time", (q) => q.eq("organizationId", org._id))
+      .withIndex(
+        access.capabilities.viewOrgUsage
+          ? "by_org_time"
+          : "by_org_audience_time",
+        (q) =>
+          access.capabilities.viewOrgUsage
+            ? q.eq("organizationId", org._id)
+            : q.eq("organizationId", org._id).eq("adminOnly", undefined),
+      )
       .order("desc")
       .paginate({
         ...args.paginationOpts,
@@ -91,7 +112,7 @@ export const listForOrg = query({
       })),
       isDone: result.isDone,
       continueCursor: result.continueCursor,
-      ...(await unreadCounts(ctx, org)),
+      ...(await unreadCounts(ctx, org, access.capabilities.viewOrgUsage)),
     };
   },
 });
@@ -100,8 +121,8 @@ export const listForOrg = query({
 export const unreadForOrg = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    return unreadCounts(ctx, org);
+    const { org, access } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    return unreadCounts(ctx, org, access.capabilities.viewOrgUsage);
   },
 });
 
@@ -111,7 +132,7 @@ export const unreadForOrg = query({
 export const markRead = mutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, args): Promise<{ ok: boolean }> => {
-    const { org } = await requireActiveOrg(ctx);
+    const { org, claims } = await requireActiveOrg(ctx);
     const notification = await ctx.db.get(args.notificationId);
     if (notification === null) {
       throw new Error("Notification not found");
@@ -119,6 +140,7 @@ export const markRead = mutation({
     if (notification.organizationId !== org._id) {
       throw new Error("Not a member of this organization");
     }
+    if (notification.adminOnly) requireOrgAdmin(claims);
     if (notification.readAt !== undefined) return { ok: true };
     await ctx.db.patch(args.notificationId, { readAt: Date.now() });
     return { ok: true };
@@ -134,11 +156,16 @@ export const markAllRead = mutation({
     ctx,
     args,
   ): Promise<{ updated: number; complete: boolean }> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const result = await markUnreadPage(ctx, org._id);
+    const { org, access } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const result = await markUnreadPage(
+      ctx,
+      org._id,
+      access.capabilities.viewOrgUsage,
+    );
     if (!result.complete) {
       await ctx.scheduler.runAfter(0, internal.notifications.markAllReadPage, {
         organizationId: org._id,
+        admin: access.capabilities.viewOrgUsage,
       });
     }
     return result;
@@ -148,12 +175,18 @@ export const markAllRead = mutation({
 async function markUnreadPage(
   ctx: MutationCtx,
   organizationId: Id<"organizations">,
+  admin: boolean,
 ): Promise<{ updated: number; complete: boolean }> {
   const now = Date.now();
   const unread = await ctx.db
     .query("notifications")
-    .withIndex("by_org_read", (q) =>
-      q.eq("organizationId", organizationId).eq("readAt", undefined),
+    .withIndex(admin ? "by_org_read" : "by_org_audience_read", (q) =>
+      admin
+        ? q.eq("organizationId", organizationId).eq("readAt", undefined)
+        : q
+            .eq("organizationId", organizationId)
+            .eq("adminOnly", undefined)
+            .eq("readAt", undefined),
     )
     .take(MARK_ALL_PAGE_SIZE);
   for (const notification of unread) {
@@ -164,12 +197,12 @@ async function markUnreadPage(
 }
 
 export const markAllReadPage = internalMutation({
-  args: { organizationId: v.id("organizations") },
+  args: { organizationId: v.id("organizations"), admin: v.boolean() },
   handler: async (
     ctx,
     args,
   ): Promise<{ updated: number; complete: boolean }> => {
-    const result = await markUnreadPage(ctx, args.organizationId);
+    const result = await markUnreadPage(ctx, args.organizationId, args.admin);
     if (!result.complete) {
       await ctx.scheduler.runAfter(
         0,

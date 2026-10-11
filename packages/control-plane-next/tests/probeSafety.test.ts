@@ -17,12 +17,17 @@ it("never opens a socket for mixed private DNS and validates redirect destinatio
   expect(socket).not.toHaveBeenCalled();
   const redirect = vi.fn(async () => ({
     statusCode: 302,
-    location: "http://127.0.0.1/admin",
+    location: "https://127.0.0.1/admin",
   }));
   expect(
     (
       await probePublicHttps("https://example.com/health", "HEAD", {
-        resolver: async () => [{ address: "93.184.216.34", family: 4 }],
+        resolver: async (host) => [
+          {
+            address: host === "127.0.0.1" ? "127.0.0.1" : "93.184.216.34",
+            family: 4,
+          },
+        ],
         requestHead: redirect,
       })
     ).outcome,

@@ -314,7 +314,7 @@ export const listFinanceReconciliationCases = query({
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    return ctx.db
+    const rows = await ctx.db
       .query("financeReconciliationCases")
       .withIndex("by_status_updated", (q) =>
         args.status
@@ -323,6 +323,18 @@ export const listFinanceReconciliationCases = query({
       )
       .order("desc")
       .paginate(page(args.paginationOpts));
+    return {
+      ...rows,
+      page: await Promise.all(
+        rows.page.map(async (row) => ({
+          ...row,
+          transferAmountCents:
+            row.rowKind === "case" && row.transferId
+              ? ((await ctx.db.get(row.transferId))?.amountCents ?? null)
+              : null,
+        })),
+      ),
+    };
   },
 });
 export const getFinanceReconciliationCase = query({
@@ -330,6 +342,13 @@ export const getFinanceReconciliationCase = query({
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
     const row = await ctx.db.get(args.caseId);
-    return row?.rowKind === "case" ? row : null;
+    return row?.rowKind === "case"
+      ? {
+          ...row,
+          transferAmountCents: row.transferId
+            ? ((await ctx.db.get(row.transferId))?.amountCents ?? null)
+            : null,
+        }
+      : null;
   },
 });

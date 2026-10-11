@@ -1,3 +1,13 @@
+import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
+import { components, internal } from "./_generated/api";
+const emailLimiter = new RateLimiter(components.rateLimiter, {
+  recipientPages: {
+    kind: "token bucket",
+    rate: 30,
+    period: MINUTE,
+    capacity: 2,
+  },
+});
 import { isActive } from "./lib/identity";
 import { v } from "convex/values";
 import {
@@ -5,7 +15,6 @@ import {
   internalQuery,
   type QueryCtx,
 } from "./_generated/server";
-import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   notificationMailer,
@@ -66,6 +75,15 @@ export const tick = internalMutation({
       console.info("Notification email skipped: email configuration missing", {
         notificationId: args.notificationId,
       });
+      return;
+    }
+    const admission = await emailLimiter.limit(ctx, "recipientPages");
+    if (!admission.ok) {
+      await ctx.scheduler.runAfter(
+        Math.max(2000, admission.retryAfter),
+        internal.notificationEmail.tick,
+        args,
+      );
       return;
     }
     const attempts = current.notification.emailAttempts ?? 0;
@@ -153,7 +171,7 @@ export const completePage = internalMutation({
       emailOffset: args.nextOffset,
       emailAttempts: 0,
     });
-    await ctx.scheduler.runAfter(0, internal.notificationEmail.tick, {
+    await ctx.scheduler.runAfter(2000, internal.notificationEmail.tick, {
       notificationId: args.notificationId,
       revision: args.revision,
       offset: args.nextOffset,

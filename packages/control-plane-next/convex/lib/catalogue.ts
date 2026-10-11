@@ -1,3 +1,4 @@
+import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { shardFor } from "../money/rollups";
@@ -18,6 +19,29 @@ export async function syncCatalogue(
   before: Doc<"projects"> | null,
   after: Doc<"projects">,
 ) {
+  if (
+    after.latestVersionId &&
+    after.discoverable &&
+    (!before?.discoverable ||
+      before.latestVersionId !== after.latestVersionId ||
+      before.name !== after.name ||
+      before.description !== after.description ||
+      JSON.stringify(before.tags) !== JSON.stringify(after.tags))
+  ) {
+    await ctx.scheduler.runAfter(0, internal.search.embedProject, {
+      projectId: after._id,
+    });
+  }
+  if (
+    !after.discoverable ||
+    before?.latestVersionId !== after.latestVersionId
+  ) {
+    const vector = await ctx.db
+      .query("specEmbeddings")
+      .withIndex("by_project", (q) => q.eq("projectId", after._id))
+      .unique();
+    if (vector) await ctx.db.delete(vector._id);
+  }
   const previous = new Set(before ? facetKeys(before) : []),
     next = new Set(facetKeys(after));
   const shard = shardFor(after._id);

@@ -51,6 +51,7 @@ export async function cycleBreakdown(ctx: QueryCtx) {
             .gte("day", utcDay(cycleStart))
             .lt("day", utcDay(cycleEnd)),
         )
+        .order("desc")
         .take(1501);
       scanTruncated ||= rows.length > 1500;
       for (const r of rows.slice(0, 1500))
@@ -75,6 +76,7 @@ export async function cycleBreakdown(ctx: QueryCtx) {
           .gte("at", cycleStart)
           .lt("at", cycleEnd),
       )
+      .order("desc")
       .take(1001);
     scanTruncated = rows.length > 1000;
     for (const r of rows.slice(0, 1000))

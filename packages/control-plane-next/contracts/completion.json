@@ -338,8 +338,8 @@
     {
       "name": "cronTasks:checkLowBalances",
       "status": "replaced",
-      "targets": ["cronTasks:lowBalance"],
-      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+      "targets": [],
+      "reason": "appendWalletEntry emits notices only on a downward threshold crossing, replacing daily low-balance scans."
     },
     {
       "name": "deploymentProof:get",
@@ -1177,8 +1177,9 @@
     },
     {
       "name": "reviews:upsert",
-      "status": "implemented",
-      "targets": ["reviews:upsert"]
+      "status": "replaced",
+      "targets": ["reviews:upsert"],
+      "reason": "Public action verifies all Clerk memberships before internal upsert; paired preview caller uses useAction."
     },
     {
       "name": "reviews:withdraw",

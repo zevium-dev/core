@@ -21,35 +21,27 @@ export const readTables = {
   })
     .index("by_provider", ["providerPayoutId"])
     .index("by_account_time", ["accountId", "updatedAt"]),
-  specEmbeddings: defineTable(
-    v.union(
-      v.object({
-        model: v.string(),
-        contentHash: v.string(),
-        embedding: v.array(v.number()),
-        updatedAt: v.number(),
-        kind: v.literal("listing"),
-        projectId: v.id("projects"),
-        specVersionId: v.id("specVersions"),
-        text: v.string(),
-        dimensions: v.literal(768),
-      }),
-      v.object({
-        model: v.string(),
-        contentHash: v.string(),
-        embedding: v.array(v.number()),
-        updatedAt: v.number(),
-        kind: v.literal("query"),
-        queryHash: v.string(),
-        leaseToken: v.string(),
-        expiresAt: v.number(),
-        dimensions: v.literal(768),
-      }),
-    ),
-  )
-    .index("by_project", ["projectId"])
+  searchQueryEmbeddings: defineTable({
+    model: v.string(),
+    queryHash: v.string(),
+    embedding: v.array(v.number()),
+    leaseToken: v.string(),
+    expiresAt: v.number(),
+  })
     .index("by_query", ["model", "queryHash"])
-    .index("by_expiry", ["expiresAt"])
+    .index("by_expiry", ["expiresAt"]),
+  specEmbeddings: defineTable({
+    model: v.string(),
+    contentHash: v.string(),
+    embedding: v.array(v.number()),
+    updatedAt: v.number(),
+    kind: v.literal("listing"),
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    text: v.string(),
+    dimensions: v.literal(768),
+  })
+    .index("by_project", ["projectId"])
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
       dimensions: 768,
@@ -170,7 +162,7 @@ export const readTables = {
       }),
     ),
   })
-    .index("by_consumer_project", ["consumerOrganizationId", "projectId"])
+    .index("by_user_project", ["createdBy", "projectId"])
     .index("by_public", ["projectId", "active", "hidden", "sortKey"])
     .index("by_state", ["active", "hidden", "sortKey"])
     .index("by_reported", ["hasOpenReports", "queueSortKey"]),
@@ -335,6 +327,7 @@ export const readTables = {
     .index("by_operation", ["rowKind", "operationId"])
     .index("by_case_evidence", ["caseId", "rowKind", "value"]),
   notifications: defineTable({
+    adminOnly: v.optional(v.boolean()),
     organizationId: v.id("organizations"),
     refId: v.string(),
     kind: v.string(),
@@ -358,6 +351,13 @@ export const readTables = {
     emailNextAttemptAt: v.optional(v.number()),
   })
     .index("by_ref", ["refId"])
+    .index("by_org_audience_time", ["organizationId", "adminOnly", "createdAt"])
+    .index("by_org_audience_read", [
+      "organizationId",
+      "adminOnly",
+      "readAt",
+      "createdAt",
+    ])
     .index("by_org_time", ["organizationId", "createdAt"])
     .index("by_org_read", ["organizationId", "readAt", "createdAt"]),
   specImportLeases: defineTable({

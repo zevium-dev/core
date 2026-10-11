@@ -1,11 +1,12 @@
 "use node";
 
+import { isPrivilegedOrgRole } from "@zevium/shared";
 import { createClerkClient } from "@clerk/backend";
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 1;
 
 /** Clerk is membership truth; only verified primary emails receive org data. */
 export const deliverPage = internalAction({
@@ -29,18 +30,27 @@ export const deliverPage = internalAction({
         offset: args.offset,
       });
       for (const member of members.data) {
+        if (current.notification.adminOnly && !isPrivilegedOrgRole(member.role))
+          continue;
         const userId = member.publicUserData?.userId;
         if (!userId) continue;
-        const user = await clerk.users.getUser(userId);
-        const email = user.emailAddresses.find(
-          (address) => address.id === user.primaryEmailAddressId,
-        );
-        if (email?.verification?.status !== "verified") continue;
-        await ctx.runMutation(internal.notificationEmail.enqueueRecipient, {
-          ...args,
-          clerkUserId: userId,
-          email: email.emailAddress,
-        });
+        try {
+          const user = await clerk.users.getUser(userId);
+          const email = user.emailAddresses.find(
+            (address) => address.id === user.primaryEmailAddressId,
+          );
+          if (email?.verification?.status !== "verified") continue;
+          await ctx.runMutation(internal.notificationEmail.enqueueRecipient, {
+            ...args,
+            clerkUserId: userId,
+            email: email.emailAddress,
+          });
+        } catch {
+          console.warn(
+            "Notification recipient skipped after delivery failure",
+            { notificationId: args.notificationId },
+          );
+        }
       }
       const nextOffset = args.offset + members.data.length;
       // Treat an empty page as the end even if Clerk's count changed meanwhile.

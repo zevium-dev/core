@@ -60,6 +60,7 @@ const searchRateLimiter = new RateLimiter(components.rateLimiter, {
     rate: 120,
     period: MINUTE,
     capacity: 120,
+    shards: 16,
   },
 });
 
@@ -69,7 +70,7 @@ type QueryEmbeddingAdmission =
   | { status: "cached"; embedding: number[] }
   | {
       status: "admitted";
-      id: Doc<"specEmbeddings">["_id"];
+      id: Doc<"searchQueryEmbeddings">["_id"];
       leaseToken: string;
     };
 
@@ -112,35 +113,31 @@ export const prepareQueryEmbedding = internalMutation({
             });
       if (!caller.ok) return { status: "limited" };
     }
-    const budget = await searchRateLimiter.limit(ctx, "searchBudget");
-    if (!budget.ok) return { status: "limited" };
 
     const cacheKey = await sha256Hex(
       args.query.trim().toLowerCase().replace(/\s+/g, " "),
     );
     const existing = await ctx.db
-      .query("specEmbeddings")
+      .query("searchQueryEmbeddings")
       .withIndex("by_query", (q) =>
         q.eq("model", "gemini-embedding-001").eq("queryHash", cacheKey),
       )
       .unique();
-    if (existing?.kind === "query" && existing.expiresAt > Date.now()) {
+    if (existing && existing.expiresAt > Date.now()) {
       return existing.embedding.length === 0
         ? { status: "pending" }
         : { status: "cached", embedding: existing.embedding };
     }
+    const budget = await searchRateLimiter.limit(ctx, "searchBudget");
+    if (!budget.ok) return { status: "limited" };
     const leaseToken = crypto.randomUUID();
     const expiresAt = Date.now() + QUERY_EMBED_LEASE_MS;
     let id;
     if (existing === null) {
-      id = await ctx.db.insert("specEmbeddings", {
-        kind: "query",
+      id = await ctx.db.insert("searchQueryEmbeddings", {
         model: "gemini-embedding-001",
-        dimensions: 768,
-        contentHash: cacheKey,
         queryHash: cacheKey,
         embedding: [],
-        updatedAt: Date.now(),
         leaseToken,
         expiresAt,
       });
@@ -157,13 +154,13 @@ export const prepareQueryEmbedding = internalMutation({
 
 export const finishQueryEmbedding = internalMutation({
   args: {
-    id: v.id("specEmbeddings"),
+    id: v.id("searchQueryEmbeddings"),
     leaseToken: v.string(),
     embedding: v.optional(v.array(v.float64())),
   },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id);
-    if (row?.kind !== "query" || row.leaseToken !== args.leaseToken) return;
+    if (!row || row.leaseToken !== args.leaseToken) return;
     if (args.embedding === undefined) {
       await ctx.db.delete(row._id);
       return;
@@ -177,11 +174,10 @@ export const finishQueryEmbedding = internalMutation({
 });
 
 export const expireQueryEmbedding = internalMutation({
-  args: { id: v.id("specEmbeddings") },
+  args: { id: v.id("searchQueryEmbeddings") },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id);
-    if (row?.kind === "query" && row.expiresAt <= Date.now())
-      await ctx.db.delete(row._id);
+    if (row && row.expiresAt <= Date.now()) await ctx.db.delete(row._id);
   },
 });
 

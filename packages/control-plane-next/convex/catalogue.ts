@@ -1,3 +1,4 @@
+import { publicSpec } from "./lib/specPolicy";
 import { paginationOptsValidator, type PaginationOptions } from "convex/server";
 import { v, ConvexError } from "convex/values";
 import { query, type QueryCtx } from "./_generated/server";
@@ -185,7 +186,7 @@ export const getPublicDetail = query({
       },
       latestVersion: {
         version: version.version,
-        spec: version.spec,
+        spec: publicSpec(version.spec),
         publishedAt: version.publishedAt,
         deprecatedAt: project.retirement?.startedAt ?? version.deprecatedAt,
         sunsetAt: project.retirement?.sunsetAt ?? version.sunsetAt,

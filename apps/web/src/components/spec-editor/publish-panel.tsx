@@ -1,3 +1,4 @@
+import type { Snapshot } from "./use-spec-draft";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -38,6 +39,7 @@ type PublishPanelProps = Pick<
   pricing: PricingSummary | null;
   endpointCount: number;
   onIssues: (issues: SpecIssue[]) => void;
+  onConflict: (snapshot: Snapshot) => void;
 };
 export function PublishPanel({
   projectId,
@@ -54,6 +56,7 @@ export function PublishPanel({
   pricing,
   endpointCount,
   onIssues,
+  onConflict,
 }: PublishPanelProps) {
   const [makePublicOpen, setMakePublicOpen] = useState(false);
   const updateProject = useConvexMutation(api.projects.update);
@@ -271,6 +274,7 @@ export function PublishPanel({
         }
         readinessCurrent={readinessCurrent}
         onIssues={onIssues}
+        onConflict={onConflict}
       />
       {dirty ? (
         <p className="text-xs text-muted-foreground">

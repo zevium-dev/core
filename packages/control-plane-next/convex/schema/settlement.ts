@@ -86,6 +86,7 @@ export const settlementTables = {
         reversedAtoms: v.number(),
         failedAtoms: v.number(),
         updatedAt: v.number(),
+        projectId: v.optional(v.id("projects")),
         kind: v.literal("daily"),
         day: v.string(),
         success: v.number(),
@@ -132,6 +133,14 @@ export const settlementTables = {
       }),
     ),
   )
+    .index("by_project_dimension_day", [
+      "kind",
+      "scope",
+      "scopeId",
+      "projectId",
+      "dimension",
+      "day",
+    ])
     .index("by_dimension_day", [
       "kind",
       "scope",

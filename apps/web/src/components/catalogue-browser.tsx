@@ -671,6 +671,9 @@ export function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               title={item.orgName}
             >
               {item.orgName}
+              {"houseOperated" in item && item.houseOperated === true && (
+                <Badge variant="secondary">Operated by Zevium</Badge>
+              )}
             </Badge>
           </div>
           <CardDescription className="min-w-0">

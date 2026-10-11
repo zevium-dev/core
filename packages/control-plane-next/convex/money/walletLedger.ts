@@ -1,3 +1,4 @@
+import { createNotification } from "../lib/notifications";
 import { ConvexError } from "convex/values";
 import type { WithoutSystemFields } from "convex/server";
 import type { Doc, Id } from "../_generated/dataModel";
@@ -100,6 +101,14 @@ export async function appendWalletEntry(
     createdAt: Date.now(),
   });
   await ctx.db.patch(wallet._id, { balance, sequence, promoCredits });
+  if (wallet.balance >= 1000 && balance < 1000)
+    await createNotification(ctx, {
+      organizationId: wallet.owner.organizationId,
+      kind: "low_balance",
+      title: "Wallet balance is low",
+      body: `${balance} credits remain. Add credits to keep calls running.`,
+      refId: `low_balance:${wallet._id}:${sequence}`,
+    });
   return {
     applied: true,
     wallet: await getWallet(ctx, wallet._id),

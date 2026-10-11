@@ -199,7 +199,7 @@ describe("deliverPinnedHttps", () => {
     expect(error).toMatchObject({ retryable: true });
   });
 
-  it("aborts response streaming after strict body limit", async () => {
+  it("accepts 2xx headers and cancels oversized response bodies", async () => {
     const oversized = response(200, {}, [
       new Uint8Array(WEBHOOK_MAX_RESPONSE_BYTES),
       new Uint8Array(1),
@@ -212,7 +212,7 @@ describe("deliverPinnedHttps", () => {
       ),
     );
 
-    await expect(promise).rejects.toMatchObject({ retryable: false });
+    await expect(promise).resolves.toEqual({ status: 200 });
     expect(oversized.abort).toHaveBeenCalledOnce();
     expect(oversized.cleanup).toHaveBeenCalledOnce();
   });

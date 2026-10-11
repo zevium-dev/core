@@ -74,10 +74,4 @@ crons.interval(
   internal.specImportLimits.cleanup,
   {},
 );
-crons.interval(
-  "low wallet balance",
-  { hours: 1 },
-  internal.cronTasks.lowBalance,
-  { cursor: null },
-);
 export default crons;

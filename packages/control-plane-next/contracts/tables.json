@@ -25,6 +25,7 @@
     "publisherTransfers",
     "connectedPayouts",
     "specEmbeddings",
+    "searchQueryEmbeddings",
     "catalogueIndex",
     "qualityEvents",
     "reviews",
