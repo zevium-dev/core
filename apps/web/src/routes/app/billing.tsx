@@ -282,6 +282,12 @@ function BillingContent({
                 credits
               </span>
             </p>
+            {billing.wallet.lockedCredits > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {formatCredits(billing.wallet.lockedCredits)} credits on hold
+                while a payment is reviewed
+              </p>
+            ) : null}
           </div>
         </div>
       </div>

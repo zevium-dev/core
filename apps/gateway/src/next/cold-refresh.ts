@@ -16,13 +16,16 @@ export const COLD_FILL_MS = 2000;
 export const NEGATIVE_TTL_MS = 10_000;
 /** An alarm fill may already be running with its larger background budget.
  * Bound the cold caller's wait as well as the outbound fetches. */
-export async function waitForColdFill(fill: Promise<void>) {
+export async function waitForColdFill(
+  fill: Promise<void>,
+  budgetMs = COLD_FILL_MS,
+) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       fill,
       new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, COLD_FILL_MS);
+        timeout = setTimeout(resolve, budgetMs);
       }),
     ]);
   } finally {

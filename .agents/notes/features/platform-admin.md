@@ -1,7 +1,7 @@
 # Platform admin
 
 > Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
-> Code: `convex/{admin,operators}.ts`, `apps/web/src/components/operator-console.tsx`, `apps/web/src/routes/admin/operations.tsx`, `tests/readSurfaces.test.ts`
+> Code: `convex/{admin,operators}.ts`, `apps/web/src/components/operator-console.tsx`, `apps/web/src/routes/admin/operations.tsx`, `tests/readSurfaces.test.ts`, `tests/sourceLocks.test.ts`
 > Related: [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [reviews](reviews.md), [earnings-payouts](earnings-payouts.md), [wallet-billing](wallet-billing.md), [webhooks-notifications](webhooks-notifications.md), [upstream-credentials](upstream-credentials.md), [accounts-orgs](accounts-orgs.md)
 
 Staff-only `/admin` surface for Zevium operators: moderation, quality gates, user/org support, billing ops, and platform metrics. Access is an env allowlist of Clerk user ids checked server-side in Convex.
@@ -22,7 +22,7 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 
 ## Tech
 
-The staff-only exception console is always available after cutover; no preview switch. Realtime paged cases/evidence, frozen wallets and needs_review payments expose verified provider adoption/quarantine, signed-final evidence recovery, exception resolution/void, same-generation retries, wakes and drained/no-effect admin-close abandonment. Irreversible actions confirm wallet/case, amount, effect and audit note. Server allowlist checks are mandatory; resolution never invents debits/earnings or bypasses drain. Details expand inline, so no list/detail transition is needed.
+The staff-only exception console is always available after cutover; no preview switch. Realtime paged cases/evidence, frozen wallets and needs_review payments expose verified provider adoption/quarantine, signed-final evidence recovery, exception resolution/void, fresh-generation payment retries after source quarantine completes (#440), wakes and drained/no-effect admin-close abandonment. Irreversible actions confirm wallet/case, amount, effect and audit note. Server allowlist checks are mandatory; resolution never invents debits/earnings or bypasses drain. Details expand inline, so no list/detail transition is needed.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 

@@ -33,6 +33,7 @@ export const walletTables = {
   wallets: defineTable({
     ownerKey: v.string(),
     balance: v.number(),
+    lockedCredits: v.optional(v.number()),
     sequence: v.number(),
     promoCredits: v.number(),
     epoch: v.number(),
@@ -141,7 +142,13 @@ export const walletTables = {
     .index("by_wallet_sequence", ["walletId", "sequence"])
     .index("by_payment", ["paymentId", "sequence"])
     .index("by_payment_kind", ["paymentId", "kind", "sequence"])
-    .index("by_unrestored", ["paymentId", "kind", "restoredAt", "sequence"])
+    .index("by_unrestored", [
+      "paymentId",
+      "kind",
+      "adjustment.kind",
+      "restoredAt",
+      "sequence",
+    ])
     .index("by_move_source", ["originLotId", "sequence"])
     .index("by_merge", ["mergeId", "sequence"])
     .index("by_admin_adjustment", [
@@ -153,6 +160,8 @@ export const walletTables = {
   fundingLots: defineTable({
     // Filled with own ID before the creating mutation commits; Convex cannot index _id directly.
     orderKey: v.optional(v.id("fundingLots")),
+    // True exactly when this container has an available original source.
+    spendable: v.boolean(),
     walletId: v.id("wallets"),
     sourceRef: v.string(),
     sourceKind: sourceKind,
@@ -189,7 +198,7 @@ export const walletTables = {
     .index("by_source", ["sourceRef"])
     .index("by_spend", [
       "walletId",
-      "state",
+      "spendable",
       "priority",
       "createdAt",
       "orderKey",
@@ -220,8 +229,9 @@ export const walletTables = {
     consumedCredits: v.number(),
     reversedCredits: v.number(),
     expiredCredits: v.number(),
-    state: lotState,
+    state: v.union(lotState, v.literal("locked")),
   })
+    .index("by_payment_state", ["paymentId", "state"])
     .index("by_wallet_spend", ["walletId", "state", "sourceCreatedAt"])
     .index("by_lot_origin", ["lotId", "originLotId"])
     .index("by_lot_spend", ["lotId", "state", "sourceCreatedAt", "originLotId"])
@@ -292,6 +302,9 @@ export const walletTables = {
     updatedAt: v.number(),
     reconciliation: v.object({
       state: jobState,
+      reviewLock: v.optional(
+        v.object({ complete: v.boolean(), cursor: v.optional(v.string()) }),
+      ),
       attempts: v.optional(v.number()),
       earningsState: v.optional(
         v.union(v.literal("pending"), v.literal("released")),

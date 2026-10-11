@@ -6,8 +6,8 @@ import { finishClose } from "./money/barrier";
 import { applyAdminDecrease } from "./money/sourceAdjustments";
 
 export const wakeWallet = internalAction({
-  args: { clerkOrgId: v.string() },
-  handler: async (_ctx, { clerkOrgId }): Promise<void> => {
+  args: { clerkOrgId: v.string(), attempt: v.optional(v.number()) },
+  handler: async (ctx, { clerkOrgId, attempt = 0 }): Promise<void> => {
     const origin = process.env.NEXT_GATEWAY_URL;
     if (
       !origin ||
@@ -16,7 +16,7 @@ export const wakeWallet = internalAction({
     )
       return;
     try {
-      await fetch(new URL("/internal/next-wake", origin), {
+      const response = await fetch(new URL("/internal/next-wake", origin), {
         method: "POST",
         headers: {
           "x-internal-secret": process.env.GATEWAY_INTERNAL_SECRET,
@@ -28,8 +28,18 @@ export const wakeWallet = internalAction({
         }),
         signal: AbortSignal.timeout(5000),
       });
+      if (!response.ok) throw new Error("Wallet wake unavailable");
     } catch {
-      /* The closing-wallet scan retries until a real drain ACK exists. */
+      // Open wallets no longer appear in the closing scan. Bound retries for both paths.
+      if (attempt < 3)
+        await ctx.scheduler.runAfter(
+          1000 * 2 ** attempt,
+          internal.edgeMaintenance.wakeWallet,
+          {
+            clerkOrgId,
+            attempt: attempt + 1,
+          },
+        );
     }
   },
 });

@@ -22,6 +22,9 @@ export class NextWalletDO extends WalletBase {
       calls: this.ctx.storage.sql.exec("SELECT * FROM next_calls").toArray(),
     };
   }
+  async pauseAlarm() {
+    await this.ctx.storage.deleteAlarm();
+  }
   expireHolds() {
     this.ctx.storage.sql.exec(
       "UPDATE next_calls SET deadline=0 WHERE final IS NULL",
@@ -86,7 +89,8 @@ export default {
           JSON.stringify([env.NEXT_DEPLOYMENT_ID, orgId]),
         ),
       );
-      await stub.wake(orgId);
+      if (action !== "inspect" && action !== "pause") await stub.wake(orgId);
+      if (action === "pause") await stub.pauseAlarm();
       if (action === "refresh") await stub.refresh();
       if (action === "expire") await stub.expireHolds();
       return Response.json(await stub.inspect());

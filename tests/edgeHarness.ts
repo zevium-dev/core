@@ -1,12 +1,14 @@
+import { grantLot, lotSpendable } from "../convex/money/lots";
 import { appendWalletEntry } from "../convex/money/walletLedger";
 import { financeFixture } from "./financeFixtures";
 import {
   projectAdjustment,
   reconcilePaymentPage,
+  reviewPayment,
 } from "../convex/money/adjustments";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../convex/_generated/server";
-import { moneyFixture, assertWallet } from "./moneyFixtures";
+import { moneyFixture, assertWallet, paidLot } from "./moneyFixtures";
 import { sha256Hex } from "@zevium/shared";
 import { requestClose, finishClose } from "../convex/money/barrier";
 import { revokeKey } from "../convex/lib/keys";
@@ -178,6 +180,7 @@ export const deplete = internalMutation({
         state: "depleted",
       });
       await ctx.db.patch(lot._id, {
+        spendable: await lotSpendable(ctx, lot._id),
         remainingCredits: lot.remainingCredits - amount,
         reversedCredits: lot.reversedCredits + amount,
         state: "depleted",
@@ -192,5 +195,32 @@ export const deplete = internalMutation({
         adjustment: { kind: "admin", ref: "fixture-deplete" },
       });
     }
+  },
+});
+
+export const review = internalMutation({
+  args: { paymentId: v.id("payments") },
+  handler: async (ctx, { paymentId }) => {
+    const payment = (await ctx.db.get(paymentId))!;
+    await projectAdjustment(ctx, paymentId, payment.revision, {
+      kind: "refund",
+      status: "pending",
+      sourceRef: `review:${paymentId}`,
+      amountCents: 1,
+    });
+    await reviewPayment(ctx, (await ctx.db.get(paymentId))!, 8);
+  },
+});
+export const reviewCredits = internalMutation({
+  args: { walletId: v.id("wallets") },
+  handler: async (ctx, { walletId }) => {
+    await grantLot(ctx, {
+      walletId,
+      sourceKind: "promo",
+      sourceRef: `review-promo:${walletId}`,
+      credits: 5,
+    });
+    return (await paidLot(ctx, walletId, `review-other:${walletId}`, 100)).lot
+      .paymentId;
   },
 });

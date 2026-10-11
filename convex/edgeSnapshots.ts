@@ -376,7 +376,7 @@ export const read = internalQuery({
         walletId: wallet._id,
         ownerKey: wallet.ownerKey,
         owner: wallet.owner,
-        balance: wallet.balance,
+        balance: wallet.balance - (wallet.lockedCredits ?? 0),
         promoCredits: wallet.promoCredits,
         sequence: wallet.sequence,
         epoch: wallet.epoch,

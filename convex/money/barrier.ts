@@ -134,7 +134,12 @@ export async function finishClose(
         : "open",
     settledThroughEdgeSequence: 0,
   });
-  return getWallet(ctx, walletId);
+  const reopened = await getWallet(ctx, walletId);
+  if (reopened.gateState === "open" && process.env.NEXT_GATEWAY_URL)
+    await ctx.scheduler.runAfter(0, internal.edgeMaintenance.wakeWallet, {
+      clerkOrgId: reopened.owner.clerkOrgId,
+    });
+  return reopened;
 }
 
 /** Cancel only a drained admin command with no effects; never cancel a paged refund or dust job. */

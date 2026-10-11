@@ -198,6 +198,7 @@ export async function assertWallet(
       .reduce((n, l) => n + l.remainingCredits, 0) === wallet.promoCredits,
     "Promo conservation",
   );
+  let locked = 0;
   for (const lot of lots) {
     check(
       lot.grantedCredits + lot.movedInCredits ===
@@ -212,6 +213,13 @@ export async function assertWallet(
       .query("fundingLotSources")
       .withIndex("by_lot_origin", (q) => q.eq("lotId", lot._id))
       .collect();
+    check(
+      lot.spendable === sources.some((s) => s.state === "available"),
+      "Container spendability",
+    );
+    locked += sources
+      .filter((s) => s.state === "locked")
+      .reduce((n, s) => n + s.remainingCredits, 0);
     for (const source of sources)
       check(
         source.creditsIn ===
@@ -233,6 +241,10 @@ export async function assertWallet(
         `Source/container ${field}`,
       );
   }
+  check(
+    locked === (wallet.lockedCredits ?? 0) && locked <= balance,
+    "Locked inventory conservation",
+  );
   const usage = await ctx.db.query("usageEvents").collect();
   const earnings = await ctx.db.query("publisherEarnings").collect();
   const rollups = await ctx.db.query("usageRollups").collect();

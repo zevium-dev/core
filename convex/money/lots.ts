@@ -19,6 +19,21 @@ export async function sourceRow(
     )
     .unique();
 }
+/** Maintain the indexed container flag in the same transaction as source changes.
+ * The source index makes this one bounded read, even for a large mixed container.
+ */
+export async function lotSpendable(
+  ctx: Pick<QueryCtx, "db">,
+  lotId: Id<"fundingLots">,
+) {
+  const available = await ctx.db
+    .query("fundingLotSources")
+    .withIndex("by_lot_spend", (q) =>
+      q.eq("lotId", lotId).eq("state", "available"),
+    )
+    .first();
+  return available !== null;
+}
 /** Trusted provider/admin/signup callers supply a canonical source. No public mint endpoint. */
 export async function grantLot(
   ctx: MutationCtx,
@@ -68,6 +83,7 @@ export async function grantLot(
       sourceRef: input.sourceRef,
       sourceKind: input.sourceKind,
       paymentId: input.paymentId,
+      spendable: true,
       grantedCredits: input.credits,
       movedInCredits: 0,
       movedOutCredits: 0,
@@ -126,13 +142,14 @@ export async function allocate(
 ): Promise<Slice[]> {
   money(credits);
   const wallet = await getWallet(ctx, walletId);
-  if (wallet.balance === 0 || wallet.balance < credits)
+  const spendable = wallet.balance - (wallet.lockedCredits ?? 0);
+  if (spendable === 0 || spendable < credits)
     throw new ConvexError("Insufficient credits");
   if (!credits) return [];
   const containers = await ctx.db
     .query("fundingLots")
     .withIndex("by_spend", (q) =>
-      q.eq("walletId", walletId).eq("state", "available"),
+      q.eq("walletId", walletId).eq("spendable", true),
     )
     .take(MAX_FUNDING_SLICES + 1);
   const slices: Slice[] = [];
@@ -190,7 +207,8 @@ export async function validateSlices(
       source.sourceRef !== slice.sourceRef ||
       source.paymentId !== slice.paymentId ||
       (lot.expiresAt !== undefined && lot.expiresAt <= admittedAt) ||
-      (consume && source.remainingCredits < slice.credits)
+      (consume &&
+        (source.state === "locked" || source.remainingCredits < slice.credits))
     )
       throw new ConvexError("Funding evidence rejected");
     totals.set(lot._id, add(totals.get(lot._id) ?? 0, slice.credits));
@@ -204,16 +222,17 @@ export async function consumeSlices(ctx: MutationCtx, slices: Slice[]) {
     const lot = (await ctx.db.get(slice.lotId))!,
       source = (await sourceRow(ctx, slice.lotId, slice.originLotId))!;
     const remainingCredits = add(lot.remainingCredits, -slice.credits);
-    await ctx.db.patch(lot._id, {
-      remainingCredits,
-      consumedCredits: add(lot.consumedCredits, slice.credits),
-      state: lotState(remainingCredits),
-    });
     const left = add(source.remainingCredits, -slice.credits);
     await ctx.db.patch(source._id, {
       remainingCredits: left,
       consumedCredits: add(source.consumedCredits, slice.credits),
       state: lotState(left),
+    });
+    await ctx.db.patch(lot._id, {
+      spendable: await lotSpendable(ctx, lot._id),
+      remainingCredits,
+      consumedCredits: add(lot.consumedCredits, slice.credits),
+      state: lotState(remainingCredits),
     });
     if (lot.sourceKind === "promo") promo = add(promo, slice.credits);
   }
