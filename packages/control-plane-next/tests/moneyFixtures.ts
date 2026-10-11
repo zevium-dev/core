@@ -222,6 +222,28 @@ export async function assertWallet(
         `Source/container ${field}`,
       );
   }
+  const usage = await ctx.db.query("usageEvents").collect();
+  const earnings = await ctx.db.query("publisherEarnings").collect();
+  const rollups = await ctx.db.query("usageRollups").collect();
+  check(
+    earnings.reduce((n, e) => n + e.grossCredits, 0) ===
+      usage
+        .filter((e) => e.billingOutcome === "settled")
+        .reduce((n, e) => n + e.credits, 0),
+    "Usage/earnings gross conservation",
+  );
+  check(
+    rollups
+      .filter(
+        (e) =>
+          e.kind === "lifetime" &&
+          e.scope === "publisher" &&
+          e.dimension === "total",
+      )
+      .reduce((n, e) => n + (e.kind === "lifetime" ? e.netAtoms : 0), 0) ===
+      earnings.reduce((n, e) => n + e.netAtoms, 0),
+    "Earnings/lifetime net conservation",
+  );
   return { balance, entries: entries.length, lots: lots.length };
 }
 export async function paidLot(

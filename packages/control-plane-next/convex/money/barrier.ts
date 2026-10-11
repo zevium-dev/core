@@ -68,8 +68,7 @@ export async function acknowledgeDrain(ctx: MutationCtx, value: unknown) {
   if (
     wallet.gateState !== "closing" ||
     wallet.epoch !== ack.epoch ||
-    wallet.gateRevision !== ack.gateRevision ||
-    ack.sealedAt > Date.now()
+    wallet.gateRevision !== ack.gateRevision
   )
     throw new ConvexError("Closure evidence rejected");
   if (wallet.settledThroughEdgeSequence !== ack.edgeFinalSequence)
@@ -120,4 +119,28 @@ export async function finishClose(
     settledThroughEdgeSequence: 0,
   });
   return getWallet(ctx, walletId);
+}
+
+/** Cancel only a drained admin command with no effects; never cancel a paged refund or dust job. */
+export async function abandonClose(
+  ctx: MutationCtx,
+  walletId: Id<"wallets">,
+  closeId: string,
+) {
+  const current = await getWallet(ctx, walletId);
+  if (current.close?.id === closeId && current.close.abandoned) return current;
+  const wallet = await requireDrained(ctx, walletId, closeId, "admin");
+  if (!wallet.close?.command) throw new ConvexError("Admin command required");
+  const effect = await ctx.db
+    .query("walletEntries")
+    .withIndex("by_admin_adjustment", (q) =>
+      q
+        .eq("walletId", walletId)
+        .eq("adjustment.kind", "admin")
+        .eq("adjustment.ref", closeId),
+    )
+    .first();
+  if (effect) throw new ConvexError("Applied adjustment cannot be abandoned");
+  await ctx.db.patch(walletId, { close: { ...wallet.close, abandoned: true } });
+  return finishClose(ctx, walletId, closeId);
 }

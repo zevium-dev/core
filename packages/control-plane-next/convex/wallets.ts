@@ -4,13 +4,19 @@ import {
   internalMutation,
   internalQuery,
   query,
+  type ActionCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireActiveOrg } from "./lib/auth";
 import { checkpoint, getWallet } from "./money/walletLedger";
 import { settleOne, type Outcome } from "./money/settle";
 import { ingestUsage } from "../contracts/settlement";
-import { acknowledgeDrain, finishClose, requestClose } from "./money/barrier";
+import {
+  abandonClose,
+  acknowledgeDrain,
+  finishClose,
+  requestClose,
+} from "./money/barrier";
 import { beginDustMerge, moveDustPage } from "./money/dust";
 import {
   applyAdminDecrease,
@@ -60,40 +66,40 @@ export const settleEvent = internalMutation({
 /** HTTP batch orchestration; per-event mutation rollback isolates poisoned refs and bounds writes. */
 export const recordUsage = internalAction({
   args: { bodyJson: v.string() },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ results: Outcome[]; wallet: ReturnType<typeof checkpoint> }> => {
-    if (args.bodyJson.length > 1_048_576)
-      throw new Error("Settlement too large");
-    const { events } = ingestUsage.parse(JSON.parse(args.bodyJson));
-    const results: Outcome[] = [];
-    // Sorting advances the contiguous watermark even if the transport reordered finals.
-    for (const event of [...events].sort(
-      (a, b) => a.epoch - b.epoch || a.edgeSequence - b.edgeSequence,
-    )) {
-      try {
-        results.push(
-          await ctx.runMutation(internal.wallets.settleEvent, {
-            eventJson: JSON.stringify(event),
-          }),
-        );
-      } catch {
-        results.push({
-          refId: event.settleRefId,
-          status: "rejected",
-          reason: "Settlement temporarily unavailable",
-          retryable: true,
-        });
-      }
-    }
-    const wallet = await ctx.runQuery(internal.wallets.getCheckpoint, {
-      walletId: events[0]
-        .walletId as import("./_generated/dataModel").Id<"wallets">,
-    });
-    return { results, wallet };
-  },
+  handler: (ctx, args) => recordUsageBatch(ctx, args.bodyJson),
 });
+export async function recordUsageBatch(
+  ctx: Pick<ActionCtx, "runMutation" | "runQuery">,
+  bodyJson: string,
+): Promise<{ results: Outcome[]; wallet: ReturnType<typeof checkpoint> }> {
+  if (bodyJson.length > 1_048_576) throw new Error("Settlement too large");
+  const { events } = ingestUsage.parse(JSON.parse(bodyJson));
+  const results: Outcome[] = [];
+  // Sorting advances the contiguous watermark even if the transport reordered finals.
+  for (const event of [...events].sort(
+    (a, b) => a.epoch - b.epoch || a.edgeSequence - b.edgeSequence,
+  )) {
+    try {
+      results.push(
+        await ctx.runMutation(internal.wallets.settleEvent, {
+          eventJson: JSON.stringify(event),
+        }),
+      );
+    } catch {
+      results.push({
+        refId: event.settleRefId,
+        status: "rejected",
+        reason: "Settlement temporarily unavailable",
+        retryable: true,
+      });
+    }
+  }
+  const wallet = await ctx.runQuery(internal.wallets.getCheckpoint, {
+    walletId: events[0]
+      .walletId as import("./_generated/dataModel").Id<"wallets">,
+  });
+  return { results, wallet };
+}
 export const ackDrain = internalMutation({
   args: { ackJson: v.string() },
   handler: async (ctx, args) =>
@@ -128,16 +134,32 @@ export const finishArchive = internalMutation({
   },
 });
 export const beginDecrease = internalMutation({
-  args: { walletId: v.id("wallets"), credits: v.number() },
+  args: {
+    walletId: v.id("wallets"),
+    credits: v.number(),
+    operationId: v.string(),
+  },
   handler: async (ctx, args) =>
-    checkpoint(await beginAdminDecrease(ctx, args.walletId, args.credits)),
+    checkpoint(
+      await beginAdminDecrease(
+        ctx,
+        args.walletId,
+        args.credits,
+        args.operationId,
+      ),
+    ),
 });
 export const applyDecrease = internalMutation({
   args: { walletId: v.id("wallets"), ref: v.string(), credits: v.number() },
-  handler: async (ctx, args) =>
-    checkpoint(
-      await applyAdminDecrease(ctx, args.walletId, args.ref, args.credits),
-    ),
+  handler: async (ctx, args) => {
+    const result = await applyAdminDecrease(
+      ctx,
+      args.walletId,
+      args.ref,
+      args.credits,
+    );
+    return { ...checkpoint(result.wallet), status: result.status };
+  },
 });
 export const restoreDecrease = internalMutation({
   args: { walletId: v.id("wallets"), ref: v.string(), closeId: v.string() },
@@ -179,5 +201,40 @@ export const recoverMerges = internalMutation({
         ...args,
         cursor: page.continueCursor,
       });
+  },
+});
+
+export const abandonDecrease = internalMutation({
+  args: { walletId: v.id("wallets"), closeId: v.string() },
+  handler: async (ctx, args) =>
+    checkpoint(await abandonClose(ctx, args.walletId, args.closeId)),
+});
+/** Operator records a reviewed external resolution or explicitly voids the debit.
+ * Neither decision silently charges a wallet or releases publisher funds.
+ */
+export const resolveSettlementException = internalMutation({
+  args: {
+    caseId: v.id("financeReconciliationCases"),
+    disposition: v.union(v.literal("resolved"), v.literal("void")),
+    resolution: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!args.resolution.trim() || args.resolution.length > 2000)
+      throw new Error("Resolution required");
+    const row = await ctx.db.get(args.caseId);
+    if (!row || row.rowKind !== "case" || row.kind !== "settlement_exception")
+      throw new Error("Settlement case not found");
+    const resolution = `${args.disposition}: ${args.resolution}`;
+    if (row.status === "resolved") {
+      if (row.resolution !== resolution)
+        throw new Error("Resolution facts changed");
+      return row;
+    }
+    await ctx.db.patch(row._id, {
+      status: "resolved",
+      resolution,
+      updatedAt: Date.now(),
+    });
+    return ctx.db.get(row._id);
   },
 });

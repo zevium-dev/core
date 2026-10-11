@@ -8,7 +8,7 @@ import { appendWalletEntry, facts, getWallet } from "./walletLedger";
 import { consumeSlices, validateSlices, type Slice } from "./lots";
 import { recordEarnings, recordRollups } from "./rollups";
 export type Outcome =
-  | { refId: string; status: "applied" | "already_applied" }
+  | { refId: string; status: "applied" | "already_applied" | "exception" }
   | { refId: string; status: "rejected"; reason: string; retryable: boolean };
 const reject = (refId: string, reason: string, retryable = false): Outcome => ({
   refId,
@@ -49,16 +49,22 @@ export async function settleOne(
     .unique();
   if (prior)
     return prior.immutableFingerprint === immutableFingerprint
-      ? { refId: event.settleRefId, status: "already_applied" }
+      ? {
+          refId: event.settleRefId,
+          status:
+            prior.billingOutcome === "exception"
+              ? "exception"
+              : "already_applied",
+        }
       : reject(event.settleRefId, "Settlement facts changed");
-  // Everything after preflight must propagate exceptions: Convex rolls back the entire event.
-  let evidence: Awaited<ReturnType<typeof validateEvidence>>;
-  try {
-    evidence = await validateEvidence(ctx, event, now);
-  } catch {
-    return reject(event.settleRefId, "Settlement evidence rejected");
-  }
-  const { wallet, project, version, slices } = evidence;
+  const walletId = ctx.db.normalizeId("wallets", event.walletId);
+  if (!walletId) return reject(event.settleRefId, "Wallet identity rejected");
+  const wallet = await getWallet(ctx, walletId);
+  if (
+    wallet.ownerKey !== event.ownerKey ||
+    wallet.owner.clerkOrgId !== event.consumerClerkOrgId
+  )
+    return reject(event.settleRefId, "Wallet identity rejected");
   if (
     wallet.epoch !== event.epoch ||
     wallet.gateState === "closed" ||
@@ -71,6 +77,24 @@ export async function settleOne(
       "Finalization sequence gap",
       event.edgeSequence > wallet.settledThroughEdgeSequence + 1,
     );
+  // Only explicit evidence failures become exceptions. Infrastructure failures roll back/retry.
+  let evidence: Awaited<ReturnType<typeof validateEvidence>>;
+  try {
+    evidence = await validateEvidence(ctx, event);
+  } catch (error) {
+    if (!(error instanceof ConvexError)) throw error;
+    return recordException(
+      ctx,
+      event,
+      wallet,
+      immutableFingerprint,
+      now,
+      typeof error.data === "string"
+        ? error.data
+        : "Settlement evidence rejected",
+    );
+  }
+  const { project, version, slices } = evidence;
   const consumed = event.billingOutcome === "settled" ? slices : [];
   const usageId = await ctx.db.insert("usageEvents", {
     publicId: `usage:${event.reservationId}`,
@@ -127,18 +151,21 @@ export async function settleOne(
     );
   }
   const usage = (await ctx.db.get(usageId))!;
-  await recordEarnings(ctx, usage, now);
-  await recordRollups(ctx, usage, now);
+  const promoCostCredits = await recordEarnings(ctx, usage, now);
+  await ctx.db.patch(usageId, { promoCostCredits });
+  await recordRollups(ctx, { ...usage, promoCostCredits }, now);
   await ctx.db.patch(wallet._id, {
     settledThroughEdgeSequence: event.edgeSequence,
   });
   return { refId: event.settleRefId, status: "applied" };
 }
-async function validateEvidence(
-  ctx: MutationCtx,
-  event: Settlement,
-  now: number,
-) {
+async function validateEvidence(ctx: MutationCtx, event: Settlement) {
+  if (
+    !Number.isFinite(new Date(event.at).getTime()) ||
+    !Number.isFinite(new Date(event.admittedAt).getTime()) ||
+    event.credits > Math.floor(Number.MAX_SAFE_INTEGER / 10000)
+  )
+    throw new ConvexError("Settlement accounting range rejected");
   const wallet = await getWallet(ctx, id(ctx, "wallets", event.walletId));
   const project = await ctx.db.get(id(ctx, "projects", event.projectId));
   const version = await ctx.db.get(
@@ -163,8 +190,6 @@ async function validateEvidence(
     key.ownerUserId !== event.ownerUserId ||
     key.subjectUserId !== event.ownerUserId ||
     key.keyFamilyId !== event.keyFamilyId ||
-    event.admittedAt < version.publishedAt ||
-    event.at > now + 30_000 ||
     event.budgetPeriod !== new Date(event.admittedAt).toISOString().slice(0, 7)
   )
     throw new ConvexError("Settlement identity rejected");
@@ -198,4 +223,81 @@ async function validateEvidence(
     event.credits > 0,
   );
   return { wallet, project, version, slices };
+}
+
+/** A signed, contiguous final is durably accounted for even when its debit evidence is unusable.
+ * No synthetic grant, consumer debt or publisher earnings. Raw evidence stays internal.
+ */
+async function recordException(
+  ctx: MutationCtx,
+  event: Settlement,
+  wallet: Awaited<ReturnType<typeof getWallet>>,
+  immutableFingerprint: string,
+  now: number,
+  reason: string,
+): Promise<Outcome> {
+  const caseId = await ctx.db.insert("financeReconciliationCases", {
+    rowKind: "case",
+    kind: "settlement_exception",
+    status: "open",
+    reason,
+    organizationId: wallet.owner.organizationId,
+    operationId: event.settleRefId,
+    candidateCount: 1,
+    attempts: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.insert("financeReconciliationCases", {
+    rowKind: "candidate",
+    caseId,
+    value: JSON.stringify(event),
+    createdAt: now,
+  });
+  // Preserve malformed identity evidence on the case; never invent typed IDs.
+  const projectId = ctx.db.normalizeId("projects", event.projectId);
+  const versionId = ctx.db.normalizeId("specVersions", event.specVersionId);
+  const publisherId = ctx.db.normalizeId(
+    "organizations",
+    event.publisherOrganizationId,
+  );
+  const project = projectId ? await ctx.db.get(projectId) : null;
+  await ctx.db.insert("usageEvents", {
+    publicId: `usage:${event.reservationId}`,
+    walletId: wallet._id,
+    consumerOrganizationId: wallet.owner.organizationId,
+    publisherOrganizationId: publisherId,
+    projectId,
+    specVersionId: versionId,
+    projectName: project?.name ?? "Unavailable API",
+    projectSlug: project?.slug ?? "unavailable",
+    operationId: event.operationId,
+    method: event.method,
+    endpoint: event.endpoint,
+    at: event.at,
+    status: event.status,
+    latencyMs: event.latencyMs,
+    settleRefId: event.settleRefId,
+    reservationId: event.reservationId,
+    epoch: event.epoch,
+    edgeSequence: event.edgeSequence,
+    admissionFingerprint: event.admissionFingerprint,
+    immutableFingerprint,
+    pricingDecision: event.pricingDecision,
+    listedCostCredits: event.listedCostCredits,
+    heldCredits: event.heldCredits,
+    credits: 0,
+    billingOutcome: "exception",
+    qualityOutcome: event.qualityOutcome,
+    ambiguous: event.ambiguous,
+    keyId: event.keyId,
+    keyFamilyId: event.keyFamilyId,
+    ownerUserId: event.ownerUserId,
+    fundingSlices: [],
+    exceptionCaseId: caseId,
+  });
+  await ctx.db.patch(wallet._id, {
+    settledThroughEdgeSequence: event.edgeSequence,
+  });
+  return { refId: event.settleRefId, status: "exception" };
 }

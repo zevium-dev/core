@@ -11,7 +11,12 @@ import {
   money,
 } from "./walletLedger";
 import { allocate, lotState, sourceRow, type Slice } from "./lots";
-import { finishClose, requestClose, requireDrained } from "./barrier";
+import {
+  abandonClose,
+  finishClose,
+  requestClose,
+  requireDrained,
+} from "./barrier";
 type Adjustment = Extract<
   Doc<"walletEntries">,
   { kind: "reversal" | "restoration" }
@@ -28,14 +33,6 @@ export async function reverseSource(
     requestFingerprint: string;
   },
 ) {
-  const wallet = await requireDrained(ctx, input.walletId, input.closeId);
-  if (
-    input.adjustment.kind === "admin"
-      ? wallet.close?.reason !== "admin" ||
-        input.closeId !== input.adjustment.ref
-      : wallet.close?.reason !== "refund" && wallet.close?.reason !== "dispute"
-  )
-    throw new ConvexError("Adjustment does not own wallet closure");
   const { slice } = input;
   const lot = await ctx.db.get(slice.lotId),
     source = await sourceRow(ctx, slice.lotId, slice.originLotId);
@@ -48,12 +45,45 @@ export async function reverseSource(
     !money(slice.credits)
   )
     throw new ConvexError("Funding evidence rejected");
+  const prior = await ctx.db
+    .query("walletEntries")
+    .withIndex("by_ref", (q) => q.eq("refId", input.refId))
+    .unique();
+  if (prior)
+    return appendWalletEntry(
+      ctx,
+      {
+        walletId: input.walletId,
+        kind: "reversal",
+        refId: input.refId,
+        amount: -slice.credits,
+        lotId: slice.lotId,
+        originLotId: slice.originLotId,
+        paymentId: slice.paymentId,
+        adjustment: input.adjustment,
+        requestFingerprint: input.requestFingerprint,
+        closeId: input.closeId,
+      },
+      lot.sourceKind === "promo" ? -slice.credits : 0,
+    );
+  const wallet = await requireDrained(ctx, input.walletId, input.closeId);
+  if (
+    input.adjustment.kind === "admin"
+      ? wallet.close?.reason !== "admin" ||
+        input.closeId !== input.adjustment.ref
+      : wallet.close?.reason !== "refund" && wallet.close?.reason !== "dispute"
+  )
+    throw new ConvexError("Adjustment does not own wallet closure");
   if (input.adjustment.kind === "payment") {
     const adjustment = await ctx.db.get(input.adjustment.id);
+    const payment = slice.paymentId ? await ctx.db.get(slice.paymentId) : null;
     if (
       !adjustment ||
       adjustment.paymentId !== slice.paymentId ||
-      !lot.refundable
+      !lot.refundable ||
+      adjustment.closeId !== input.closeId ||
+      !payment ||
+      adjustment.closeGeneration !== payment.reconciliation.generation
     )
       throw new ConvexError("Adjustment source mismatch");
   }
@@ -69,6 +99,7 @@ export async function reverseSource(
       paymentId: slice.paymentId,
       adjustment: input.adjustment,
       requestFingerprint: input.requestFingerprint,
+      closeId: input.closeId,
     },
     lot.sourceKind === "promo" ? -slice.credits : 0,
   );
@@ -97,6 +128,31 @@ export async function restoreSource(
 ) {
   if (entry.kind !== "reversal" || refId !== `restore:${entry.refId}`)
     throw new ConvexError("Reversal not found");
+  const lot = (await ctx.db.get(entry.lotId))!,
+    source = (await sourceRow(ctx, entry.lotId, entry.originLotId))!;
+  if (!lot || !source) throw new ConvexError("Funding source not found");
+  const amount = -entry.amount;
+  const prior = await ctx.db
+    .query("walletEntries")
+    .withIndex("by_ref", (q) => q.eq("refId", refId))
+    .unique();
+  if (prior)
+    return appendWalletEntry(
+      ctx,
+      {
+        walletId: entry.walletId,
+        kind: "restoration",
+        refId,
+        amount,
+        lotId: entry.lotId,
+        originLotId: entry.originLotId,
+        paymentId: entry.paymentId,
+        adjustment: entry.adjustment,
+        requestFingerprint: entry.immutableFingerprint,
+        closeId,
+      },
+      lot.sourceKind === "promo" ? amount : 0,
+    );
   const wallet = await requireDrained(ctx, entry.walletId, closeId);
   if (
     entry.adjustment.kind === "admin"
@@ -104,10 +160,17 @@ export async function restoreSource(
       : wallet.close?.reason !== "refund" && wallet.close?.reason !== "dispute"
   )
     throw new ConvexError("Restoration does not own wallet closure");
-  const lot = (await ctx.db.get(entry.lotId))!,
-    source = (await sourceRow(ctx, entry.lotId, entry.originLotId))!;
-  if (!lot || !source) throw new ConvexError("Funding source not found");
-  const amount = -entry.amount;
+  if (entry.adjustment.kind === "payment") {
+    const adjustment = await ctx.db.get(entry.adjustment.id);
+    const payment = entry.paymentId ? await ctx.db.get(entry.paymentId) : null;
+    if (
+      !adjustment ||
+      adjustment.closeId !== closeId ||
+      !payment ||
+      adjustment.closeGeneration !== payment.reconciliation.generation
+    )
+      throw new ConvexError("Restoration does not own payment generation");
+  }
   const result = await appendWalletEntry(
     ctx,
     {
@@ -120,6 +183,7 @@ export async function restoreSource(
       paymentId: entry.paymentId,
       adjustment: entry.adjustment,
       requestFingerprint: entry.immutableFingerprint,
+      closeId,
     },
     lot.sourceKind === "promo" ? amount : 0,
   );
@@ -175,30 +239,40 @@ export async function beginAdminDecrease(
   ctx: MutationCtx,
   walletId: Id<"wallets">,
   credits: number,
+  operationId: string,
 ) {
+  if (!operationId || operationId.length > 200)
+    throw new ConvexError("Invalid operation ID");
   if (!money(credits)) throw new ConvexError("Adjustment must be positive");
   const wallet = await getWallet(ctx, walletId);
+  const ref = `admin:${walletId}:${operationId}`;
   const command = {
     credits,
     fingerprint: await fingerprint({
       walletId,
       credits,
       kind: "admin_decrease",
+      ref,
     }),
   };
+  const prior = await adminEntries(ctx, walletId, ref);
+  if (prior.length) {
+    if (
+      prior.some(
+        (e) =>
+          e.kind === "reversal" && e.requestFingerprint !== command.fingerprint,
+      )
+    )
+      throw new ConvexError("Adjustment facts changed");
+    return wallet;
+  }
   if (
     wallet.gateState === "closing" &&
     wallet.close?.reason === "admin" &&
     wallet.close.command?.fingerprint === command.fingerprint
   )
     return wallet;
-  return requestClose(
-    ctx,
-    walletId,
-    `admin:${crypto.randomUUID()}`,
-    "admin",
-    command,
-  );
+  return requestClose(ctx, walletId, ref, "admin", command);
 }
 export async function applyAdminDecrease(
   ctx: MutationCtx,
@@ -210,6 +284,7 @@ export async function applyAdminDecrease(
     walletId,
     credits: money(credits),
     kind: "admin_decrease",
+    ref,
   });
   const prior = await adminEntries(ctx, walletId, ref);
   if (prior.length) {
@@ -220,12 +295,30 @@ export async function applyAdminDecrease(
       )
     )
       throw new ConvexError("Adjustment facts changed");
-    return getWallet(ctx, walletId);
+    return {
+      wallet: await getWallet(ctx, walletId),
+      status: "applied" as const,
+    };
+  }
+  const current = await getWallet(ctx, walletId);
+  if (current.close?.id === ref && current.close.abandoned) {
+    if (current.close.command?.fingerprint !== requestFingerprint)
+      throw new ConvexError("Adjustment facts changed");
+    return { wallet: current, status: "abandoned" as const };
   }
   const wallet = await requireDrained(ctx, walletId, ref, "admin");
   if (wallet.close?.command?.fingerprint !== requestFingerprint)
     throw new ConvexError("Adjustment facts changed");
-  const slices = await allocate(ctx, walletId, credits);
+  let slices: Slice[];
+  try {
+    slices = await allocate(ctx, walletId, credits);
+  } catch (error) {
+    if (!(error instanceof ConvexError)) throw error;
+    return {
+      wallet: await abandonClose(ctx, walletId, ref),
+      status: "abandoned" as const,
+    };
+  }
   for (const slice of slices)
     await reverseSource(ctx, {
       walletId,
@@ -235,7 +328,10 @@ export async function applyAdminDecrease(
       adjustment: { kind: "admin", ref },
       requestFingerprint,
     });
-  return finishClose(ctx, walletId, ref);
+  return {
+    wallet: await finishClose(ctx, walletId, ref),
+    status: "applied" as const,
+  };
 }
 export async function restoreAdminDecrease(
   ctx: MutationCtx,

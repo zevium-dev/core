@@ -8,7 +8,9 @@ async function view(
   event: Doc<"usageEvents">,
   privileged: boolean,
 ) {
-  const publisher = await ctx.db.get(event.publisherOrganizationId);
+  const publisher = event.publisherOrganizationId
+    ? await ctx.db.get(event.publisherOrganizationId)
+    : null;
   const member =
     privileged && event.ownerUserId
       ? await ctx.db

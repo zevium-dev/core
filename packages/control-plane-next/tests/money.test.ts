@@ -167,34 +167,290 @@ describe("wallet ledger and source inventory", () => {
       t.run((ctx) => allocate(ctx, empty.walletId, 0)),
     ).rejects.toThrow("Insufficient");
   });
-  it("conserves randomized grant/settle/replay sequences against a reference balance", async () => {
+  it("matches a source reference model across randomized money and maintenance sequences", async () => {
     const t = harness(),
-      f = await t.run((ctx) => moneyFixture(ctx, "random", [50], 1));
-    let balance = 50,
+      f = await t.run((ctx) => moneyFixture(ctx, "model", [], 7));
+    type Source = {
+      ref: string;
+      container: Id<"fundingLots">;
+      origin: Id<"fundingLots">;
+      priority: number;
+      order: number;
+      containerOrder: number;
+      remaining: number;
+      consumed: number;
+      reversed: number;
+    };
+    const model: Source[] = [];
+    let ordinal = 0,
       state = 17,
-      seq = 0;
-    for (let i = 0; i < 60; i++) {
-      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-      if (state % 4 === 0) {
-        const credits = (state % 17) + 1;
-        await t.run((ctx) =>
-          grantLot(ctx, {
-            walletId: f.walletId,
-            sourceKind: "promo",
-            sourceRef: `random:${i}:promo`,
-            credits,
-          }),
+      sequence = 0,
+      expectedSpent = 0;
+    const random = () =>
+      (state = (Math.imul(state, 1664525) + 1013904223) >>> 0);
+    const grant = async (
+      kind: "promo" | "admin" | "payment",
+      amount: number,
+    ) => {
+      vi.advanceTimersByTime(1);
+      const order = ++ordinal,
+        ref = `model:${order}`;
+      const result =
+        kind === "payment"
+          ? await t.run((ctx) => paidLot(ctx, f.walletId, ref, amount))
+          : await t.run((ctx) =>
+              grantLot(ctx, {
+                walletId: f.walletId,
+                sourceKind: kind,
+                sourceRef: ref,
+                credits: amount,
+              }),
+            );
+      model.push({
+        ref,
+        origin: result.lot._id,
+        container: result.lot._id,
+        priority: kind === "promo" ? 0 : kind === "admin" ? 1 : 2,
+        order,
+        containerOrder: order,
+        remaining: amount,
+        consumed: 0,
+        reversed: 0,
+      });
+    };
+    const allocation = (amount: number) => {
+      let left = amount;
+      const slices: { source: Source; credits: number }[] = [];
+      for (const source of [...model].sort(
+        (a, b) =>
+          a.priority - b.priority ||
+          a.containerOrder - b.containerOrder ||
+          a.order - b.order,
+      )) {
+        const credits = Math.min(left, source.remaining);
+        if (credits) {
+          slices.push({ source, credits });
+          left -= credits;
+        }
+        if (!left) break;
+      }
+      expect(left).toBe(0);
+      return slices;
+    };
+    await grant("admin", 100);
+    await grant("admin", 100);
+    await grant("payment", 200);
+    await grant("promo", 80);
+    const visited = new Set<number>();
+    for (let i = 0; i < 70; i++) {
+      // Shuffle each seven-operation round, guaranteeing coverage without a fixed operation sequence.
+      const choices = Array.from({ length: 7 }, (_, n) => n).filter(
+        (n) => !visited.has(n),
+      );
+      const op = choices[random() % choices.length];
+      visited.add(op);
+      if (visited.size === 7) visited.clear();
+      if (op === 0)
+        await grant(
+          (["promo", "admin", "payment"] as const)[random() % 3],
+          20 + (random() % 40),
         );
-        balance += credits;
-      } else {
-        const event = await t.run((ctx) => eventFor(ctx, f, ++seq));
+      if (op >= 1 && op <= 3) {
+        const selected = allocation(7);
+        const patch: Partial<Settlement> =
+          op === 2
+            ? {
+                billingOutcome: "refunded",
+                qualityOutcome: "server_error",
+                status: 500,
+                credits: 0,
+              }
+            : op === 3
+              ? {
+                  billingOutcome: "free",
+                  pricingDecision: "free_tier",
+                  heldCredits: 0,
+                  credits: 0,
+                  fundingSlices: [],
+                  freeTierUsedBefore: 0,
+                }
+              : {};
+        const event = await t.run((ctx) => eventFor(ctx, f, ++sequence, patch));
+        if (op !== 3)
+          expect(
+            event.fundingSlices.map((s) => [s.sourceRef, s.lotId, s.credits]),
+          ).toEqual(
+            selected.map((s) => [s.source.ref, s.source.container, s.credits]),
+          );
         expect((await settle(t, event)).status).toBe("applied");
         expect((await settle(t, event)).status).toBe("already_applied");
-        balance--;
+        if (op === 1) {
+          expectedSpent += 7;
+          for (const { source, credits } of selected) {
+            source.remaining -= credits;
+            source.consumed += credits;
+          }
+        }
+      }
+      if (op === 4) {
+        // Merge compatible admin containers; model explicitly moves provenance and spend order.
+        await grant("admin", 20);
+        const containers = [
+          ...new Set(
+            model
+              .filter((s) => s.priority === 1 && s.remaining > 0)
+              .map((s) => s.container),
+          ),
+        ];
+        const sourceId = containers.sort(
+          (a, b) =>
+            model.find((s) => s.container === a)!.containerOrder -
+            model.find((s) => s.container === b)!.containerOrder,
+        )[0];
+        const target = model[model.length - 1];
+        const job = (await t.run((ctx) => beginDustMerge(ctx, sourceId)))!;
+        expect(job.merge?.toLotId).toBe(target.container);
+        await ack(t, f.walletId);
+        let done = false;
+        while (!done)
+          done = (
+            await t.run((ctx) =>
+              moveDustPage(ctx, sourceId, job.merge!.generation),
+            )
+          ).complete;
+        for (const source of model.filter(
+          (s) => s.container === sourceId && s.remaining > 0,
+        )) {
+          source.container = target.container;
+          source.containerOrder = target.containerOrder;
+        }
+        sequence = 0;
+      }
+      if (op === 5) {
+        const credits = 1 + (random() % 9),
+          selected = allocation(credits);
+        const begin = await t.mutation(internal.wallets.beginDecrease, {
+          walletId: f.walletId,
+          credits,
+          operationId: `model:${i}`,
+        });
+        await ack(t, f.walletId);
+        expect(
+          await t.mutation(internal.wallets.applyDecrease, {
+            walletId: f.walletId,
+            ref: begin.closeId!,
+            credits,
+          }),
+        ).toMatchObject({ status: "applied" });
+        for (const { source, credits: n } of selected) {
+          source.remaining -= n;
+          source.reversed += n;
+        }
+        sequence = 0;
+      }
+      if (op === 6) {
+        // A source-specific payment reversal/restoration uses a bound generation and exact journal ref.
+        const source = model.find((s) => s.priority === 2 && s.remaining > 3)!;
+        const lot = (await t.run((ctx) => ctx.db.get(source.origin)))!;
+        const closeId = `model-refund:${i}`;
+        await t.run((ctx) => requestClose(ctx, f.walletId, closeId, "refund"));
+        await ack(t, f.walletId);
+        const adjustmentId = await t.run((ctx) =>
+          ctx.db.insert("paymentAdjustments", {
+            paymentId: lot.paymentId!,
+            providerSourceRef: closeId,
+            kind: "refund",
+            status: "succeeded",
+            principalCents: 0.03,
+            feeCents: 0,
+            requestedCredits: 3,
+            effectiveCredits: 3,
+            fundsWithdrawn: false,
+            fundsReinstated: false,
+            revision: 1,
+            appliedWalletCredits: 0,
+            appliedPublisherCredits: 0,
+            closeId,
+            closeGeneration: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }),
+        );
+        const input = {
+          walletId: f.walletId,
+          closeId,
+          refId: `reverse:${i}`,
+          requestFingerprint: `model:${i}`,
+          adjustment: { kind: "payment" as const, id: adjustmentId },
+          slice: {
+            lotId: source.container,
+            originLotId: source.origin,
+            sourceRef: source.ref,
+            paymentId: lot.paymentId,
+            credits: 3,
+          },
+        };
+        await expect(
+          t.run((ctx) => reverseSource(ctx, { ...input, closeId: "wrong" })),
+        ).rejects.toThrow("drained");
+        const result = await t.run((ctx) => reverseSource(ctx, input));
+        source.remaining -= 3;
+        source.reversed += 3;
+        await t.run((ctx) => assertWallet(ctx, f.walletId));
+        await t.run((ctx) =>
+          restoreSource(ctx, result.entry, `restore:${input.refId}`, closeId),
+        );
+        source.remaining += 3;
+        source.reversed -= 3;
+        await t.run((ctx) => finishClose(ctx, f.walletId, closeId));
+        sequence = 0;
+        // Both primitives replay after completion, without re-opening the close.
+        expect((await t.run((ctx) => reverseSource(ctx, input))).applied).toBe(
+          false,
+        );
+        expect(
+          (
+            await t.run((ctx) =>
+              restoreSource(
+                ctx,
+                result.entry,
+                `restore:${input.refId}`,
+                closeId,
+              ),
+            )
+          ).applied,
+        ).toBe(false);
+        await expect(
+          t.run((ctx) => reverseSource(ctx, { ...input, closeId: "wrong" })),
+        ).rejects.toThrow("facts changed");
       }
       expect(
         (await t.run((ctx) => assertWallet(ctx, f.walletId))).balance,
-      ).toBe(balance);
+      ).toBe(model.reduce((n, s) => n + s.remaining, 0));
+      const rows = await t.run((ctx) =>
+        ctx.db.query("fundingLotSources").collect(),
+      );
+      for (const source of model) {
+        const originals = rows.filter((r) => r.sourceRef === source.ref);
+        expect(originals.reduce((n, r) => n + r.remainingCredits, 0)).toBe(
+          source.remaining,
+        );
+        expect(originals.reduce((n, r) => n + r.consumedCredits, 0)).toBe(
+          source.consumed,
+        );
+        expect(originals.reduce((n, r) => n + r.reversedCredits, 0)).toBe(
+          source.reversed,
+        );
+      }
+      const earnings = await t.run((ctx) =>
+        ctx.db.query("publisherEarnings").collect(),
+      );
+      expect(earnings.reduce((n, e) => n + e.grossCredits, 0)).toBe(
+        expectedSpent,
+      );
+      expect(earnings.reduce((n, e) => n + e.netAtoms, 0)).toBe(
+        expectedSpent * 9500,
+      );
     }
   });
 });
@@ -297,6 +553,7 @@ describe("source-backed settlement v2", () => {
     const t = harness(),
       f = await t.run((ctx) => moneyFixture(ctx));
     const event = await t.run((ctx) => eventFor(ctx, f));
+    let poisonedSequence = 0;
     for (const patch of [
       { ownerUserId: "forged" },
       {
@@ -311,14 +568,23 @@ describe("source-backed settlement v2", () => {
       { freeTierLimit: 3 },
       { deploymentId: "other" },
     ]) {
-      expect(
-        (await settle(t, await resign({ ...event, ...patch }))).status,
-      ).toBe("rejected");
+      const poisoned = await resign({
+        ...event,
+        ...patch,
+        edgeSequence: ++poisonedSequence,
+        reservationId: `poison:${poisonedSequence}`,
+        settleRefId: `settle:poison:${poisonedSequence}`,
+      });
+      const expected = patch.deploymentId ? "rejected" : "exception";
+      expect((await settle(t, poisoned)).status).toBe(expected);
+      expect((await settle(t, poisoned)).status).toBe(expected);
     }
     expect(
       (await settle(t, { ...event, admissionFingerprint: "0".repeat(64) }))
         .status,
     ).toBe("rejected");
+    event.edgeSequence = poisonedSequence;
+    await resign(event);
     expect((await settle(t, event)).status).toBe("applied");
     expect((await settle(t, { ...event, latencyMs: 11 })).status).toBe(
       "rejected",
@@ -342,6 +608,7 @@ describe("source-backed settlement v2", () => {
       f = await t.run((ctx) => moneyFixture(ctx));
     const event = await t.run((ctx) => eventFor(ctx, f));
     const begin = await t.mutation(internal.wallets.beginDecrease, {
+      operationId: "archive-decrease",
       walletId: f.walletId,
       credits: 95,
     });
@@ -403,7 +670,7 @@ describe("source-backed settlement v2", () => {
     const first = await t.run((ctx) => eventFor(ctx, last)),
       second = await t.run((ctx) => eventFor(ctx, last, 2));
     expect((await settle(t, first)).status).toBe("applied");
-    expect((await settle(t, second)).status).toBe("rejected");
+    expect((await settle(t, second)).status).toBe("exception");
     await t.run((ctx) => assertWallet(ctx, last.walletId));
   });
   it("validates HTTP size/auth/deferred fields and keeps the checkpoint envelope", async () => {
@@ -553,6 +820,8 @@ describe("dust moves and exact restoration", () => {
       ctx.db.insert("paymentAdjustments", {
         paymentId: a.lot.paymentId!,
         providerSourceRef: "refund:a",
+        closeId: "refund:a",
+        closeGeneration: 0,
         kind: "refund",
         status: "succeeded",
         principalCents: 1,
@@ -589,6 +858,17 @@ describe("dust moves and exact restoration", () => {
       adjustment: { kind: "payment" as const, id: adjustment },
       requestFingerprint: "verified-refund-fact",
     };
+    await t.run((ctx) => ctx.db.patch(adjustment, { closeId: "unrelated" }));
+    await expect(t.run((ctx) => reverseSource(ctx, input))).rejects.toThrow(
+      "source mismatch",
+    );
+    await t.run((ctx) =>
+      ctx.db.patch(adjustment, { closeId: "refund:a", closeGeneration: 1 }),
+    );
+    await expect(t.run((ctx) => reverseSource(ctx, input))).rejects.toThrow(
+      "source mismatch",
+    );
+    await t.run((ctx) => ctx.db.patch(adjustment, { closeGeneration: 0 }));
     const reversed = await t.run((ctx) => reverseSource(ctx, input));
     expect((await t.run((ctx) => reverseSource(ctx, input))).applied).toBe(
       false,
@@ -670,6 +950,7 @@ describe("dust moves and exact restoration", () => {
     const t = harness(),
       f = await t.run((ctx) => moneyFixture(ctx, "restore", [100]));
     const begin = await t.mutation(internal.wallets.beginDecrease, {
+      operationId: "restore-first",
       walletId: f.walletId,
       credits: 25,
     });
@@ -693,6 +974,7 @@ describe("dust moves and exact restoration", () => {
       (await t.mutation(internal.wallets.restoreDecrease, args)).balance,
     ).toBe(100);
     const again = await t.mutation(internal.wallets.beginDecrease, {
+      operationId: "restore-expired",
       walletId: f.walletId,
       credits: 100,
     });
@@ -821,4 +1103,266 @@ it("requires exact drain evidence and never lets an old ACK advance the next epo
     t.run((ctx) => acknowledgeDrain(ctx, { ...proof, gateRevision: 999 })),
   ).rejects.toThrow("facts changed");
   expect((await t.run((ctx) => ctx.db.get(f.walletId)))?.epoch).toBe(2);
+});
+
+it.each([90_000, -90_000])(
+  "settles signed calls with %i ms Worker skew and drains",
+  async (skew) => {
+    const t = harness(),
+      f = await t.run((ctx) => moneyFixture(ctx));
+    const event = await t.run((ctx) =>
+      eventFor(ctx, f, 1, {
+        admittedAt: NOW + skew,
+        at: NOW + skew,
+        budgetPeriod: new Date(NOW + skew).toISOString().slice(0, 7),
+      }),
+    );
+    expect((await settle(t, event)).status).toBe("applied");
+    await t.run((ctx) => requestClose(ctx, f.walletId, "skew", "admin"));
+    const w = (await t.run((ctx) => ctx.db.get(f.walletId)))!;
+    await t.run((ctx) =>
+      acknowledgeDrain(ctx, {
+        protocolVersion: 2,
+        deploymentId: "next-fixture",
+        walletId: w._id,
+        ownerKey: w.ownerKey,
+        epoch: w.epoch,
+        gateRevision: w.gateRevision,
+        closeId: "skew",
+        requestedAt: w.close!.requestedAt,
+        reason: "admin",
+        edgeFinalSequence: 1,
+        settledThroughEdgeSequence: 1,
+        sealedAt: NOW + skew,
+      }),
+    );
+    await t.run((ctx) => finishClose(ctx, f.walletId, "skew"));
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      95,
+    );
+  },
+);
+
+it.each(["resolved", "void"] as const)(
+  "records depleted-source exceptions and operator %s without blocking later finals",
+  async (disposition) => {
+    const t = harness(),
+      f = await t.run((ctx) => moneyFixture(ctx, "exception", [5]));
+    const events = await t.run(async (ctx) => [
+      await eventFor(ctx, f),
+      await eventFor(ctx, f, 2),
+    ]);
+    expect((await settle(t, events[0])).status).toBe("applied");
+    expect((await settle(t, events[1])).status).toBe("exception");
+    expect((await settle(t, events[1])).status).toBe("exception");
+    await t.run((ctx) =>
+      grantLot(ctx, {
+        walletId: f.walletId,
+        sourceKind: "admin",
+        sourceRef: "next",
+        credits: 5,
+      }),
+    );
+    expect(
+      (await settle(t, await t.run((ctx) => eventFor(ctx, f, 3)))).status,
+    ).toBe("applied");
+    const rows = await t.run((ctx) => ctx.db.query("usageEvents").collect());
+    expect(rows.find((e) => e.billingOutcome === "exception")).toMatchObject({
+      credits: 0,
+      fundingSlices: [],
+    });
+    const cases = await t.run((ctx) =>
+      ctx.db.query("financeReconciliationCases").collect(),
+    );
+    expect(cases.filter((c) => c.rowKind === "case")).toHaveLength(1);
+    const args = {
+      caseId: cases.find((c) => c.rowKind === "case")!._id,
+      disposition,
+      resolution: "Reviewed source evidence; no debit authorized",
+    };
+    expect(
+      await t.mutation(internal.wallets.resolveSettlementException, args),
+    ).toMatchObject({ status: "resolved" });
+    expect(
+      await t.mutation(internal.wallets.resolveSettlementException, args),
+    ).toMatchObject({ status: "resolved" });
+    await expect(
+      t.mutation(internal.wallets.resolveSettlementException, {
+        ...args,
+        resolution: "changed",
+      }),
+    ).rejects.toThrow("facts changed");
+    await t.run((ctx) =>
+      requestClose(ctx, f.walletId, "drain-exception", "admin"),
+    );
+    await ack(t, f.walletId, 3);
+    await t.run((ctx) => finishClose(ctx, f.walletId, "drain-exception"));
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      0,
+    );
+  },
+);
+
+it.each([{ projectId: "invalid-project" }, { at: Number.MAX_SAFE_INTEGER }])(
+  "records malformed signed evidence %j without wedging the watermark",
+  async (patch) => {
+    const t = harness(),
+      f = await t.run((ctx) => moneyFixture(ctx));
+    const event = await t.run((ctx) => eventFor(ctx, f, 1, patch));
+    expect((await settle(t, event)).status).toBe("exception");
+    expect(
+      (await settle(t, await t.run((ctx) => eventFor(ctx, f, 2)))).status,
+    ).toBe("applied");
+    await t.run((ctx) => assertWallet(ctx, f.walletId));
+  },
+);
+
+it("uses caller operation IDs for admin decreases across lost responses and equal amounts", async () => {
+  const t = harness(),
+    f = await t.run((ctx) => moneyFixture(ctx));
+  const args = { walletId: f.walletId, credits: 10, operationId: "first" };
+  const begin = await t.mutation(internal.wallets.beginDecrease, args);
+  expect(await t.mutation(internal.wallets.beginDecrease, args)).toEqual(begin);
+  await ack(t, f.walletId);
+  const applied = await t.mutation(internal.wallets.applyDecrease, {
+    walletId: f.walletId,
+    credits: 10,
+    ref: begin.closeId!,
+  });
+  expect(await t.mutation(internal.wallets.beginDecrease, args)).toMatchObject({
+    balance: 90,
+    gateState: "open",
+    epoch: applied.epoch,
+  });
+  await expect(
+    t.mutation(internal.wallets.beginDecrease, { ...args, credits: 11 }),
+  ).rejects.toThrow("facts changed");
+  const next = await t.mutation(internal.wallets.beginDecrease, {
+    ...args,
+    operationId: "second",
+  });
+  expect(next.closeId).not.toBe(begin.closeId);
+  await ack(t, f.walletId);
+  await t.mutation(internal.wallets.applyDecrease, {
+    walletId: f.walletId,
+    credits: 10,
+    ref: next.closeId!,
+  });
+  expect(await t.mutation(internal.wallets.beginDecrease, args)).toMatchObject({
+    balance: 80,
+    gateState: "open",
+  });
+  await t.run((ctx) => assertWallet(ctx, f.walletId));
+});
+
+it.each(["insufficient", "fragmented", "cancel"])(
+  "reopens drained admin close on %s with no debit",
+  async (mode) => {
+    const t = harness(),
+      f = await t.run((ctx) =>
+        moneyFixture(
+          ctx,
+          mode,
+          mode === "fragmented" ? Array<number>(33).fill(1) : [10],
+        ),
+      );
+    const credits = mode === "fragmented" ? 33 : 11;
+    const begin = await t.mutation(internal.wallets.beginDecrease, {
+      walletId: f.walletId,
+      credits,
+      operationId: mode,
+    });
+    await expect(
+      t.mutation(internal.wallets.abandonDecrease, {
+        walletId: f.walletId,
+        closeId: begin.closeId!,
+      }),
+    ).rejects.toThrow("drained");
+    await ack(t, f.walletId);
+    const args = { walletId: f.walletId, ref: begin.closeId!, credits };
+    if (mode === "cancel")
+      await t.mutation(internal.wallets.abandonDecrease, {
+        walletId: f.walletId,
+        closeId: begin.closeId!,
+      });
+    const result = await t.mutation(internal.wallets.applyDecrease, args);
+    expect(result).toMatchObject({
+      status: "abandoned",
+      gateState: "open",
+      epoch: begin.epoch + 1,
+      sequence: begin.sequence,
+    });
+    expect(await t.mutation(internal.wallets.applyDecrease, args)).toEqual(
+      result,
+    );
+    await t.run((ctx) => assertWallet(ctx, f.walletId));
+  },
+);
+
+it.each([true, false])(
+  "books promo source cost with same-org=%s while paid/admin keep 95/5",
+  async (sameOrg) => {
+    const t = harness(),
+      f = await t.run((ctx) => moneyFixture(ctx, "promo-cost", [2], 8));
+    await t.run((ctx) => paidLot(ctx, f.walletId, "paid-cost", 3));
+    await t.run((ctx) =>
+      grantLot(ctx, {
+        walletId: f.walletId,
+        sourceKind: "promo",
+        sourceRef: "signup:cost",
+        credits: 3,
+      }),
+    );
+    if (sameOrg) {
+      await t.run((ctx) =>
+        ctx.db.patch(f.project, { organizationId: f.consumer }),
+      );
+      f.publisher = f.consumer;
+    }
+    const event = await t.run((ctx) => eventFor(ctx, f));
+    expect((await settle(t, event)).status).toBe("applied");
+    const earnings = await t.run((ctx) =>
+      ctx.db.query("publisherEarnings").collect(),
+    );
+    expect(earnings.find((e) => e.sourceRef === "signup:cost")).toMatchObject({
+      grossCredits: 3,
+      netAtoms: sameOrg ? 0 : 28500,
+      platformFeeAtoms: sameOrg ? 0 : 1500,
+    });
+    expect(earnings.reduce((n, e) => n + e.netAtoms, 0)).toBe(
+      (sameOrg ? 5 : 8) * 9500,
+    );
+    const rollups = await t.run((ctx) =>
+      ctx.db.query("usageRollups").collect(),
+    );
+    expect(
+      rollups.find((r) => r.kind === "lifetime" && r.scope === "platform"),
+    ).toMatchObject({
+      promoCostAtoms: sameOrg ? 30000 : 0,
+      netAtoms: (sameOrg ? 5 : 8) * 500,
+    });
+    await t.run((ctx) => assertWallet(ctx, f.walletId));
+  },
+);
+
+it("distributes platform and publisher totals over bounded 128-shard scopes", async () => {
+  const { shardFor, rollupShardCount, TOTAL_ROLLUP_SHARDS, ROLLUP_SHARDS } =
+    await import("../convex/money/rollups");
+  expect(TOTAL_ROLLUP_SHARDS).toBeGreaterThanOrEqual(64);
+  for (const [scope, dimension, expected] of [
+    ["platform", "total", TOTAL_ROLLUP_SHARDS],
+    ["publisher", "total", TOTAL_ROLLUP_SHARDS],
+    ["publisher", "project", ROLLUP_SHARDS],
+    ["consumer", "total", ROLLUP_SHARDS],
+  ] as const) {
+    const count = rollupShardCount(scope, dimension);
+    expect(count).toBe(expected);
+    const shards = new Set(
+      Array.from({ length: 4096 }, (_, i) =>
+        shardFor(`wallet:${i}:settle`, count),
+      ),
+    );
+    expect(shards.size).toBe(count);
+    expect(Math.max(...shards)).toBe(count - 1);
+  }
 });

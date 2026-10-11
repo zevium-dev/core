@@ -1,3 +1,4 @@
+import { recordUsageBatch } from "./wallets";
 import { ingestUsage } from "../contracts/settlement";
 import {
   validInternalSecret,
@@ -154,9 +155,7 @@ router.route({
       return new Response("Unauthorized", { status: 401 });
     try {
       const body = await readBoundedJson(request, ingestUsage);
-      const result = await ctx.runAction(internal.wallets.recordUsage, {
-        bodyJson: JSON.stringify(body),
-      });
+      const result = await recordUsageBatch(ctx, JSON.stringify(body));
       return Response.json(result);
     } catch (error) {
       return new Response(

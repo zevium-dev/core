@@ -22,6 +22,8 @@ const paymentAdjustmentFields = {
   appliedWalletCredits: v.number(),
   appliedPublisherCredits: v.number(),
   cursor: v.optional(v.string()),
+  closeId: v.optional(v.string()),
+  closeGeneration: v.optional(v.number()),
   createdAt: v.number(),
   updatedAt: v.number(),
 };
@@ -61,6 +63,7 @@ export const walletTables = {
         settledThrough: v.optional(v.number()),
         ackAt: v.optional(v.number()),
         ackFingerprint: v.optional(v.string()),
+        abandoned: v.optional(v.boolean()),
         command: v.optional(
           v.object({ credits: v.number(), fingerprint: v.string() }),
         ),
@@ -94,6 +97,7 @@ export const walletTables = {
         originLotId: v.id("fundingLots"),
         paymentId: v.optional(v.id("payments")),
         requestFingerprint: v.optional(v.string()),
+        closeId: v.optional(v.string()),
         adjustment: v.union(
           v.object({
             kind: v.literal("payment"),

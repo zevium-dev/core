@@ -1,7 +1,7 @@
 # Wallet & billing
 
 > Status: partial (P0 #5 + P1 #8 built; signup credit uses first signed org creation; P1 #12 spend controls planned; #360 SQLite wallet storage and #421 immediate empty-wallet credit recovery built; #109 anonymous lots built behind configuration; #334 admission-proof settlement built; real-money journey unproven) · Updated: 2026-10-11
-> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement and drain primitives implemented; PR 4/5 and cutover remain pending.
+> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement, terminal exception/drain recovery, idempotent admin operations and promo self-consumption protection implemented; PR 4/5 and cutover remain pending.
 > Code: `packages/control-plane-next/convex/{wallets,usage}.ts`, `packages/control-plane-next/convex/money/`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/machinePayments.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`, `apps/gateway/src/wallet-storage.ts`, `packages/shared/src/pricing-policy.ts`, `convex/users.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -61,7 +61,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### Isolated rebuild PR 3 — 2026-10-11
 
-The replacement now implements atomic signup promotion, journal-backed balances, promo-first/FIFO allocation capped at 32 original sources, frozen/drained dust moves, v2 settlement, exact original-source earnings/rollups, admin decreases and source-specific reversal/restoration primitives. Failed/free/refunded calls persist empty consumed slices. No current gateway or provider destination uses this code. [Complete implementation, test evidence, schema amendments and PR 4 handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
+The replacement now implements atomic signup promotion, journal-backed balances, promo-first/FIFO allocation capped at 32 original sources, frozen/drained dust moves, v2 settlement, exact original-source earnings/rollups, admin decreases and source-specific reversal/restoration primitives. Failed/free/refunded calls persist empty consumed slices. Authenticated evidence failures persist zero-debit exception usage plus reconciliation evidence and advance the finalization watermark; operator resolve/void records an audit note without a hidden money movement. Signed cross-host clock skew cannot wedge settlement/drain. Admin decreases require caller operation IDs; replay returns canonical state, and allocation failure after drain abandons/reopens without debit. Reversals/restores bind payment generation and replay after completion. Platform/publisher-total rollups and earnings use 128 shards; other dimensions use 16. Same-org signup-promo slices earn zero publisher net/fee and book platform promo cost, [pending owner sign-off](../decisions/2026-10-11-promo-self-consumption.md). Cross-org creator/admin matching needs a verified membership projection absent from this schema. No current gateway or provider destination uses this code. [Complete implementation, test evidence, schema amendments and PR 4 handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
 
 ### Isolated rebuild foundation — 2026-10-11
 
@@ -165,6 +165,8 @@ Key-verification bullet lives in [api-keys](api-keys.md).
   - Also verify keyless mock and MCP calls against same listing.
 
 ## Decisions
+
+- [Promo self-consumption protection](../decisions/2026-10-11-promo-self-consumption.md): proposed, pending owner sign-off; same-org protection implemented in isolated PR #438.
 
 - 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 

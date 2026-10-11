@@ -1,18 +1,27 @@
 import type { Doc } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import { PUBLISHER_RISK_HOLD_MS, publisherEarningSplit } from "../accounting";
+import {
+  PUBLISHER_RISK_HOLD_MS,
+  publisherEarningSplit,
+  creditsToAtoms,
+} from "../accounting";
 import { add } from "./walletLedger";
 export const ROLLUP_SHARDS = 16;
+export const TOTAL_ROLLUP_SHARDS = 128;
+export const rollupShardCount = (scope: string, dimension: string) =>
+  scope === "platform" || (scope === "publisher" && dimension === "total")
+    ? TOTAL_ROLLUP_SHARDS
+    : ROLLUP_SHARDS;
 // Inclusive upper bounds in milliseconds; final bucket contains all larger values.
 export const LATENCY_BUCKETS_MS = [
   10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000,
 ];
 export const utcDay = (at: number) => new Date(at).toISOString().slice(0, 10);
-export function shardFor(ref: string) {
+export function shardFor(ref: string, count = ROLLUP_SHARDS) {
   let hash = 2166136261;
   for (const char of ref)
     hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
-  return hash % ROLLUP_SHARDS;
+  return hash % count;
 }
 type Usage = Doc<"usageEvents">;
 type Financial = Extract<Doc<"usageRollups">, { kind: "lifetime" }>;
@@ -25,16 +34,31 @@ export async function recordEarnings(
   event: Usage,
   acceptedAt: number,
 ) {
+  if (
+    !event.publisherOrganizationId ||
+    !event.projectId ||
+    event.billingOutcome === "exception"
+  )
+    throw new Error("Unsettled earning evidence");
+  const { publisherOrganizationId, projectId } = event;
   const day = utcDay(acceptedAt),
-    shard = shardFor(event.settleRefId);
+    shard = shardFor(event.settleRefId, TOTAL_ROLLUP_SHARDS);
+  let promoCostCredits = 0;
   for (const slice of event.fundingSlices) {
-    const split = publisherEarningSplit(slice.credits);
+    const origin = await ctx.db.get(slice.originLotId);
+    const suppressed =
+      origin?.sourceKind === "promo" &&
+      event.consumerOrganizationId === publisherOrganizationId;
+    const split = suppressed
+      ? { platformFeeAtoms: 0, publisherNetAtoms: 0 }
+      : publisherEarningSplit(slice.credits);
+    if (suppressed) promoCostCredits = add(promoCostCredits, slice.credits);
     const row = await ctx.db
       .query("publisherEarnings")
       .withIndex("by_bucket", (q) =>
         q
-          .eq("publisherOrganizationId", event.publisherOrganizationId)
-          .eq("projectId", event.projectId)
+          .eq("publisherOrganizationId", publisherOrganizationId)
+          .eq("projectId", projectId)
           .eq("sourceRef", slice.sourceRef)
           .eq("day", day)
           .eq("shard", shard),
@@ -46,19 +70,24 @@ export async function recordEarnings(
       await ctx.db.patch(row._id, {
         grossCredits: add(row.grossCredits, slice.credits),
         platformFeeAtoms: add(row.platformFeeAtoms, split.platformFeeAtoms),
+        promoCostAtoms: add(
+          row.promoCostAtoms ?? 0,
+          suppressed ? creditsToAtoms(slice.credits) : 0,
+        ),
         netAtoms: add(row.netAtoms, split.publisherNetAtoms),
         updatedAt: acceptedAt,
       });
     } else
       await ctx.db.insert("publisherEarnings", {
-        publisherOrganizationId: event.publisherOrganizationId,
-        projectId: event.projectId,
+        publisherOrganizationId: publisherOrganizationId,
+        projectId: projectId,
         paymentId: slice.paymentId,
         sourceRef: slice.sourceRef,
         day,
         shard,
         grossCredits: slice.credits,
         platformFeeAtoms: split.platformFeeAtoms,
+        promoCostAtoms: suppressed ? creditsToAtoms(slice.credits) : 0,
         netAtoms: split.publisherNetAtoms,
         clawedBackGrossCredits: 0,
         clawedBackAtoms: 0,
@@ -74,25 +103,31 @@ export async function recordEarnings(
       });
   }
   // Deliberately no publisherBalances write on the settlement hot path.
+  return promoCostCredits;
 }
 export async function recordRollups(
   ctx: MutationCtx,
   event: Usage,
   acceptedAt: number,
 ) {
-  const shard = shardFor(event.settleRefId),
-    day = utcDay(event.at),
+  if (
+    !event.publisherOrganizationId ||
+    !event.projectId ||
+    event.billingOutcome === "exception"
+  )
+    throw new Error("Unsettled rollup evidence");
+  const { publisherOrganizationId, projectId } = event;
+  const day = utcDay(event.at),
     earningDay = utcDay(acceptedAt);
-  const split = publisherEarningSplit(event.credits);
+  const split = publisherEarningSplit(
+    event.credits - (event.promoCostCredits ?? 0),
+  );
   const dimensions: Dimension[] = [
     ...(
       [
         ["total", "all"],
-        ["project", event.projectId],
-        [
-          "endpoint",
-          JSON.stringify([event.projectId, event.method, event.endpoint]),
-        ],
+        ["project", projectId],
+        ["endpoint", JSON.stringify([projectId, event.method, event.endpoint])],
         ...(event.ownerUserId ? [["member", event.ownerUserId]] : []),
         ...(event.keyId ? [["key", event.keyId]] : []),
       ] as [Dimension["dimension"], string][]
@@ -105,15 +140,12 @@ export async function recordRollups(
     ...(
       [
         ["total", "all"],
-        ["project", event.projectId],
-        [
-          "endpoint",
-          JSON.stringify([event.projectId, event.method, event.endpoint]),
-        ],
+        ["project", projectId],
+        ["endpoint", JSON.stringify([projectId, event.method, event.endpoint])],
       ] as [Dimension["dimension"], string][]
     ).map(([dimension, dimensionKey]) => ({
       scope: "publisher" as const,
-      scopeId: event.publisherOrganizationId,
+      scopeId: publisherOrganizationId,
       dimension,
       dimensionKey,
     })),
@@ -125,6 +157,10 @@ export async function recordRollups(
     },
   ];
   for (const dimension of dimensions) {
+    const shard = shardFor(
+      event.settleRefId,
+      rollupShardCount(dimension.scope, dimension.dimension),
+    );
     const net =
       dimension.scope === "publisher"
         ? split.publisherNetAtoms
@@ -153,6 +189,12 @@ export async function recordRollups(
       calls: add(lifetime?.calls ?? 0, 1),
       grossCredits: add(lifetime?.grossCredits ?? 0, event.credits),
       netAtoms: add(lifetime?.netAtoms ?? 0, net),
+      promoCostAtoms: add(
+        lifetime?.promoCostAtoms ?? 0,
+        dimension.scope === "platform"
+          ? creditsToAtoms(event.promoCostCredits ?? 0)
+          : 0,
+      ),
       pendingRiskAtoms: add(lifetime?.pendingRiskAtoms ?? 0, pending),
       updatedAt: acceptedAt,
     };
@@ -196,6 +238,12 @@ export async function recordRollups(
         calls: add(row?.calls ?? 0, count),
         grossCredits: add(row?.grossCredits ?? 0, count * event.credits),
         netAtoms: add(row?.netAtoms ?? 0, count * net),
+        promoCostAtoms: add(
+          row?.promoCostAtoms ?? 0,
+          dimension.scope === "platform"
+            ? count * creditsToAtoms(event.promoCostCredits ?? 0)
+            : 0,
+        ),
         pendingRiskAtoms: add(
           row?.pendingRiskAtoms ?? 0,
           rowDay === earningDay ? pending : 0,
@@ -231,7 +279,7 @@ export async function recordRollups(
   if (
     event.qualityOutcome === "success" &&
     event.billingOutcome !== "refunded" &&
-    event.consumerOrganizationId !== event.publisherOrganizationId
+    event.consumerOrganizationId !== publisherOrganizationId
   ) {
     const row = await ctx.db
       .query("usageRollups")
@@ -239,7 +287,7 @@ export async function recordRollups(
         q
           .eq("kind", "lifetime_consumer_project")
           .eq("consumerOrganizationId", event.consumerOrganizationId)
-          .eq("projectId", event.projectId),
+          .eq("projectId", projectId),
       )
       .unique();
     if (row && row.kind !== "lifetime_consumer_project")
@@ -255,7 +303,7 @@ export async function recordRollups(
       await ctx.db.insert("usageRollups", {
         kind: "lifetime_consumer_project",
         consumerOrganizationId: event.consumerOrganizationId,
-        projectId: event.projectId,
+        projectId: projectId,
         firstSuccessAt: event.at,
         lastSuccessAt: event.at,
         successfulCalls: 1,

@@ -74,26 +74,64 @@ export const measuredSettle = internalMutation({
   args: { eventJson: v.string() },
   handler: async (ctx, args) => {
     let writes = 0,
-      argumentBytes = 0;
+      argumentBytes = 0,
+      readBytes = 0,
+      documentWriteBytes = 0;
+    const bytes = (value: unknown) =>
+      new TextEncoder().encode(JSON.stringify(facts(value ?? null))).length;
+    const queryProxy = <T extends object>(query: T): T =>
+      new Proxy(query, {
+        get(target, property) {
+          const member: unknown = Reflect.get(target, property);
+          if (typeof member !== "function") return member;
+          return (...params: unknown[]) => {
+            const result: unknown = Reflect.apply(member, target, params);
+            if (
+              ["unique", "first", "take", "collect", "paginate"].includes(
+                String(property),
+              )
+            )
+              return Promise.resolve(result).then((value) => {
+                readBytes += bytes(value);
+                return value;
+              });
+            return typeof result === "object" && result !== null
+              ? queryProxy(result)
+              : result;
+          };
+        },
+      });
     const db = new Proxy(ctx.db, {
       get(target, property) {
         const member: unknown = Reflect.get(target, property);
         if (typeof member !== "function") return member;
-        return (...params: unknown[]) => {
-          if (
-            ["insert", "patch", "replace", "delete"].includes(String(property))
-          ) {
+        if (property === "query")
+          return (...params: unknown[]) =>
+            queryProxy(Reflect.apply(member, target, params) as object);
+        if (property === "get")
+          return async (...params: unknown[]) => {
+            const value: unknown = await Reflect.apply(member, target, params);
+            readBytes += bytes(value);
+            return value;
+          };
+        if (["insert", "patch", "replace", "delete"].includes(String(property)))
+          return async (...params: unknown[]) => {
             writes++;
-            argumentBytes += new TextEncoder().encode(
-              JSON.stringify(facts(params)),
-            ).length;
-          }
-          return Reflect.apply(member, target, params);
-        };
+            argumentBytes += bytes(params);
+            const value: unknown = await Reflect.apply(member, target, params);
+            const id = (
+              property === "insert" ? value : params[0]
+            ) as Id<"usageEvents">;
+            // Charge the full post-write document for every write, including repeated patches.
+            if (property !== "delete")
+              documentWriteBytes += bytes(await target.get(id));
+            return value;
+          };
+        return member.bind(target);
       },
     });
     const outcome = await settleOne({ ...ctx, db }, JSON.parse(args.eventJson));
-    return { outcome, writes, argumentBytes };
+    return { outcome, writes, argumentBytes, readBytes, documentWriteBytes };
   },
 });
 export const races = internalAction({
@@ -155,6 +193,7 @@ export const races = internalAction({
     if (granted.filter(Boolean).length !== 1)
       throw new Error("Grant race failed");
     const begin = await ctx.runMutation(internal.wallets.beginDecrease, {
+      operationId: "concurrent-decrease",
       walletId: f.walletId,
       credits: 100,
     });
@@ -185,19 +224,39 @@ export const races = internalAction({
         }),
       ),
     );
-    const outcomes = await Promise.all(
+    await Promise.all(
       finals.map((e) =>
         ctx.runMutation(internal.wallets.settleEvent, {
           eventJson: JSON.stringify(e),
         }),
       ),
     );
+    // Retry every contiguous final, twice concurrently. Sequence gaps can no longer
+    // make the test pass before the depleted-source check has actually run.
+    const outcomes: Outcome[] = [];
+    for (const e of finals) {
+      const pair = await Promise.all(
+        [0, 1].map(() =>
+          ctx.runMutation(internal.wallets.settleEvent, {
+            eventJson: JSON.stringify(e),
+          }),
+        ),
+      );
+      outcomes.push(pair[0]);
+    }
     if (
-      outcomes.filter((r) => r.status === "applied").length !== 1 ||
+      outcomes.filter((r) => r.status === "exception").length !== 7 ||
+      outcomes.some((r) => r.status === "rejected") ||
       (await ctx.runQuery(auditRef, { walletId: scarce.walletId })).balance !==
         0
     )
-      throw new Error("Concurrent overspend");
+      throw new Error("Concurrent overspend funding check failed");
+    const scarceCheckpoint = await ctx.runQuery(
+      internal.wallets.getCheckpoint,
+      { walletId: scarce.walletId },
+    );
+    if (scarceCheckpoint.settledThroughEdgeSequence !== 8)
+      throw new Error("Exceptions failed to drain");
     // Freeze can race finalization, but cannot reclaim credits until all eight finals commit.
     const barrier = await ctx.runMutation(seed, {
       run: `${run}-barrier`,
@@ -213,6 +272,7 @@ export const races = internalAction({
       ),
     );
     const closing = await ctx.runMutation(internal.wallets.beginDecrease, {
+      operationId: "drained-decrease",
       walletId: barrier.walletId,
       credits: 2,
     });
@@ -290,14 +350,24 @@ export const races = internalAction({
       makeFunctionReference<
         "mutation",
         { eventJson: string },
-        { outcome: Outcome; writes: number; argumentBytes: number }
+        {
+          outcome: Outcome;
+          writes: number;
+          argumentBytes: number;
+          readBytes: number;
+          documentWriteBytes: number;
+        }
       >("moneyRaces:measuredSettle"),
       { eventJson: JSON.stringify(worstEvent) },
     );
     if (
       measured.outcome.status !== "applied" ||
       measured.writes > 150 ||
-      measured.argumentBytes > 200000
+      measured.argumentBytes > 200000 ||
+      measured.readBytes <= 0 ||
+      measured.readBytes > 1000000 ||
+      measured.documentWriteBytes <= measured.argumentBytes ||
+      measured.documentWriteBytes > 1000000
     )
       throw new Error("Worst-case event budget failed");
     await ctx.runQuery(auditRef, { walletId: worst.walletId });
