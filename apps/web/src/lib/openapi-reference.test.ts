@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { serializeRequestParameters } from "@zevium/shared";
 
 import {
-  appendQueryParameters,
-  buildRequestPath,
   parameterKey,
   parsePublishedEndpoints,
   readableJsonResponse,
@@ -220,23 +219,16 @@ describe("parsePublishedEndpoints", () => {
   });
 });
 
-describe("request URL helpers", () => {
+describe("request form projection", () => {
   const endpoint = parsePublishedEndpoints(SPEC)[0]!;
 
-  it("encodes path segments and non-empty query values", () => {
-    const values = {
-      [parameterKey("path", "id")]: "item 1/2",
-      [parameterKey("query", "expand")]: "true",
-    };
-    const path = buildRequestPath(endpoint.path, values);
-    expect(path).toBe("/items/item%201%2F2");
+  it("serializes typed parameters from the published operation", () => {
     expect(
-      appendQueryParameters(
-        `https://gateway.test${path}`,
-        endpoint.parameters,
-        values,
-      ),
-    ).toBe("https://gateway.test/items/item%201%2F2?expand=true");
+      serializeRequestParameters(endpoint.path, endpoint.form.parameters, {
+        [parameterKey("path", "id")]: "item 1/2",
+        [parameterKey("query", "expand")]: true,
+      }).path,
+    ).toBe("/items/item%201%2F2?expand=true");
   });
 });
 
