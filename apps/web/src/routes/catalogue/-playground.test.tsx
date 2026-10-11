@@ -300,3 +300,122 @@ it("reports an invalid key without leaking it or throwing from header constructi
     "invalid-",
   );
 });
+
+function bodyEndpoints(schema: unknown, example: unknown) {
+  return parsePublishedEndpoints(
+    JSON.stringify({
+      openapi: "3.1.0",
+      paths: {
+        "/body": {
+          post: {
+            "x-zevium-cost": 1,
+            requestBody: {
+              required: true,
+              content: { "application/json": { schema, example } },
+            },
+            responses: { "200": { description: "OK" } },
+          },
+        },
+      },
+    }),
+  );
+}
+it.each(["hello", null])(
+  "preserves JSON body %j in MCP preview and gateway bytes",
+  async (value) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    render(panel(bodyEndpoints({ type: ["string", "null"] }, value)));
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "qa-placeholder-key" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Send live · 1 credit" }),
+    );
+    await screen.findByText("200");
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "MCP call_api" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    const args = JSON.parse(
+      screen.getByLabelText("MCP call_api arguments").textContent!,
+    );
+    expect(args.body).toBe(JSON.stringify(value));
+    // The gateway adapter sends strings verbatim and treats null/undefined as absent.
+    const adapted =
+      args.body === null || args.body === undefined
+        ? undefined
+        : typeof args.body === "string"
+          ? args.body
+          : JSON.stringify(args.body);
+    expect(adapted).toBe(fetch.mock.calls[0]![1].body);
+  },
+);
+it.each([
+  [
+    { type: "array", minItems: 1, items: { type: "string" } },
+    [],
+    "Use at least 1 items.",
+  ],
+  [
+    {
+      type: "object",
+      minProperties: 1,
+      properties: { name: { type: "string" } },
+    },
+    {},
+    "Use at least 1 properties.",
+  ],
+])(
+  "focuses and announces container validation errors for %j",
+  (schema, example, message) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    render(panel(bodyEndpoints(schema, example)));
+    fireEvent.change(screen.getByLabelText("API key"), {
+      target: { value: "qa-placeholder-key" },
+    });
+    const send = screen.getByRole("button", { name: "Send live · 1 credit" });
+    send.focus();
+    fireEvent.click(send);
+    expect(fetch).not.toHaveBeenCalled();
+    const target = document.activeElement!;
+    expect(target.getAttribute("data-form-path")).toBe("body");
+    expect(target.getAttribute("aria-invalid")).toBe("true");
+    const error = document.getElementById(
+      target.getAttribute("aria-describedby")!,
+    );
+    expect(error?.textContent).toBe(message);
+    expect(error?.getAttribute("role")).toBe("alert");
+  },
+);
+
+it("renders a parameter example behind 18 nested allOf schemas without amplifying warnings", () => {
+  let schema: unknown = { pattern: "x" };
+  for (let i = 0; i < 18; i++) schema = { allOf: [schema] };
+  const rows = parsePublishedEndpoints(
+    JSON.stringify({
+      openapi: "3.1.0",
+      paths: {
+        "/nested": {
+          get: {
+            "x-zevium-cost": 1,
+            parameters: [{ in: "query", name: "value", example: "x", schema }],
+            responses: { "200": { description: "OK" } },
+          },
+        },
+      },
+    }),
+  );
+  render(panel(rows));
+  expect(
+    screen.getByLabelText<HTMLTextAreaElement>("value (query)").value,
+  ).toBe('"x"');
+  expect(
+    screen.getAllByText(
+      "Validation is incomplete: value: Not checked here: pattern.",
+    ),
+  ).toHaveLength(1);
+});

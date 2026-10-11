@@ -43,8 +43,26 @@ type Props = {
   document?: unknown;
 };
 
+/** Bound every entry into the recursive renderer, including seeded parameters and defaults. */
+export function SchemaField(props: Props) {
+  const fits =
+    props.node.kind === "raw" ||
+    (typeof props.value !== "symbol" && formValueFits(props.value));
+  const node: FormNode = fits
+    ? props.node
+    : {
+        kind: "raw",
+        schema: props.node.schema,
+        reason:
+          typeof props.value === "symbol"
+            ? "Enter valid JSON to use form controls."
+            : "This value exceeds the form limit (100 array items / 500 values / 8 levels). Use raw JSON.",
+      };
+  return <SchemaFieldControl key={node.kind} {...props} node={node} />;
+}
+
 /** Typed controls keep absence separate from false, zero, empty strings and null. */
-export function SchemaField({
+function SchemaFieldControl({
   node,
   value,
   onChange,
@@ -117,7 +135,13 @@ export function SchemaField({
     node.kind === "variant"
   ) {
     return (
-      <FieldSet data-invalid={Boolean(error)} aria-describedby={describedBy}>
+      <FieldSet
+        data-invalid={Boolean(error)}
+        aria-invalid={Boolean(error)}
+        aria-describedby={describedBy}
+        data-form-path={node.kind === "variant" ? undefined : path}
+        tabIndex={-1}
+      >
         <FieldLegend>{labelText}</FieldLegend>
         {help && <FieldDescription id={`${id}-help`}>{help}</FieldDescription>}
         {optional}

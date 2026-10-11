@@ -2,7 +2,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it } from "vitest";
-import { initialFormValue, schemaToForm, type FormNode } from "@zevium/shared";
+import {
+  initialFormValue,
+  operationParameters,
+  schemaToForm,
+  type FormNode,
+} from "@zevium/shared";
 import { SchemaBody, SchemaField } from "./schema-form";
 
 afterEach(cleanup);
@@ -236,4 +241,67 @@ it("keeps the selected object variant while its required fields are incomplete",
   expect(JSON.parse(screen.getByTestId("body").textContent!)).toEqual({
     team: "Engineering",
   });
+});
+
+it.each([
+  "parameter example",
+  "named example",
+  "default",
+  "example",
+  "examples",
+])("bounds %s values before rendering parameter controls", (source) => {
+  const values = Array.from({ length: 101 }, (_, i) => i);
+  const parameter = operationParameters(
+    [],
+    [
+      {
+        in: "query",
+        name: "ids",
+        required: true,
+        ...(source === "parameter example" ? { example: values } : {}),
+        ...(source === "named example"
+          ? { examples: { large: { value: values } } }
+          : {}),
+        schema: {
+          type: "array",
+          items: { type: "integer" },
+          ...(["default", "example", "examples"].includes(source)
+            ? { [source]: source === "examples" ? [values] : values }
+            : {}),
+        },
+      },
+    ],
+    {},
+  )[0]!;
+  render(<Form node={parameter.node} initial={parameter.initialValue} />);
+  const raw = screen.getByLabelText<HTMLTextAreaElement>("Payload · required");
+  expect(raw.tagName).toBe("TEXTAREA");
+  expect(JSON.parse(raw.value)).toEqual(values);
+  expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
+  expect(screen.getByText(/exceeds the form limit/)).toBeTruthy();
+  fireEvent.change(raw, { target: { value: "[" } });
+  expect(
+    screen.getByLabelText<HTMLTextAreaElement>("Payload · required").value,
+  ).toBe("[");
+  fireEvent.change(raw, { target: { value: "[7]" } });
+  expect(JSON.parse(screen.getByTestId("value").textContent!)).toEqual([7]);
+});
+it("bounds defaults introduced by adding an array item", () => {
+  const values = Array.from({ length: 101 }, () => "x");
+  render(
+    <Form
+      node={schemaToForm({
+        type: "array",
+        items: {
+          type: "array",
+          items: { type: "string" },
+          default: values,
+        },
+      })}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add Payload item" }));
+  const raw = screen.getByLabelText<HTMLTextAreaElement>("Payload · required");
+  expect(raw.tagName).toBe("TEXTAREA");
+  expect(JSON.parse(raw.value)).toEqual([values]);
 });

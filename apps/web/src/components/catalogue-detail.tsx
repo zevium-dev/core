@@ -672,7 +672,9 @@ function subscribeStoredApiKey(onChange: () => void) {
 function mcpBody(text: string, contentType: string): unknown {
   if (!contentType.toLowerCase().includes("json")) return text;
   try {
-    return JSON.parse(text) as unknown;
+    const value: unknown = JSON.parse(text);
+    // call_api passes strings through and treats null as absent.
+    return typeof value === "string" || value === null ? text : value;
   } catch {
     return text;
   }

@@ -41,14 +41,34 @@ const own = (value: object, key: string) =>
 export const formPath = (parent: string, key: string | number) =>
   `${parent}/${String(key).replaceAll("~", "~0").replaceAll("/", "~1")}`;
 
-function resolve(schema: unknown, document: unknown): unknown {
+function resolve(
+  schema: unknown,
+  document: unknown,
+  conjoin = false,
+  consume: (cost?: number) => void = () => {},
+): unknown {
   const seen = new Set<string>();
   while (isFormObject(schema) && typeof schema.$ref === "string") {
     if (seen.has(schema.$ref) || seen.size >= 32) return undefined;
     seen.add(schema.$ref);
+    // Pointer parsing and sibling inspection are part of validation's shared budget.
+    consume(schema.$ref.length + Object.keys(schema).length);
     const target = resolveLocalJsonPointer(schema.$ref, document);
-    if (!isFormObject(target)) return target;
     const { $ref: _, ...siblings } = schema;
+    if (conjoin && Object.keys(siblings).some((key) => !annotations.has(key))) {
+      if (target === undefined) return undefined;
+      const metadata: FormSchema = {};
+      for (const source of [target, siblings]) {
+        if (!isFormObject(source)) continue;
+        for (const key of Object.keys(source)) {
+          consume();
+          if (annotations.has(key)) metadata[key] = source[key];
+        }
+      }
+      return { ...metadata, allOf: [target, siblings] };
+    }
+    if (!isFormObject(target)) return target;
+    consume(Object.keys(target).length);
     schema = { ...target, ...siblings };
   }
   return schema;
@@ -137,7 +157,7 @@ export function schemaToForm(
 ): FormNode {
   let nodes = 0;
   const walk = (input: unknown, depth: number, refs: Set<string>): FormNode => {
-    const resolved = resolve(input, document);
+    const resolved = resolve(input, document, true);
     const s = isFormObject(resolved) ? resolved : {};
     const raw = (reason: string): FormNode => ({
       kind: "raw",
@@ -213,8 +233,8 @@ export function schemaToForm(
         .filter(
           ([, child]) =>
             !(
-              isFormObject(resolve(child, document)) &&
-              (resolve(child, document) as FormSchema).readOnly === true
+              isFormObject(resolve(child, document, true)) &&
+              (resolve(child, document, true) as FormSchema).readOnly === true
             ),
         )
         .map(([name, child]) => ({
@@ -289,15 +309,32 @@ export function formValueFits(value: unknown): boolean {
   return walk(value, 0);
 }
 
-function equal(a: unknown, b: unknown): boolean {
+function equal(
+  a: unknown,
+  b: unknown,
+  consume: (cost?: number, depth?: number) => void,
+  depth = 0,
+): boolean {
+  consume(1, depth);
+  if (typeof a === "string" && typeof b === "string")
+    consume(Math.max(a.length, b.length));
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b))
-    return a.length === b.length && a.every((item, i) => equal(item, b[i]));
-  if (isFormObject(a) && isFormObject(b))
     return (
-      Object.keys(a).length === Object.keys(b).length &&
-      Object.keys(a).every((key) => own(b, key) && equal(a[key], b[key]))
+      a.length === b.length &&
+      a.every((item, i) => equal(item, b[i], consume, depth + 1))
     );
+  if (isFormObject(a) && isFormObject(b)) {
+    const keys = Object.keys(a);
+    const otherKeys = Object.keys(b);
+    consume(keys.length + otherKeys.length);
+    return (
+      keys.length === otherKeys.length &&
+      keys.every(
+        (key) => own(b, key) && equal(a[key], b[key], consume, depth + 1),
+      )
+    );
+  }
   return false;
 }
 
@@ -312,6 +349,17 @@ export function validateFormValue(
   path = "",
 ): FormValidation {
   let visits = 0;
+  let diagnostics = 0;
+  let limited = false;
+  const limit = Symbol("validation-limit");
+  const consume = (cost = 1, depth = 0) => {
+    if (limited) throw limit;
+    visits += cost;
+    if (visits > 5000 || depth > 32) {
+      limited = true;
+      throw limit;
+    }
+  };
   const walk = (
     input: unknown,
     current: unknown,
@@ -320,192 +368,246 @@ export function validateFormValue(
     depth: number,
   ): FormValidation => {
     const result: FormValidation = { errors: [], warnings: [] };
-    const error = (message: string) =>
-      result.errors.push({ path: at, message });
-    const warning = (message: string) =>
-      result.warnings.push({ path: at, message });
-    const merge = (next: FormValidation) => {
-      result.errors.push(...next.errors);
+    const add = (
+      kind: keyof FormValidation,
+      message: string,
+      issuePath = at,
+    ) => {
+      consume();
+      // Reserve one slot for the final incomplete-validation warning.
+      if (++diagnostics >= 100) {
+        limited = true;
+        throw limit;
+      }
+      result[kind].push({ path: issuePath, message });
+    };
+    const error = (message: string) => add("errors", message);
+    const warning = (message: string) => add("warnings", message);
+    const merge = (next: FormValidation, errors = true) => {
+      // Retain already-discovered issues while unwinding an exhausted traversal.
+      if (errors) result.errors.push(...next.errors);
       result.warnings.push(...next.warnings);
+      consume(next.errors.length + next.warnings.length);
     };
-    if (++visits > 5000 || depth > 32) {
-      warning(
-        "Validation limit reached; check this value against the published schema.",
-      );
-      return result;
-    }
-    if (typeof current === "symbol") {
-      error("Enter valid JSON.");
-      return result;
-    }
-    if (current === undefined) {
-      if (needed) error("This value is required.");
-      return result;
-    }
-    const s = resolve(input, document);
-    if (s === false) {
-      error("This value is not allowed.");
-      return result;
-    }
-    if (s === true) return result;
-    if (!isFormObject(s)) {
-      warning("Schema could not be resolved; only JSON syntax is checked.");
-      return result;
-    }
-    const unknown = unsupportedKeywords(s);
-    if (unknown.length) warning(`Not checked here: ${unknown.join(", ")}.`);
-    if (s.nullable === true && current === null) return result;
-    if (Array.isArray(s.enum) && !s.enum.some((item) => equal(item, current)))
-      error("Choose one of the allowed values.");
-    if (own(s, "const") && !equal(s.const, current))
-      error(`Value must be ${JSON.stringify(s.const)}.`);
-    for (const keyword of ["oneOf", "anyOf", "allOf"] as const) {
-      const variants = s[keyword];
-      if (!Array.isArray(variants)) continue;
-      if (variants.length > 150) {
-        warning("Too many schema variants to validate here.");
-        continue;
-      }
-      const checked = variants.map((variant) =>
-        walk(variant, current, true, at, depth + 1),
-      );
-      result.warnings.push(...checked.flatMap((r) => r.warnings));
-      if (keyword === "allOf") checked.forEach(merge);
-      else {
-        const matches = checked.filter((r) => !r.errors.length).length;
-        if (matches === 0) error("Value must match a schema variant.");
-        else if (keyword === "oneOf" && matches !== 1)
-          error("Value must match exactly one schema variant.");
-      }
-    }
-    if (s.not !== undefined) {
-      const checked = walk(s.not, current, true, at, depth + 1);
-      result.warnings.push(...checked.warnings);
-      if (!checked.errors.length && !checked.warnings.length)
-        error("Value matches a disallowed schema.");
-    }
-    const types = Array.isArray(s.type) ? s.type : s.type ? [s.type] : [];
-    const matches = (type: unknown) =>
-      type === "null"
-        ? current === null
-        : type === "object"
-          ? isFormObject(current)
-          : type === "array"
-            ? Array.isArray(current)
-            : type === "integer"
-              ? typeof current === "number" && Number.isInteger(current)
-              : type === "number"
-                ? typeof current === "number" && Number.isFinite(current)
-                : typeof current === type;
-    if (types.length && !types.some(matches)) {
-      error(`Enter ${types.join(" or ")} value.`);
-      return result;
-    }
-    if (typeof current === "number") {
-      const min =
-        typeof s.exclusiveMinimum === "number" ? s.exclusiveMinimum : s.minimum;
-      const max =
-        typeof s.exclusiveMaximum === "number" ? s.exclusiveMaximum : s.maximum;
-      const exclusiveMin =
-        s.exclusiveMinimum === true || typeof s.exclusiveMinimum === "number";
-      const exclusiveMax =
-        s.exclusiveMaximum === true || typeof s.exclusiveMaximum === "number";
-      if (
-        typeof min === "number" &&
-        (exclusiveMin ? current <= min : current < min)
-      )
-        error(`Must be ${exclusiveMin ? "greater than" : "at least"} ${min}.`);
-      if (
-        typeof max === "number" &&
-        (exclusiveMax ? current >= max : current > max)
-      )
-        error(`Must be ${exclusiveMax ? "less than" : "at most"} ${max}.`);
-      if (
-        typeof s.multipleOf === "number" &&
-        s.multipleOf > 0 &&
-        Math.abs(current / s.multipleOf - Math.round(current / s.multipleOf)) >
-          1e-8
-      )
-        error(`Must be a multiple of ${s.multipleOf}.`);
-    }
-    const range = (size: number, min: unknown, max: unknown, unit: string) => {
-      if (typeof min === "number" && size < min)
-        error(`Use at least ${min} ${unit}.`);
-      if (typeof max === "number" && size > max)
-        error(`Use at most ${max} ${unit}.`);
-    };
-    if (typeof current === "string")
-      range([...current].length, s.minLength, s.maxLength, "characters");
-    if (Array.isArray(current)) {
-      range(current.length, s.minItems, s.maxItems, "items");
-      if (current.length > 500) {
-        warning("Only arrays up to 500 items are validated here.");
+    try {
+      consume(1, depth);
+      if (typeof current === "symbol") {
+        error("Enter valid JSON.");
         return result;
       }
-      if (
-        s.uniqueItems === true &&
-        current.some((item, i) =>
-          current.slice(0, i).some((other) => equal(item, other)),
-        )
-      )
-        error("Items must be unique.");
-      if (s.items !== undefined)
-        current.forEach((item, i) =>
-          merge(walk(s.items, item, true, formPath(at, i), depth + 1)),
-        );
-    }
-    if (isFormObject(current)) {
-      const keys = Object.keys(current);
-      range(keys.length, s.minProperties, s.maxProperties, "properties");
-      if (keys.length > 500) {
-        warning("Only objects up to 500 properties are validated here.");
+      if (current === undefined) {
+        if (needed) error("This value is required.");
         return result;
       }
-      const properties = isFormObject(s.properties) ? s.properties : {};
-      const requiredNames = Array.isArray(s.required)
-        ? s.required.filter((key): key is string => typeof key === "string")
-        : [];
-      for (const name of new Set([
-        ...Object.keys(properties),
-        ...requiredNames,
-      ])) {
-        const child = own(properties, name) ? properties[name] : {};
-        if (
-          isFormObject(resolve(child, document)) &&
-          (resolve(child, document) as FormSchema).readOnly === true
-        )
+      const s = resolve(input, document, true, consume);
+      if (s === false) {
+        error("This value is not allowed.");
+        return result;
+      }
+      if (s === true) return result;
+      if (!isFormObject(s)) {
+        warning("Schema could not be resolved; only JSON syntax is checked.");
+        return result;
+      }
+      consume(Object.keys(s).length);
+      const unknown = unsupportedKeywords(s);
+      if (unknown.length) warning(`Not checked here: ${unknown.join(", ")}.`);
+      if (s.nullable === true && current === null) return result;
+      if (
+        Array.isArray(s.enum) &&
+        !s.enum.some((item) => equal(item, current, consume, depth))
+      )
+        error("Choose one of the allowed values.");
+      if (own(s, "const") && !equal(s.const, current, consume, depth))
+        error("Value must match the declared constant.");
+      for (const keyword of ["oneOf", "anyOf", "allOf"] as const) {
+        const variants = s[keyword];
+        if (!Array.isArray(variants)) continue;
+        if (variants.length > 150) {
+          warning("Too many schema variants to validate here.");
           continue;
-        merge(
-          walk(
-            child,
-            own(current, name) ? current[name] : undefined,
-            requiredNames.includes(name),
-            formPath(at, name),
-            depth + 1,
-          ),
-        );
+        }
+        let matches = 0;
+        for (const variant of variants) {
+          consume();
+          const checked = walk(variant, current, true, at, depth + 1);
+          merge(checked, keyword === "allOf");
+          if (limited) return result;
+          if (!checked.errors.length) matches++;
+        }
+        if (keyword !== "allOf") {
+          if (matches === 0) error("Value must match a schema variant.");
+          else if (keyword === "oneOf" && matches !== 1)
+            error("Value must match exactly one schema variant.");
+        }
       }
-      for (const name of keys.filter((key) => !own(properties, key))) {
-        if (s.additionalProperties === false)
-          result.errors.push({
-            path: formPath(at, name),
-            message: "This property is not allowed.",
-          });
-        else if (isFormObject(s.additionalProperties))
+      if (s.not !== undefined) {
+        const checked = walk(s.not, current, true, at, depth + 1);
+        merge(checked, false);
+        if (limited) return result;
+        if (!checked.errors.length && !checked.warnings.length)
+          error("Value matches a disallowed schema.");
+      }
+      const types = Array.isArray(s.type) ? s.type : s.type ? [s.type] : [];
+      consume(types.length);
+      const matches = (type: unknown) =>
+        type === "null"
+          ? current === null
+          : type === "object"
+            ? isFormObject(current)
+            : type === "array"
+              ? Array.isArray(current)
+              : type === "integer"
+                ? typeof current === "number" && Number.isInteger(current)
+                : type === "number"
+                  ? typeof current === "number" && Number.isFinite(current)
+                  : typeof current === type;
+      if (types.length && !types.some(matches)) {
+        error(`Enter ${types.join(" or ")} value.`);
+        return result;
+      }
+      if (typeof current === "number") {
+        const min =
+          typeof s.exclusiveMinimum === "number"
+            ? s.exclusiveMinimum
+            : s.minimum;
+        const max =
+          typeof s.exclusiveMaximum === "number"
+            ? s.exclusiveMaximum
+            : s.maximum;
+        const exclusiveMin =
+          s.exclusiveMinimum === true || typeof s.exclusiveMinimum === "number";
+        const exclusiveMax =
+          s.exclusiveMaximum === true || typeof s.exclusiveMaximum === "number";
+        if (
+          typeof min === "number" &&
+          (exclusiveMin ? current <= min : current < min)
+        )
+          error(
+            `Must be ${exclusiveMin ? "greater than" : "at least"} ${min}.`,
+          );
+        if (
+          typeof max === "number" &&
+          (exclusiveMax ? current >= max : current > max)
+        )
+          error(`Must be ${exclusiveMax ? "less than" : "at most"} ${max}.`);
+        if (
+          typeof s.multipleOf === "number" &&
+          s.multipleOf > 0 &&
+          Math.abs(
+            current / s.multipleOf - Math.round(current / s.multipleOf),
+          ) > 1e-8
+        )
+          error(`Must be a multiple of ${s.multipleOf}.`);
+      }
+      const range = (
+        size: number,
+        min: unknown,
+        max: unknown,
+        unit: string,
+      ) => {
+        if (typeof min === "number" && size < min)
+          error(`Use at least ${min} ${unit}.`);
+        if (typeof max === "number" && size > max)
+          error(`Use at most ${max} ${unit}.`);
+      };
+      if (typeof current === "string") {
+        consume(current.length);
+        range([...current].length, s.minLength, s.maxLength, "characters");
+      }
+      if (Array.isArray(current)) {
+        range(current.length, s.minItems, s.maxItems, "items");
+        if (current.length > 500) {
+          warning("Only arrays up to 500 items are validated here.");
+          return result;
+        }
+        if (s.uniqueItems === true) {
+          let duplicate = false;
+          for (let i = 0; i < current.length && !duplicate; i++) {
+            consume();
+            for (let j = 0; j < i; j++) {
+              if (equal(current[i], current[j], consume, depth + 1)) {
+                duplicate = true;
+                break;
+              }
+            }
+          }
+          if (duplicate) error("Items must be unique.");
+        }
+        if (s.items !== undefined) {
+          for (let i = 0; i < current.length; i++) {
+            consume();
+            merge(walk(s.items, current[i], true, formPath(at, i), depth + 1));
+            if (limited) return result;
+          }
+        }
+      }
+      if (isFormObject(current)) {
+        const keys = Object.keys(current);
+        consume(keys.length);
+        range(keys.length, s.minProperties, s.maxProperties, "properties");
+        if (keys.length > 500) {
+          warning("Only objects up to 500 properties are validated here.");
+          return result;
+        }
+        const properties = isFormObject(s.properties) ? s.properties : {};
+        const propertyNames = Object.keys(properties);
+        consume(
+          propertyNames.length +
+            (Array.isArray(s.required) ? s.required.length : 0),
+        );
+        const requiredNames = new Set(
+          Array.isArray(s.required)
+            ? s.required.filter((key): key is string => typeof key === "string")
+            : [],
+        );
+        for (const name of new Set([...propertyNames, ...requiredNames])) {
+          consume();
+          const child = own(properties, name) ? properties[name] : {};
+          const resolved = resolve(child, document, true, consume);
+          if (isFormObject(resolved) && resolved.readOnly === true) continue;
           merge(
             walk(
-              s.additionalProperties,
-              current[name],
-              true,
+              child,
+              own(current, name) ? current[name] : undefined,
+              requiredNames.has(name),
               formPath(at, name),
               depth + 1,
             ),
           );
+          if (limited) return result;
+        }
+        for (const name of keys) {
+          consume();
+          if (own(properties, name)) continue;
+          if (s.additionalProperties === false)
+            add("errors", "This property is not allowed.", formPath(at, name));
+          else if (isFormObject(s.additionalProperties))
+            merge(
+              walk(
+                s.additionalProperties,
+                current[name],
+                true,
+                formPath(at, name),
+                depth + 1,
+              ),
+            );
+        }
       }
+      return result;
+    } catch (caught) {
+      if (caught !== limit) throw caught;
+      return result;
     }
-    return result;
   };
-  return walk(schema, value, required, path, 0);
+  const result = walk(schema, value, required, path, 0);
+  if (limited)
+    result.warnings.push({
+      path,
+      message:
+        "Validation limit reached; check this value against the published schema.",
+    });
+  return result;
 }
 
 /** Path-item parameters are inherited; operation entries override by (in, name). */

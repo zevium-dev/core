@@ -393,3 +393,82 @@ it("scans unresolved path placeholders in linear time", () => {
   ]);
   expect(performance.now() - started).toBeLessThan(1_000);
 });
+
+describe("review regressions: bounded validation and reference conjunctions", () => {
+  it("merges nested allOf diagnostics once", () => {
+    let schema: unknown = { pattern: "x" };
+    for (let i = 0; i < 18; i++) schema = { allOf: [schema] };
+    expect(validateFormValue(schema, "example").warnings).toEqual([
+      { path: "", message: "Not checked here: pattern." },
+    ]);
+  });
+  it("caps accumulated diagnostics and announces incomplete validation", () => {
+    const schema = {
+      allOf: Array.from({ length: 150 }, () => ({
+        allOf: Array.from({ length: 150 }, () => ({ pattern: "x" })),
+      })),
+    };
+    const result = validateFormValue(schema, "example");
+    expect(result.warnings.length).toBeLessThanOrEqual(100);
+    expect(result.warnings.some((issue) => /limit/.test(issue.message))).toBe(
+      true,
+    );
+  });
+  it.each(["enum", "const", "uniqueItems"])(
+    "charges %s comparisons to the traversal budget",
+    (keyword) => {
+      let value: unknown = "leaf";
+      for (let i = 0; i < 40; i++) value = [value];
+      const copy = JSON.parse(JSON.stringify(value));
+      const schema =
+        keyword === "enum"
+          ? { enum: [copy] }
+          : keyword === "const"
+            ? { const: copy }
+            : { uniqueItems: true };
+      const result = validateFormValue(
+        schema,
+        keyword === "uniqueItems" ? [value, copy] : value,
+      );
+      expect(result.warnings.some((issue) => /limit/.test(issue.message))).toBe(
+        true,
+      );
+    },
+  );
+  it("budgets wide schema property and required lists even for absent values", () => {
+    const result = validateFormValue(
+      { required: Array.from({ length: 6000 }, (_, i) => `p${i}`) },
+      {},
+    );
+    expect(result.errors.length).toBeLessThanOrEqual(100);
+    expect(result.warnings.some((issue) => /limit/.test(issue.message))).toBe(
+      true,
+    );
+  });
+  it("intersects reference assertions with siblings and projects a raw combined schema", () => {
+    const doc = {
+      defs: { count: { type: "number", minimum: 10, maximum: 20 } },
+    };
+    const schema = { $ref: "#/defs/count", minimum: 0, maximum: 15 };
+    expect(validateFormValue(schema, 5, doc).errors).toEqual([
+      { path: "", message: "Must be at least 10." },
+    ]);
+    expect(validateFormValue(schema, 17, doc).errors).toEqual([
+      { path: "", message: "Must be at most 15." },
+    ]);
+    expect(validateFormValue(schema, 12, doc).errors).toEqual([]);
+    const node = schemaToForm(schema, doc);
+    expect(node.kind).toBe("raw");
+    expect(validateFormValue(node.schema, 5, doc).errors).toHaveLength(1);
+  });
+  it("preserves boolean reference targets and sibling assertions", () => {
+    expect(
+      validateFormValue({ $ref: "#/allow", minimum: 10 }, 5, { allow: true })
+        .errors,
+    ).toHaveLength(1);
+    expect(
+      validateFormValue({ $ref: "#/deny", minimum: 0 }, 5, { deny: false })
+        .errors,
+    ).toHaveLength(1);
+  });
+});
