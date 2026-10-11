@@ -1,3 +1,4 @@
+import { isX402Enabled } from "./x402-config";
 import {
   StripeX402Facilitator,
   type VerifiedPayment,
@@ -816,6 +817,8 @@ export class WalletSqliteDO extends DurableObject<Cloudflare.Env> {
     try {
       return await this.#mutate(async () => {
         const env = this.env as unknown as Env;
+        if (!isX402Enabled(env))
+          return { ok: false as const, reason: "unavailable" as const };
         const receiptKey = "machine-settlement-receipt";
         const resultKey = "machine-payment-result";
         const prior = await this.ctx.storage.get<VerifiedPayment>(resultKey);

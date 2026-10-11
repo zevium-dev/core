@@ -578,7 +578,9 @@ async function handleCallApi(
     // Never forward upstream error bodies, headers, or exception details.
     const message =
       response.status === 402
-        ? "A valid API key or wallet session with sufficient credits is required."
+        ? deps.pipeline.machinePayments
+          ? "A valid API key or wallet session with sufficient credits is required."
+          : "A valid API key with sufficient credits is required."
         : response.status === 403
           ? "This API call is not permitted. Check your API key and spending limit."
           : platformRateLimited

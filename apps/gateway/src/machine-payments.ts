@@ -33,8 +33,7 @@ export function addPaymentOffer(
         x402Version: 2,
         resource: {
           url: request.url,
-          description:
-            "$1 anonymous wallet top-up; unused credits expire one year after payment",
+          description: "$1 anonymous wallet top-up",
           mimeType: "application/json",
         },
         accepts: [machine.facilitator.requirements],

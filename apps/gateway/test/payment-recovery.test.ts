@@ -125,7 +125,7 @@ async function call(surface: "direct" | "mcp", origin: string, key?: string) {
         ),
       },
     ),
-    { ...env, APP_ORIGIN: origin } as Env,
+    { ...env, APP_ORIGIN: origin, X402_ENABLED: "true" } as Env,
     ctx,
   );
   await waitOnExecutionContext(ctx);

@@ -1,3 +1,4 @@
+import { isX402Enabled } from "./x402-config";
 import { isWalletSession, verifyWalletSession } from "./wallet-session";
 import {
   InternalHttpCatalogueSearch,
@@ -54,6 +55,8 @@ export { WalletSqliteDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {
+  /** Only the literal "true" enables the retained anonymous payment rail. */
+  X402_ENABLED?: string;
   X402_DEPOSIT_ADDRESS?: string;
   X402_FACILITATOR_URL?: string;
   X402_FACILITATOR_TOKEN?: string;
@@ -157,11 +160,14 @@ export function __resetProdDepsCache(): void {
 function buildDeps(env: Env): WorkerDeps {
   // Module-scoped test harness wins when installed (vitest-pool-workers).
   if (testDeps) {
-    return testDeps;
+    return isX402Enabled(env)
+      ? testDeps
+      : { ...testDeps, machinePayments: undefined };
   }
 
   // NUL-joined to avoid ambiguity when one field is empty.
   const fingerprint = [
+    env.X402_ENABLED ?? "",
     env.X402_DEPOSIT_ADDRESS ?? "",
     env.X402_FACILITATOR_URL ?? "",
     env.X402_FACILITATOR_TOKEN ?? "",
@@ -212,11 +218,13 @@ function buildDeps(env: Env): WorkerDeps {
       : new FailClosedCatalogueSource();
 
   const machinePayments =
+    isX402Enabled(env) &&
     env.X402_DEPOSIT_ADDRESS &&
     env.X402_FACILITATOR_URL &&
     env.X402_FACILITATOR_TOKEN &&
     env.X402_STRIPE_SECRET_KEY &&
     env.WALLET_SESSION_SECRET &&
+    env.WALLET_SESSION_SECRET.length >= 32 &&
     siteUrl &&
     env.GATEWAY_INTERNAL_SECRET
       ? {
