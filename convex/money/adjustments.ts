@@ -6,7 +6,7 @@ import { requestClose, requireDrained, finishClose } from "./barrier";
 import { reverseSource, restoreSource } from "./sourceAdjustments";
 import { reverseEarning, restoreEarning } from "./publisherLedger";
 import { fingerprint } from "../../contracts/transport";
-import { lotState } from "./lots";
+import { lotState, lotSpendable } from "./lots";
 import { openCase } from "./reconciliationCases";
 export const FINANCE_PAGE_SIZE = 8;
 export type AdjustmentFact =
@@ -232,6 +232,9 @@ export async function reconcilePaymentPage(
       if (source.state === "locked") continue;
       locked = add(locked, source.remainingCredits);
       await ctx.db.patch(source._id, { state: "locked" });
+      await ctx.db.patch(source.lotId, {
+        spendable: await lotSpendable(ctx, source.lotId),
+      });
     }
     // Inventory changes invalidate every pinned checkpoint, even with no ledger delta.
     await ctx.db.patch(p.walletId, {
@@ -267,6 +270,9 @@ export async function reconcilePaymentPage(
           lot.expiresAt !== undefined && lot.expiresAt <= Date.now()
             ? "expired"
             : lotState(source.remainingCredits),
+      });
+      await ctx.db.patch(source.lotId, {
+        spendable: await lotSpendable(ctx, source.lotId),
       });
     }
     if (locked.length) {

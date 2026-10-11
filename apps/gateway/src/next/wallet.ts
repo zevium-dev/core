@@ -75,6 +75,7 @@ export type AdmissionResult =
 export class NextWalletDO extends DurableObject<NextEnv> {
   private checkpointPending?: Promise<void>;
   private coldRetryAt = 0;
+  private wakeRevision = 0;
   constructor(ctx: DurableObjectState, env: NextEnv) {
     super(ctx, env);
     ctx.storage.sql.exec(
@@ -162,8 +163,11 @@ export class NextWalletDO extends DurableObject<NextEnv> {
           lastWake: Date.now(),
         });
       if (maintenance) await this.ctx.storage.put("lastWake", Date.now());
-      if (maintenance && (await this.ctx.storage.getAlarm()) === null)
+      if (maintenance) {
+        this.wakeRevision++;
+        this.coldRetryAt = 0;
         await this.ctx.storage.setAlarm(Date.now() + 1);
+      }
     });
   }
   async admit(
@@ -176,18 +180,38 @@ export class NextWalletDO extends DurableObject<NextEnv> {
     if (!Number.isSafeInteger(validUntil))
       throw new Error("Invalid authority deadline");
     await this.wake(input.consumerClerkOrgId, false);
-    const current = this.state();
-    if (!current || current.checkpoint.validUntil <= Date.now()) {
+    const needsRefresh = () => {
+      const current = this.state();
+      return (
+        !current ||
+        current.checkpoint.validUntil <= Date.now() ||
+        current.sealed ||
+        current.checkpoint.gateState === "closing" ||
+        !!current.freeze
+      );
+    };
+    if (needsRefresh()) {
+      const deadline = Date.now() + COLD_FILL_MS;
       if (this.checkpointPending)
         await waitForColdFill(this.checkpointPending).catch(() => {});
-      else if (Date.now() >= this.coldRetryAt && coldRefreshBudget.take()) {
-        this.coldRetryAt = Date.now() + 5000;
-        await waitForColdFill(
-          this.refreshCheckpoint(
-            input.consumerClerkOrgId,
-            AbortSignal.timeout(COLD_FILL_MS),
-          ),
-        ).catch(() => {});
+      // An alarm may have read the closing epoch before the backend reopened it.
+      // Recheck after joining it; any fresh fill shares the original caller deadline.
+      const remaining = deadline - Date.now();
+      if (needsRefresh() && remaining > 0) {
+        if (this.checkpointPending)
+          await waitForColdFill(this.checkpointPending, remaining).catch(
+            () => {},
+          );
+        else if (Date.now() >= this.coldRetryAt && coldRefreshBudget.take()) {
+          this.coldRetryAt = Date.now() + 5000;
+          await waitForColdFill(
+            this.refreshCheckpoint(
+              input.consumerClerkOrgId,
+              AbortSignal.timeout(remaining),
+            ),
+            remaining,
+          ).catch(() => {});
+        }
       }
     }
     return this.ctx.blockConcurrencyWhile(async () => {
@@ -588,6 +612,9 @@ export class NextWalletDO extends DurableObject<NextEnv> {
     this.checkpointPending = this.fillCheckpoint(owner, signal);
     try {
       await this.checkpointPending;
+      // A verified closing response is not a failed fill. Keeping its cooldown
+      // would reject the next call even if the backend has just reopened.
+      this.coldRetryAt = 0;
     } finally {
       this.checkpointPending = undefined;
     }
@@ -679,6 +706,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
       );
   }
   async alarm() {
+    const wakeRevision = this.wakeRevision;
     const owner = await this.ctx.storage.get<string>("owner");
     if (!owner) return;
     try {
@@ -771,6 +799,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
             throw new Error("Drain gap");
           s = { ...s, sealed: true, ack };
           this.save(s);
+          this.coldRetryAt = 0;
         }
         const response = await fetch(
           new URL("/wallet-drain", this.env.CONVEX_SITE_URL),
@@ -796,7 +825,11 @@ export class NextWalletDO extends DurableObject<NextEnv> {
         state?.lastAdmit ?? 0,
         (await this.ctx.storage.get<number>("lastWake")) ?? 0,
       );
-      if (
+      // A reopen wake can arrive while an older closing snapshot is in flight.
+      // Do not postpone that wake behind the normal refresh interval.
+      if (this.wakeRevision !== wakeRevision)
+        await this.ctx.storage.setAlarm(now + 1);
+      else if (
         this.calls().length ||
         state?.freeze ||
         state?.checkpoint.gateState === "closing" ||

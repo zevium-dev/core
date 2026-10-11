@@ -394,3 +394,208 @@ it("cold-fills once, renews unchanged sources, logs rejected finals and prunes o
   });
   alert.mockRestore();
 });
+
+it.each(["installed", "in-flight", "closed-probe"])(
+  "installs the reopened epoch on the next admission (%s)",
+  async (mode) => {
+    const staleFill = mode === "in-flight",
+      priorProbe = mode === "closed-probe";
+    const stub = await setup();
+    await runInDurableObject(stub, async (_wallet, ctx) => {
+      const ring = {
+        current: "k1",
+        keys: { k1: "test-only-secret-never-use-in-production" },
+      };
+      const wallet = new NextWalletDO(ctx, {
+        ...(env as unknown as NextEnv),
+        CONVEX_SITE_URL: "https://next.invalid",
+        NEXT_SNAPSHOT_KEYS: JSON.stringify(ring),
+      });
+      const original = JSON.parse(
+        ctx.storage.sql
+          .exec<{ data: string }>("SELECT data FROM next_state")
+          .one().data,
+      );
+      original.sealed = true;
+      original.checkpoint.gateState = "closing";
+      original.checkpoint.closeId = "close";
+      ctx.storage.sql.exec(
+        "UPDATE next_state SET data=?",
+        JSON.stringify(original),
+      );
+      await ctx.storage.put({
+        owner: "org_test",
+        bootstrapId: "bootstrap",
+        activated: true,
+      });
+      const inventory = ctx.storage.sql
+        .exec<{ data: string }>("SELECT data FROM next_sources")
+        .toArray()
+        .map((r) => JSON.parse(r.data));
+      let wakeDuringRefresh = false,
+        pulls = 0;
+      let releaseStale = () => {};
+      let sawStale = () => {};
+      const staleStarted = new Promise<void>((resolve) => {
+        sawStale = resolve;
+      });
+      const network = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation(async (request) => {
+          const stale = (staleFill || priorProbe) && pulls++ === 0;
+          if (stale && staleFill) {
+            sawStale();
+            await new Promise<void>((resolve) => {
+              releaseStale = resolve;
+            });
+          }
+          if (wakeDuringRefresh) await wallet.wake("org_test");
+          const now = Date.now();
+          const cp = {
+            ...original.checkpoint,
+            epoch: stale ? 1 : 2,
+            gateRevision: stale ? 1 : 3,
+            gateState: stale ? "closing" : "open",
+            generationId: stale ? original.checkpoint.generationId : "reopened",
+            edgeBootstrapId: "bootstrap",
+            generatedAt: now,
+            validUntil: now + 30000,
+            lots: inventory.map((r) => r.lot),
+            sources: inventory.map((r) => r.source),
+          };
+          return Response.json(
+            await sealProjection(
+              {
+                deploymentId: "next-fixture",
+                kind: "wallet",
+                scope: "org_test",
+                revision: now,
+                generationId: cp.generationId,
+                generatedAt: now,
+                expiresAt: now + 30000,
+                nonce: new URL(String(request)).searchParams.get("nonce")!,
+                payload: { checkpoint: cp },
+              },
+              ring,
+            ),
+          );
+        });
+      try {
+        if (priorProbe)
+          expect(
+            await wallet.admit(input(5), key, Date.now() + 30000),
+          ).toMatchObject({ ok: false, status: 503 });
+        const alarm = staleFill ? wallet.alarm() : undefined;
+        if (staleFill) await staleStarted;
+        const admissions = Promise.all(
+          Array.from({ length: 4 }, () =>
+            wallet.admit(input(5), key, Date.now() + 30000),
+          ),
+        );
+        if (staleFill) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          releaseStale();
+        }
+        const results = await admissions;
+        await alarm;
+        for (const result of results)
+          expect(result).toMatchObject({ ok: true, admission: { epoch: 2 } });
+        expect(network).toHaveBeenCalledTimes(staleFill || priorProbe ? 2 : 1);
+        const installed = JSON.parse(
+          ctx.storage.sql
+            .exec<{ data: string }>("SELECT data FROM next_state")
+            .one().data,
+        );
+        expect(installed).toMatchObject({
+          sealed: false,
+          checkpoint: { epoch: 2, gateState: "open" },
+        });
+        expect(
+          await wallet.admit(input(5), key, Date.now() + 30000),
+        ).toMatchObject({ ok: true });
+        expect(network).toHaveBeenCalledTimes(staleFill || priorProbe ? 2 : 1); // Warm requests stay local.
+        wakeDuringRefresh = true;
+        await wallet.alarm();
+        expect((await ctx.storage.getAlarm())! - Date.now()).toBeLessThan(1000);
+      } finally {
+        network.mockRestore();
+        await ctx.storage.deleteAlarm();
+      }
+    });
+  },
+);
+
+it("maintenance wakes advance an existing refresh alarm", async () => {
+  const stub = await setup();
+  await runInDurableObject(stub, async (wallet, ctx) => {
+    await ctx.storage.setAlarm(Date.now() + 15000);
+    await wallet.wake("org_test");
+    expect((await ctx.storage.getAlarm())! - Date.now()).toBeLessThan(1000);
+    await ctx.storage.deleteAlarm();
+  });
+});
+
+it("bounds failed sealed-checkpoint refreshes and throttles repeated refusals", async () => {
+  const stub = await setup();
+  await runInDurableObject(stub, async (_instance, ctx) => {
+    const wallet = new NextWalletDO(ctx, {
+      ...(env as unknown as NextEnv),
+      CONVEX_SITE_URL: "https://next.invalid",
+    });
+    const original = JSON.parse(
+      ctx.storage.sql
+        .exec<{ data: string }>("SELECT data FROM next_state")
+        .one().data,
+    );
+    original.sealed = true;
+    original.checkpoint.gateState = "closing";
+    ctx.storage.sql.exec(
+      "UPDATE next_state SET data=?",
+      JSON.stringify(original),
+    );
+    await ctx.storage.put({
+      owner: "org_test",
+      bootstrapId: "bootstrap",
+      activated: true,
+    });
+    const network = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        (_request, init) =>
+          new Promise((_resolve, reject) =>
+            init!.signal!.addEventListener("abort", () =>
+              reject(new Error("timeout")),
+            ),
+          ),
+      );
+    try {
+      const start = Date.now();
+      const results = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          wallet.admit(input(), key, Date.now() + 30000),
+        ),
+      );
+      expect(Date.now() - start).toBeLessThan(3000);
+      for (const result of results)
+        expect(result).toMatchObject({ ok: false, status: 503 });
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(
+        await wallet.admit(input(), key, Date.now() + 30000),
+      ).toMatchObject({ ok: false, status: 503 });
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(
+        ctx.storage.sql.exec("SELECT * FROM next_calls").toArray(),
+      ).toHaveLength(0);
+      expect(
+        JSON.parse(
+          ctx.storage.sql
+            .exec<{ data: string }>("SELECT data FROM next_state")
+            .one().data,
+        ),
+      ).toEqual(original);
+    } finally {
+      network.mockRestore();
+      await ctx.storage.deleteAlarm();
+    }
+  });
+});

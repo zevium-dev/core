@@ -7,7 +7,7 @@ import {
   MAX_FUNDING_SLICES,
 } from "../../contracts/money";
 import { add, appendWalletEntry, getWallet, money } from "./walletLedger";
-import { lotState, sourceRow } from "./lots";
+import { lotState, lotSpendable, sourceRow } from "./lots";
 import { finishClose, requestClose, requireDrained } from "./barrier";
 export async function beginDustMerge(
   ctx: MutationCtx,
@@ -19,19 +19,12 @@ export async function beginDustMerge(
   if (!lot) throw new ConvexError("Funding lot not found");
   if (lot.merge && lot.merge.state !== "complete") return lot;
   if (
+    !lot.spendable ||
     !lot.remainingCredits ||
     lot.remainingCredits >= threshold ||
     (lot.expiresAt !== undefined && lot.expiresAt <= Date.now())
   )
     return null;
-  // A container holding only review-locked balances has nothing movable; never freeze for it.
-  const movable = await ctx.db
-    .query("fundingLotSources")
-    .withIndex("by_lot_spend", (q) =>
-      q.eq("lotId", lot._id).eq("state", "available"),
-    )
-    .first();
-  if (!movable) return null;
   const target = await ctx.db
     .query("fundingLots")
     .withIndex("by_merge_target", (q) =>
@@ -152,10 +145,12 @@ export async function moveDustPage(
     await ctx.db.patch(target._id, {
       remainingCredits: add(to.remainingCredits, amount),
       movedInCredits: add(to.movedInCredits, amount),
+      spendable: true,
       state: "available",
     });
   }
   await ctx.db.patch(lotId, {
+    spendable: await lotSpendable(ctx, lotId),
     merge: {
       ...lot.merge,
       state: page.isDone ? "complete" : "moving",

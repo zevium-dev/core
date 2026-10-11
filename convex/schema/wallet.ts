@@ -160,6 +160,8 @@ export const walletTables = {
   fundingLots: defineTable({
     // Filled with own ID before the creating mutation commits; Convex cannot index _id directly.
     orderKey: v.optional(v.id("fundingLots")),
+    // True exactly when this container has an available original source.
+    spendable: v.boolean(),
     walletId: v.id("wallets"),
     sourceRef: v.string(),
     sourceKind: sourceKind,
@@ -196,7 +198,7 @@ export const walletTables = {
     .index("by_source", ["sourceRef"])
     .index("by_spend", [
       "walletId",
-      "state",
+      "spendable",
       "priority",
       "createdAt",
       "orderKey",

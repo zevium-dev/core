@@ -11,7 +11,13 @@ import {
   getWallet,
   money,
 } from "./walletLedger";
-import { allocate, lotState, sourceRow, type Slice } from "./lots";
+import {
+  allocate,
+  lotState,
+  lotSpendable,
+  sourceRow,
+  type Slice,
+} from "./lots";
 import {
   abandonClose,
   finishClose,
@@ -107,15 +113,16 @@ export async function reverseSource(
   if (result.applied) {
     const remainingCredits = add(lot.remainingCredits, -slice.credits),
       left = add(source.remainingCredits, -slice.credits);
-    await ctx.db.patch(lot._id, {
-      remainingCredits,
-      reversedCredits: add(lot.reversedCredits, slice.credits),
-      state: lotState(remainingCredits),
-    });
     await ctx.db.patch(source._id, {
       remainingCredits: left,
       reversedCredits: add(source.reversedCredits, slice.credits),
       state: source.state === "locked" ? "locked" : lotState(left),
+    });
+    await ctx.db.patch(lot._id, {
+      spendable: await lotSpendable(ctx, lot._id),
+      remainingCredits,
+      reversedCredits: add(lot.reversedCredits, slice.credits),
+      state: lotState(remainingCredits),
     });
     if (source.state === "locked")
       await ctx.db.patch(input.walletId, {
@@ -199,18 +206,19 @@ export async function restoreSource(
   if (!result.applied) return result;
   await ctx.db.patch(entry._id, { restoredAt: Date.now() });
   const expired = lot.expiresAt !== undefined && lot.expiresAt <= Date.now();
-  await ctx.db.patch(lot._id, {
-    reversedCredits: add(lot.reversedCredits, -amount),
-    remainingCredits: add(lot.remainingCredits, expired ? 0 : amount),
-    expiredCredits: add(lot.expiredCredits, expired ? amount : 0),
-    state: expired ? "expired" : "available",
-  });
   await ctx.db.patch(source._id, {
     reversedCredits: add(source.reversedCredits, -amount),
     remainingCredits: add(source.remainingCredits, expired ? 0 : amount),
     expiredCredits: add(source.expiredCredits, expired ? amount : 0),
     state:
       source.state === "locked" ? "locked" : expired ? "expired" : "available",
+  });
+  await ctx.db.patch(lot._id, {
+    spendable: await lotSpendable(ctx, lot._id),
+    reversedCredits: add(lot.reversedCredits, -amount),
+    remainingCredits: add(lot.remainingCredits, expired ? 0 : amount),
+    expiredCredits: add(lot.expiredCredits, expired ? amount : 0),
+    state: expired ? "expired" : "available",
   });
   if (source.state === "locked" && !expired)
     await ctx.db.patch(entry.walletId, {

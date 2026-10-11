@@ -337,3 +337,59 @@ it("never starts a dust freeze for a container holding only locked balances", as
   expect(await t.run((ctx) => beginDustMerge(ctx, a.lot._id))).toBeNull();
   expect(await t.run((ctx) => ctx.db.get(f.walletId))).toEqual(before);
 });
+
+it("skips 33 older locked-only containers before bounded FIFO allocation and admin decrease", async () => {
+  const t = harness();
+  const f = await t.run((ctx) => moneyFixture(ctx, "locked-capacity", [], 100));
+  for (let i = 0; i < 33; i++) {
+    const paid = await t.run((ctx) =>
+      paidLot(ctx, f.walletId, `locked-capacity:${i}`, 100),
+    );
+    await adjustment(t, paid.lot.paymentId!, "pending");
+    await review(t, paid.lot.paymentId!);
+    await finish(t, paid.lot.paymentId!);
+    vi.advanceTimersByTime(1);
+  }
+  const unlocked = await t.run((ctx) =>
+    paidLot(ctx, f.walletId, "unlocked-capacity", 200),
+  );
+  const { measure } = await import("./measureDb");
+  const allocation = await t.run((ctx) =>
+    measure(ctx, (measured) => allocate(measured, f.walletId, 100)),
+  );
+  expect(allocation.result).toMatchObject([
+    { lotId: unlocked.lot._id, credits: 100 },
+  ]);
+  expect(allocation.readRowsByIndex.by_spend).toBe(1);
+  expect(allocation.readRowsByIndex.by_lot_spend).toBe(1);
+  const wallet = (await t.run((ctx) => ctx.db.get(f.walletId)))!;
+  const snapshot = walletPage.parse(
+    (
+      await t.query(internal.edgeSnapshots.read, {
+        kind: "wallet",
+        scope: wallet.owner.clerkOrgId,
+        now: Date.now(),
+      })
+    ).payload,
+  ).checkpoint;
+  expect(snapshot.balance).toBe(200);
+  expect(snapshot.sources).toMatchObject([
+    { lotId: unlocked.lot._id, remainingCredits: 200 },
+  ]);
+  expect(snapshot.sources).toHaveLength(1);
+  const { beginAdminDecrease, applyAdminDecrease } =
+    await import("../convex/money/sourceAdjustments");
+  const close = await t.run((ctx) =>
+    beginAdminDecrease(ctx, f.walletId, 100, "capacity-decrease"),
+  );
+  await t.run((ctx) => drain(ctx, f.walletId));
+  expect(
+    await t.run((ctx) =>
+      applyAdminDecrease(ctx, f.walletId, close.close!.id, 100),
+    ),
+  ).toMatchObject({
+    status: "applied",
+    wallet: { balance: 3400, lockedCredits: 3300, gateState: "open" },
+  });
+  await t.run((ctx) => assertWallet(ctx, f.walletId));
+});

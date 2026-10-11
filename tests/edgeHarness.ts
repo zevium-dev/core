@@ -1,4 +1,4 @@
-import { grantLot } from "../convex/money/lots";
+import { grantLot, lotSpendable } from "../convex/money/lots";
 import { appendWalletEntry } from "../convex/money/walletLedger";
 import { financeFixture } from "./financeFixtures";
 import {
@@ -180,6 +180,7 @@ export const deplete = internalMutation({
         state: "depleted",
       });
       await ctx.db.patch(lot._id, {
+        spendable: await lotSpendable(ctx, lot._id),
         remainingCredits: lot.remainingCredits - amount,
         reversedCredits: lot.reversedCredits + amount,
         state: "depleted",

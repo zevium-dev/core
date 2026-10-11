@@ -43,6 +43,7 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 
 ## Build queue — updated 2026-10-11
 
+- **Built — P1 #456:** immediate wallet reopen checkpoint refresh; next-call epoch regression replaces alarm-dependent acceptance. → [gateway](../features/gateway.md)
 - **Built — P1 #440:** scoped payment `needs_review` source quarantine implemented; unrelated funds reopen after drain. Owner policy sign-off remains required before activation. → [wallet-billing](../features/wallet-billing.md)
 
 Small, decided items. Each links to its decision; build in any order unless noted.

@@ -213,6 +213,10 @@ export async function assertWallet(
       .query("fundingLotSources")
       .withIndex("by_lot_origin", (q) => q.eq("lotId", lot._id))
       .collect();
+    check(
+      lot.spendable === sources.some((s) => s.state === "available"),
+      "Container spendability",
+    );
     locked += sources
       .filter((s) => s.state === "locked")
       .reduce((n, s) => n + s.remainingCredits, 0);
