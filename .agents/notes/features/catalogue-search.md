@@ -45,6 +45,8 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 ## Tech
 
+URL drafts reset during render only when the committed value changes; debounce callbacks use `useEffectEvent` in `apps/web/src/lib/catalogue-search.ts`. Playground parameters/body reset on endpoint identity changes, with initial defaults ready on first render; stored API-key hydration uses `useSyncExternalStore` in `apps/web/src/components/catalogue-detail.tsx`.
+
 Catalogue price chips and detail labels contain only scalar per-call prices; dead `hasTokenPricing` / `tokenPricing` display branches are removed. Code: `apps/web/src/lib/catalogue-card.ts` and `apps/web/src/components/catalogue-detail.tsx`.
 
 Root indexed browse/tag pages and facet counters are canonical. Query embeddings use a separate non-vector fenced cache; cache misses consume sharded trusted budgets. Direct anonymous actions degrade before buying embeddings; web connects through an authenticated server/IP-budget boundary when configured. Public hydration rechecks current visibility and omits unpriced/token operations. Combined filters can return short pages with continuations; totals describe selected tag/global catalogue, not arbitrary filter matches. Cards and detail render Operated by Zevium from server-owned houseOperated.

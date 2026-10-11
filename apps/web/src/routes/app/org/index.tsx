@@ -9,7 +9,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { Building2, KeyRound, Landmark, Plus, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { PublisherCountrySelect } from "#/components/publisher-country-select";
@@ -142,12 +142,13 @@ function PublicHandleCard() {
   const setPublicHandle = useConvexMutation(api.organizations.setPublicHandle);
   const current = mine.data?.[0]?.publisherHandle ?? "";
   const handleLocked = mine.data?.[0]?.publicHandleLocked ?? false;
-  const [handle, setHandle] = useState("");
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
+  const [handle, setHandle] = useState(current);
+  const [previousHandle, setPreviousHandle] = useState(current);
+  if (previousHandle !== current) {
+    setPreviousHandle(current);
     setHandle(current);
-  }, [current]);
+  }
+  const [confirming, setConfirming] = useState(false);
 
   const normalized = handle.trim().toLowerCase();
   const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);

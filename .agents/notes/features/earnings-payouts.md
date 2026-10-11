@@ -32,6 +32,8 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 
 ## Tech
 
+Stripe SDK 23.0.0 retains Dahlia Accounts v2 recipient-scoped onboarding (`configurations: ["recipient"]`) through a documented compatibility directive in `convex/connect.ts`. `tests/stripeSdk.test.ts` exercises the production onboarding action with fake HTTP, checking version headers, JSON payload, durable idempotency key, and completed link state. No account or API-version migration.
+
 Settlement writes exact original-source/day/shard 95/5 atoms and rollups without per-call publisher balance writes. Risk release waits until acceptance-day end plus seven days. Whole-cent transfers retain fractional carry; ambiguous provider outcomes retain allocation and reconciliation evidence. Pending earnings reverse newest-first before released earnings; already transferred money can leave negative publisher availability. Reinstatement restores exact journals. Accounts v2 ownership, mode/account/capability checks and durable retry identities survive. Same-org promo self-consumption earns no withdrawable net; cross-org common ownership is not inferred. These review defaults still need owner policy sign-off before activation.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

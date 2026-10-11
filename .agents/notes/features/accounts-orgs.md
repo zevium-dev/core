@@ -54,6 +54,8 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 
 ## Tech
 
+Public handle input synchronizes on canonical handle changes during render in `apps/web/src/routes/app/org/index.tsx`; local edits remain until the canonical value changes.
+
 Verified Svix events atomically retain receipt ordering, terminal user/org tombstones, creator claims and the once-per-user 10,000-credit promo lot/source/journal. Only signed organization.created.created_by selects the first processed creator org. Ensure calls grant nothing. Signed active-org JWTs own tenant/role checks; archive denies new reads/admissions while finance and admitted settlements remain recoverable.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

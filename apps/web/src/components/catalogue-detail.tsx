@@ -15,8 +15,7 @@ import { PackageX, TriangleAlert } from "lucide-react";
 import {
   Suspense,
   useCallback,
-  useEffect,
-  useEffectEvent,
+  useSyncExternalStore,
   useMemo,
   useState,
   type FormEvent,
@@ -655,6 +654,20 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
+function readStoredApiKey() {
+  try {
+    const stored = sessionStorage.getItem(API_KEY_STORAGE);
+    return stored && stored.length <= 4096 ? stored : "";
+  } catch {
+    return "";
+  }
+}
+const emptyStoredApiKey = () => "";
+function subscribeStoredApiKey(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
 export function TryItPanel({
   userId,
   publisherHandle,
@@ -681,40 +694,47 @@ export function TryItPanel({
 
   const [parameterValues, setParameterValues] = useState<
     Record<string, string>
-  >({});
+  >(() =>
+    Object.fromEntries(
+      (endpoint?.parameters ?? []).map((parameter) => [
+        parameter.key,
+        parameter.initialValue,
+      ]),
+    ),
+  );
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState(
     endpoint?.requestBodyExample ?? "{\n  \n}",
   );
-  const [apiKey, setApiKey] = useState("");
+  const storedApiKey = useSyncExternalStore(
+    subscribeStoredApiKey,
+    readStoredApiKey,
+    emptyStoredApiKey,
+  );
+  const [apiKeyEdit, setApiKey] = useState<string | null>(null);
+  const apiKey = apiKeyEdit ?? storedApiKey;
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<PlayResult | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const mock = mode === "mock";
 
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(API_KEY_STORAGE);
-      if (stored && stored.length <= 4096) setApiKey(stored);
-    } catch {
-      // sessionStorage may be blocked
+  const [previousEndpoint, setPreviousEndpoint] = useState(endpoint?.id);
+  if (previousEndpoint !== endpoint?.id) {
+    setPreviousEndpoint(endpoint?.id);
+    if (endpoint) {
+      setParameterValues((previous) =>
+        Object.fromEntries(
+          endpoint.parameters.map((parameter) => [
+            parameter.key,
+            previous[parameter.key] ?? parameter.initialValue,
+          ]),
+        ),
+      );
+      setBodyText(endpoint.requestBodyExample);
+      setErrors({});
+      setResult(null);
     }
-  }, []);
-
-  const resetEndpoint = useEffectEvent(() => {
-    if (!endpoint) return;
-    setParameterValues((previous) => {
-      const next: Record<string, string> = {};
-      for (const parameter of endpoint.parameters) {
-        next[parameter.key] = previous[parameter.key] ?? parameter.initialValue;
-      }
-      return next;
-    });
-    setBodyText(endpoint.requestBodyExample);
-    setErrors({});
-    setResult(null);
-  });
-  useEffect(() => resetEndpoint(), [endpoint?.id]);
+  }
 
   const onApiKeyChange = useCallback((value: string) => {
     setApiKey(value);

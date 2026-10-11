@@ -27,6 +27,8 @@ Public front door and integration help. Landing page pitches the agent-first mar
 
 ## Tech
 
+`SyntaxCode` uses `@speed-highlight/core` v2 `highlightHTML` with `block: false` and `showLineNumbers: false`. Highlight results are keyed by code/language so changes render escaped plain text immediately; cancelled async results cannot replace newer content. `apps/web/src/components/syntax-code.test.tsx` checks inline markup, HTML escaping, aliases, and replacement.
+
 ### Accepted changes — implementation pending (2026-10-11)
 
 P0 #428 adds the shared spec conversion pipeline and generated CLI/docs; #110 owns listing-scoped MCP, #350 SDKs stays P2. Current docs/snippet code remains as described below; no generated CLI is claimed by this decision PR.

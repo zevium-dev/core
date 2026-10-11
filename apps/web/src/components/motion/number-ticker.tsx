@@ -38,22 +38,24 @@ export function NumberTicker({
 }: NumberTickerProps) {
   const reduce = useHydratedReducedMotion();
   const [display, setDisplay] = useState(value);
+  const immediate = reduce || vtState.active;
+  const [previous, setPrevious] = useState({ value, immediate });
+  if (previous.value !== value || previous.immediate !== immediate) {
+    setPrevious({ value, immediate });
+    if (immediate) setDisplay(value);
+  }
   const fromRef = useRef(value);
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (reduce || vtState.active) {
-      setDisplay(value);
+    if (immediate) {
       fromRef.current = value;
       return;
     }
 
     const from = fromRef.current;
     const to = value;
-    if (from === to) {
-      setDisplay(to);
-      return;
-    }
+    if (from === to) return;
 
     const durationMs = Math.min(1000, DUR.slow * 1000);
     const start = performance.now();
@@ -80,9 +82,9 @@ export function NumberTicker({
         cancelAnimationFrame(frameRef.current);
       }
     };
-  }, [reduce, value]);
+  }, [immediate, value]);
 
-  const visibleValue = reduce ? value : display;
+  const visibleValue = immediate ? value : display;
   const text =
     format !== undefined
       ? format(visibleValue)
