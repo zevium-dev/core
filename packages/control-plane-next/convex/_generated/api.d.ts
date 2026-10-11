@@ -24,6 +24,13 @@ import type * as lib_keyProjection from "../lib/keyProjection.js";
 import type * as lib_keys from "../lib/keys.js";
 import type * as lib_publicRoutes from "../lib/publicRoutes.js";
 import type * as lib_specPolicy from "../lib/specPolicy.js";
+import type * as money_barrier from "../money/barrier.js";
+import type * as money_dust from "../money/dust.js";
+import type * as money_lots from "../money/lots.js";
+import type * as money_rollups from "../money/rollups.js";
+import type * as money_settle from "../money/settle.js";
+import type * as money_sourceAdjustments from "../money/sourceAdjustments.js";
+import type * as money_walletLedger from "../money/walletLedger.js";
 import type * as organizations from "../organizations.js";
 import type * as projects from "../projects.js";
 import type * as publishReadiness from "../publishReadiness.js";
@@ -34,7 +41,9 @@ import type * as schema_settlement from "../schema/settlement.js";
 import type * as schema_wallet from "../schema/wallet.js";
 import type * as specs from "../specs.js";
 import type * as upstreamCredentials from "../upstreamCredentials.js";
+import type * as usage from "../usage.js";
 import type * as users from "../users.js";
+import type * as wallets from "../wallets.js";
 
 import type {
   ApiFromModules,
@@ -59,6 +68,13 @@ declare const fullApi: ApiFromModules<{
   "lib/keys": typeof lib_keys;
   "lib/publicRoutes": typeof lib_publicRoutes;
   "lib/specPolicy": typeof lib_specPolicy;
+  "money/barrier": typeof money_barrier;
+  "money/dust": typeof money_dust;
+  "money/lots": typeof money_lots;
+  "money/rollups": typeof money_rollups;
+  "money/settle": typeof money_settle;
+  "money/sourceAdjustments": typeof money_sourceAdjustments;
+  "money/walletLedger": typeof money_walletLedger;
   organizations: typeof organizations;
   projects: typeof projects;
   publishReadiness: typeof publishReadiness;
@@ -69,7 +85,9 @@ declare const fullApi: ApiFromModules<{
   "schema/wallet": typeof schema_wallet;
   specs: typeof specs;
   upstreamCredentials: typeof upstreamCredentials;
+  usage: typeof usage;
   users: typeof users;
+  wallets: typeof wallets;
 }>;
 
 /**

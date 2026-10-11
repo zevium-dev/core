@@ -1,3 +1,9 @@
+import { ingestUsage } from "../contracts/settlement";
+import {
+  validInternalSecret,
+  readBoundedJson,
+  BoundaryError,
+} from "../contracts/transport";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { z } from "zod";
@@ -133,6 +139,33 @@ router.route({
       return new Response("Webhook could not be processed", { status: 503 });
     }
     return new Response(null, { status: 200 });
+  }),
+});
+router.route({
+  path: "/ingest-usage",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (
+      !(await validInternalSecret(
+        request.headers.get("x-internal-secret"),
+        process.env.GATEWAY_INTERNAL_SECRET,
+      ))
+    )
+      return new Response("Unauthorized", { status: 401 });
+    try {
+      const body = await readBoundedJson(request, ingestUsage);
+      const result = await ctx.runAction(internal.wallets.recordUsage, {
+        bodyJson: JSON.stringify(body),
+      });
+      return Response.json(result);
+    } catch (error) {
+      return new Response(
+        error instanceof BoundaryError
+          ? error.message
+          : "Settlement unavailable",
+        { status: error instanceof BoundaryError ? error.status : 503 },
+      );
+    }
   }),
 });
 export default router;

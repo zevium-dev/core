@@ -28,6 +28,7 @@ export const settlementTables = {
     epoch: v.number(),
     edgeSequence: v.number(),
     admissionFingerprint: v.string(),
+    immutableFingerprint: v.string(),
     pricingDecision: pricingDecision,
     listedCostCredits: v.number(),
     heldCredits: v.number(),

@@ -34,9 +34,24 @@ export const contend = internalMutation({
   handler: async (ctx, args) => {
     const org = (await ctx.db.get(args.org))!;
     if (args.kind === "signup") {
-      return (await claimSignupOrganization(ctx, org, `user_${args.run}`))
-        ? org._id
-        : "not-eligible";
+      if (!(await claimSignupOrganization(ctx, org, `user_${args.run}`)))
+        return "not-eligible";
+      const wallet = await ctx.db
+        .query("wallets")
+        .withIndex("by_owner", (q) => q.eq("ownerKey", `org:${org.clerkOrgId}`))
+        .unique();
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerk", (q) => q.eq("clerkUserId", `user_${args.run}`))
+        .unique();
+      if (
+        wallet?.balance !== 10_000 ||
+        wallet.promoCredits !== 10_000 ||
+        wallet.sequence !== 1 ||
+        user?.signupGrant?.organizationId !== org._id
+      )
+        throw new Error("Signup money and identity did not commit atomically");
+      return org._id;
     }
     if (args.kind === "route")
       return (

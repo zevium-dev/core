@@ -1,3 +1,5 @@
+import { ensureWallet } from "../money/walletLedger";
+import { grantLot } from "../money/lots";
 import { ConvexError } from "convex/values";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
@@ -64,7 +66,7 @@ export async function availableHandle(
   return fallback;
 }
 /** Only signed organization.created.created_by establishes the first processed creator claim.
- * PR 3 adds the promo ledger/lot and users.signupGrant in the same transaction.
+ * Promo ledger/lot and retained user grant commit in this same transaction.
  * Retained user identity prevents later organizations or deleted mirrors from claiming again.
  */
 export async function claimSignupOrganization(
@@ -101,6 +103,7 @@ export async function claimSignupOrganization(
       lastClerkEventAt: 0,
       signupPersonalOrganizationId: org._id,
     });
+  await completeSignupGrant(ctx, userId);
   return true;
 }
 
@@ -134,4 +137,25 @@ export async function signupGrantCandidate(
     refId: `signup:${clerkUserId}`,
     credits: 10_000 as const,
   };
+}
+
+/** Called inside the signed creator-claim mutation, never by a browser or org update. */
+async function completeSignupGrant(ctx: MutationCtx, clerkUserId: string) {
+  const candidate = await signupGrantCandidate(ctx, clerkUserId);
+  if (!candidate) return;
+  const org = (await ctx.db.get(candidate.organizationId))!;
+  const wallet = await ensureWallet(ctx, org);
+  await grantLot(ctx, {
+    walletId: wallet._id,
+    sourceKind: "promo",
+    sourceRef: candidate.refId,
+    credits: candidate.credits,
+  });
+  await ctx.db.patch(candidate.userId, {
+    signupGrant: {
+      refId: candidate.refId,
+      organizationId: org._id,
+      grantedAt: Date.now(),
+    },
+  });
 }

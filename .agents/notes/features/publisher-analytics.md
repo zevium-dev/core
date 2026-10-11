@@ -1,7 +1,8 @@
 # Publisher analytics
 
 > Status: #398 fixed; partial (P0) · Updated: 2026-10-10
-> Code: `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/components/publisher-earnings-display.test.tsx`, `convex/earnings.test.ts`
+> Rebuild status: isolated PR 3 settlement projection implemented; production reads and cutover unchanged.
+> Code: `packages/control-plane-next/convex/money/rollups.ts`, `convex/analytics.ts` (`projectAnalytics`, `orgOverview`), `convex/usage.ts`, `convex/usage.test.ts`, `apps/web/src/routes/app/projects/$projectSlug.tsx` (`ProjectAnalyticsPanel`, `?tab=analytics&range=`), `apps/web/src/lib/analytics-view.ts`, `apps/web/src/lib/format.ts`, `apps/web/src/components/publisher-earnings-display.test.tsx`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md) (usage ingest pipe), [gateway](gateway.md), [earnings-payouts](earnings-payouts.md), [quality-signals](quality-signals.md), [accounts-orgs](accounts-orgs.md), [roadmap](../product/roadmap.md)
 
 Per-project dashboards for publishers: calls, revenue, tail latency, and error breakdown per endpoint, live-updating. Built from per-call usage events emitted by the gateway. Positioned to beat the dead incumbent's analytics. Usage events arrive through the usage ingest pipe owned by [wallet-billing](wallet-billing.md).
@@ -25,6 +26,10 @@ Per-project dashboards for publishers: calls, revenue, tail latency, and error b
 Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)".
 
 ## Tech
+
+### Isolated rebuild PR 3 — 2026-10-11
+
+Settlement now writes sharded daily/lifetime call, gross/net and fixed-bucket latency metrics with usage. Call metrics use execution day; publisher total/project risk inventory uses acceptance day. Free successful calls retain consumer-project eligibility. Read surfaces and histogram labeling remain PR 6. [Implementation and handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
 
 - **Earnings precision (#398)**: analytics sums canonical `publisherNetAtoms` and converts once with `atomsToCredits`, matching statement and payout-ledger reads. Analytics, project earnings, and organization earnings use `formatPublisherCredits` (fixed two decimals); USD equivalents use the shared `formatCreditsAsUsd`. Two 7-credit calls display 13.30 net credits everywhere.
 
