@@ -1,3 +1,5 @@
+import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
+import { publicSemanticSearch } from "#/lib/catalogue-search.functions";
 import { QualityBadges } from "#/components/quality-badges";
 import { ListBoundary } from "#/components/list-boundary";
 import { convexQuery } from "@convex-dev/react-query";
@@ -127,7 +129,23 @@ export function CatalogueBrowser({
   const semanticSearchEnabled = semanticQueryText !== "";
   const semanticQuery = useQuery({
     queryKey: ["catalogue", "semantic", semanticQueryText],
-    queryFn: () => runSemanticAction({ query: semanticQueryText, limit: 20 }),
+    queryFn: async (): Promise<{
+      items: SearchListing[];
+      degraded: boolean;
+    }> => {
+      if (!NEXT_CONTROL_PLANE)
+        return runSemanticAction({ query: semanticQueryText, limit: 20 });
+      const result = await publicSemanticSearch({
+        data: { query: semanticQueryText },
+      });
+      return {
+        ...result,
+        items: result.items.map((item) => ({
+          ...item,
+          description: item.description,
+        })),
+      };
+    },
     enabled: semanticSearchEnabled,
     retry: false,
     staleTime: 60_000,

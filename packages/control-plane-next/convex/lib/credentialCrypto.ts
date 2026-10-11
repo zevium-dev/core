@@ -126,3 +126,10 @@ export async function decryptSecret(
     throw new ConvexError("Stored credential is unavailable");
   }
 }
+
+export function webhookBinding(
+  projectId: string,
+  generation: number,
+): SecretBinding {
+  return { purpose: "webhook-signing-secret", resource: projectId, generation };
+}

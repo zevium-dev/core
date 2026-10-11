@@ -381,13 +381,15 @@ export const getPayoutState = query({
     return {
       profile: {
         status: !org.connect
-          ? "not_started"
+          ? ("not_started" as const)
           : org.connect.status === "active"
-            ? "enabled"
+            ? ("enabled" as const)
             : org.connect.status === "pending"
-              ? "incomplete"
-              : "restricted",
+              ? ("incomplete" as const)
+              : ("restricted" as const),
         requirements: org.connect?.requirements ?? [],
+        disabledReason:
+          org.connect?.status === "closed" ? "Account is closed" : undefined,
       },
       earnings: {
         pendingRisk: atomsToCredits(pendingRiskAtoms),
@@ -417,8 +419,10 @@ export const getPayoutState = query({
           availableAt: e.availableAt,
           status:
             e.clawedBackAtoms === e.netAtoms && e.netAtoms > 0
-              ? "reversed"
-              : e.state,
+              ? ("reversed" as const)
+              : e.state === "pending"
+                ? ("pending_risk" as const)
+                : ("released" as const),
           createdAt: e.createdAt,
           netAtoms: e.netAtoms,
           clawedBackAtoms: e.clawedBackAtoms,
@@ -434,11 +438,17 @@ export const getPayoutState = query({
         amountCents: t.amountCents,
         reversedCents: t.reversedCents,
         createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        stripeTransferId: t.stripeTransferId,
+        failureReason: t.failureCode,
       })),
       payouts: payouts.map((p) => ({
         id: p._id,
         status: p.status,
         amountCents: p.amountCents,
+        amount: p.amountCents,
+        updatedAt: p.updatedAt,
+        failureReason: p.failureCode,
         currency: p.currency,
         arrivalDate: p.arrivalDate,
       })),

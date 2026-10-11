@@ -1,8 +1,12 @@
+import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
+import { api as legacyApi } from "../../../../../../convex/_generated/api";
+import { api as nextApi } from "#/lib/convex-api.next";
+import type { FunctionReturnType } from "convex/server";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth, usePaginatedQuery } from "convex/react";
 import { FolderPlus, Plus } from "lucide-react";
 import { Suspense } from "react";
 
@@ -32,9 +36,9 @@ import type { RouterContext } from "#/router";
 export const Route = createFileRoute("/app/projects/")({
   loader: async ({ context }) => {
     const { queryClient, orgSlug } = context as RouterContext;
-    if (!orgSlug) return;
+    if (!orgSlug || NEXT_CONTROL_PLANE) return;
 
-    const queryOpts = convexQuery(api.projects.list, { orgSlug });
+    const queryOpts = convexQuery(legacyApi.projects.list, { orgSlug });
 
     // Components wait for verified browser auth before subscribing. Cached
     // titles still morph; a cold list reveals its skeleton until data is ready.
@@ -88,18 +92,55 @@ function ProjectsIndexPage() {
 
   return (
     <Suspense fallback={<ProjectsListSkeleton />}>
-      <ProjectsList orgSlug={orgSlug} />
+      {NEXT_CONTROL_PLANE ? (
+        <NextProjectsList orgSlug={orgSlug} />
+      ) : (
+        <LegacyProjectsList orgSlug={orgSlug} />
+      )}
     </Suspense>
   );
 }
 
-function ProjectsList({ orgSlug }: { orgSlug: string }) {
+function LegacyProjectsList({ orgSlug }: { orgSlug: string }) {
+  const { data: projects } = useSuspenseQuery(
+    convexQuery(legacyApi.projects.list, { orgSlug }),
+  );
+  return <ProjectsList orgSlug={orgSlug} projects={projects} />;
+}
+function NextProjectsList({ orgSlug }: { orgSlug: string }) {
+  const page = usePaginatedQuery(
+    nextApi.projects.list,
+    { orgSlug },
+    { initialNumItems: 25 },
+  );
+  if (page.status === "LoadingFirstPage") return <ProjectsListSkeleton />;
+  return (
+    <>
+      <ProjectsList orgSlug={orgSlug} projects={page.results} />
+      <Button
+        variant="outline"
+        disabled={page.status !== "CanLoadMore"}
+        onClick={() => page.loadMore(25)}
+      >
+        {page.status === "LoadingMore"
+          ? "Loading projects…"
+          : page.status === "Exhausted"
+            ? "All projects loaded"
+            : "Load more projects"}
+      </Button>
+    </>
+  );
+}
+function ProjectsList({
+  orgSlug,
+  projects,
+}: {
+  orgSlug: string;
+  projects: FunctionReturnType<typeof legacyApi.projects.list>;
+}) {
   const queryClient = useQueryClient();
   const { membership } = useOrganization();
   const canCreate = isPrivilegedOrgRole(membership?.role);
-  const { data: projects } = useSuspenseQuery(
-    convexQuery(api.projects.list, { orgSlug }),
-  );
 
   return (
     <FadeIn className="flex flex-col gap-6">

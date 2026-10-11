@@ -337,7 +337,9 @@ function ProjectShell({
         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="spec">Spec</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          {canAdminister && (
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          )}
           <TabsTrigger value="quality">Quality</TabsTrigger>
           <TabsTrigger value="earnings">Earnings</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -345,6 +347,10 @@ function ProjectShell({
         <TabsContent value={tab}>
           {isSpecRoute ? (
             <Outlet />
+          ) : panel === "analytics" && !canAdminister ? (
+            <p className="text-sm text-muted-foreground">
+              Organization admins can view project analytics.
+            </p>
           ) : panel === "analytics" ? (
             <Suspense fallback={<AnalyticsSkeleton />}>
               <ProjectAnalyticsPanel
@@ -572,17 +578,31 @@ export function ProjectAnalyticsPanel({
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Latency p95</CardDescription>
+            <CardDescription>
+              Latency p95
+              {"latencyPrecision" in analytics ? " · histogram estimate" : ""}
+            </CardDescription>
             <CardTitle className="text-2xl tabular-nums">
               {formatMs(analytics.p95)}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             p50 {formatMs(analytics.p50)} · p99 {formatMs(analytics.p99)}
+            {"latencyPrecision" in analytics && (
+              <span className="block">
+                Bucket bounds; 30,000 ms represents 30,000 ms or longer.
+              </span>
+            )}
           </CardContent>
         </Card>
       </div>
 
+      {"breakdownTruncated" in analytics &&
+        analytics.breakdownTruncated === true && (
+          <p className="text-sm text-muted-foreground">
+            Endpoint detail is partial. Summary totals include all calls.
+          </p>
+        )}
       <Card>
         <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">

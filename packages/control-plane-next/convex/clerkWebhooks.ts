@@ -1,3 +1,4 @@
+import { adjustStat } from "./lib/catalogue";
 import { requestClose } from "./money/barrier";
 import { v, ConvexError } from "convex/values";
 import { internalMutation } from "./_generated/server";
@@ -106,6 +107,7 @@ export const apply = internalMutation({
             lastClerkEventAt: args.sourceTimestamp,
             revision: 1,
           });
+          await adjustStat(ctx, "orgs", id, 1);
           org = (await ctx.db.get(id))!;
         } else if (args.sourceTimestamp > org.lastClerkEventAt) {
           if (!args.name)

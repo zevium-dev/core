@@ -24,7 +24,7 @@ describe("isolated schema and proven ports", () => {
       [...tables.application].sort(),
     );
     expect(tables.application).toHaveLength(35);
-    expect(Object.values(tables.components).flat()).toHaveLength(4);
+    expect(Object.values(tables.components).flat()).toHaveLength(28);
     expect(JSON.stringify(schema.tables.fundingLotSources)).toContain(
       "by_payment",
     );

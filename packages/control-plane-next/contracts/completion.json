@@ -1,0 +1,1467 @@
+{
+  "version": 2,
+  "functions": [
+    {
+      "name": "admin:getFinanceReconciliationCase",
+      "status": "implemented",
+      "targets": ["admin:getFinanceReconciliationCase"]
+    },
+    {
+      "name": "admin:isAdminQuery",
+      "status": "implemented",
+      "targets": ["admin:isAdminQuery"]
+    },
+    {
+      "name": "admin:listFinanceReconciliationCases",
+      "status": "implemented",
+      "targets": ["admin:listFinanceReconciliationCases"]
+    },
+    {
+      "name": "admin:listOrgs",
+      "status": "implemented",
+      "targets": ["admin:listOrgs"]
+    },
+    {
+      "name": "admin:listProjects",
+      "status": "implemented",
+      "targets": ["admin:listProjects"]
+    },
+    {
+      "name": "admin:listPublisherTransfers",
+      "status": "implemented",
+      "targets": ["admin:listPublisherTransfers"]
+    },
+    {
+      "name": "admin:platformStats",
+      "status": "implemented",
+      "targets": ["admin:platformStats"]
+    },
+    {
+      "name": "admin:recentUsage",
+      "status": "implemented",
+      "targets": ["admin:recentUsage"]
+    },
+    {
+      "name": "admin:reconcilePublisherTransfer",
+      "status": "replaced",
+      "targets": [
+        "operators:resolveProviderCase",
+        "admin:retryPublisherTransfer"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "admin:resolveConnectAccountReconciliation",
+      "status": "replaced",
+      "targets": [
+        "operators:resolveProviderCase",
+        "admin:retryPublisherTransfer"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "admin:resolvePublisherTransferReconciliation",
+      "status": "replaced",
+      "targets": [
+        "operators:resolveProviderCase",
+        "admin:retryPublisherTransfer"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "admin:retryPublisherTransfer",
+      "status": "implemented",
+      "targets": ["admin:retryPublisherTransfer"]
+    },
+    {
+      "name": "admin:setProjectVisibility",
+      "status": "implemented",
+      "targets": ["admin:setProjectVisibility"]
+    },
+    {
+      "name": "analytics:orgOverview",
+      "status": "implemented",
+      "targets": ["analytics:orgOverview"]
+    },
+    {
+      "name": "analytics:projectAnalytics",
+      "status": "implemented",
+      "targets": ["analytics:projectAnalytics"]
+    },
+    {
+      "name": "billing:applyDisputeProjection",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:applyRefundProjection",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:attachCheckoutSession",
+      "status": "implemented",
+      "targets": ["billing:attachCheckoutSession"]
+    },
+    {
+      "name": "billing:claimStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:createCheckout",
+      "status": "implemented",
+      "targets": ["billing:createCheckout"]
+    },
+    {
+      "name": "billing:cycleBreakdown",
+      "status": "implemented",
+      "targets": ["billing:cycleBreakdown"]
+    },
+    {
+      "name": "billing:failStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:finishStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:getBillingState",
+      "status": "implemented",
+      "targets": ["billing:getBillingState"]
+    },
+    {
+      "name": "billing:getCheckoutIntentForSession",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:listPacksStatic",
+      "status": "retired",
+      "reason": "No app callers; getBillingState returns authorized packs."
+    },
+    {
+      "name": "billing:listStripeReconciliationQueue",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:markCheckoutIntentTerminal",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:markPaymentGrantRecorded",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:prepareCheckoutIntent",
+      "status": "implemented",
+      "targets": ["billing:prepareCheckoutIntent"]
+    },
+    {
+      "name": "billing:processPublisherReconciliation",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:processStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:receiveStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:recoverPublisherReconciliations",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:recoverStripeEvents",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:replayStripeEvent",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "billing:setStripeCustomer",
+      "status": "implemented",
+      "targets": ["billing:setStripeCustomer"]
+    },
+    {
+      "name": "billing:upsertPaidPayment",
+      "status": "replaced",
+      "targets": [
+        "billing:projectPaidPayment",
+        "billing:reconcile",
+        "stripeEvents:receive",
+        "stripeEvents:recover"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "catalogue:backfillCatalogueListingsPage",
+      "status": "retired",
+      "reason": "Fresh deployment has no legacy data to backfill. New publication and source-backed ledger paths own projection; legacy release-proof claims cannot run against v2."
+    },
+    {
+      "name": "catalogue:getPublicDetail",
+      "status": "implemented",
+      "targets": ["catalogue:getPublicDetail"]
+    },
+    {
+      "name": "catalogue:listPublic",
+      "status": "implemented",
+      "targets": ["catalogue:listPublic"]
+    },
+    {
+      "name": "catalogue:listPublicPaginated",
+      "status": "implemented",
+      "targets": ["catalogue:listPublicPaginated"]
+    },
+    {
+      "name": "catalogue:publicFacets",
+      "status": "implemented",
+      "targets": ["catalogue:publicFacets"]
+    },
+    {
+      "name": "catalogue:resumeCatalogueProjectionBackfill",
+      "status": "retired",
+      "reason": "Fresh deployment has no legacy data to backfill. New publication and source-backed ledger paths own projection; legacy release-proof claims cannot run against v2."
+    },
+    {
+      "name": "catalogue:syncOrganizationCataloguePage",
+      "status": "replaced",
+      "targets": ["catalogue:listPublic"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "cronTasks:checkLowBalances",
+      "status": "replaced",
+      "targets": ["cronTasks:lowBalance"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "deploymentProof:get",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "deploymentProof:record",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "earnings:forOrg",
+      "status": "implemented",
+      "targets": ["earnings:forOrg"]
+    },
+    {
+      "name": "keySettings:beginRotation",
+      "status": "implemented",
+      "targets": ["keySettings:beginRotation"]
+    },
+    {
+      "name": "keySettings:completeRotation",
+      "status": "implemented",
+      "targets": ["keySettings:completeRotation"]
+    },
+    {
+      "name": "keySettings:expireGrace",
+      "status": "implemented",
+      "targets": ["keySettings:expireGrace"]
+    },
+    {
+      "name": "keySettings:failRotation",
+      "status": "implemented",
+      "targets": ["keySettings:failRotation"]
+    },
+    {
+      "name": "keySettings:getForOrg",
+      "status": "implemented",
+      "targets": ["keySettings:getForOrg"]
+    },
+    {
+      "name": "keySettings:listKeys",
+      "status": "implemented",
+      "targets": ["keySettings:listKeys"]
+    },
+    {
+      "name": "keySettings:recordProviderVerifiedKey",
+      "status": "replaced",
+      "targets": [
+        "keySettings:registerVerified",
+        "clerkWebhooks:membershipPage"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "keySettings:registerOwnedKey",
+      "status": "implemented",
+      "targets": ["keySettings:registerOwnedKey"]
+    },
+    {
+      "name": "keySettings:registerVerified",
+      "status": "implemented",
+      "targets": ["keySettings:registerVerified"]
+    },
+    {
+      "name": "keySettings:resolveMcpIdentity",
+      "status": "implemented",
+      "targets": ["keySettings:resolveMcpIdentity"]
+    },
+    {
+      "name": "keySettings:revokeMembershipVerified",
+      "status": "replaced",
+      "targets": [
+        "keySettings:registerVerified",
+        "clerkWebhooks:membershipPage"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "keySettings:revokePrevious",
+      "status": "implemented",
+      "targets": ["keySettings:revokePrevious"]
+    },
+    {
+      "name": "keySettings:setCap",
+      "status": "implemented",
+      "targets": ["keySettings:setCap"]
+    },
+    {
+      "name": "keySettings:setDisabled",
+      "status": "implemented",
+      "targets": ["keySettings:setDisabled"]
+    },
+    {
+      "name": "keyVerification:revokeWithRetry",
+      "status": "implemented",
+      "targets": ["keyVerification:revokeWithRetry"]
+    },
+    {
+      "name": "keyVerification:syncVerifiedKey",
+      "status": "implemented",
+      "targets": ["keyVerification:syncVerifiedKey"]
+    },
+    {
+      "name": "machinePayments:fund",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "notificationEmail:completePage",
+      "status": "implemented",
+      "targets": ["notificationEmail:completePage"]
+    },
+    {
+      "name": "notificationEmail:enqueueRecipient",
+      "status": "implemented",
+      "targets": ["notificationEmail:enqueueRecipient"]
+    },
+    {
+      "name": "notificationEmail:page",
+      "status": "implemented",
+      "targets": ["notificationEmail:page"]
+    },
+    {
+      "name": "notificationEmail:tick",
+      "status": "implemented",
+      "targets": ["notificationEmail:tick"]
+    },
+    {
+      "name": "notificationEmailAction:deliverPage",
+      "status": "implemented",
+      "targets": ["notificationEmailAction:deliverPage"]
+    },
+    {
+      "name": "notifications:emailPreference",
+      "status": "implemented",
+      "targets": ["notifications:emailPreference"]
+    },
+    {
+      "name": "notifications:listForOrg",
+      "status": "implemented",
+      "targets": ["notifications:listForOrg"]
+    },
+    {
+      "name": "notifications:markAllRead",
+      "status": "implemented",
+      "targets": ["notifications:markAllRead"]
+    },
+    {
+      "name": "notifications:markAllReadPage",
+      "status": "implemented",
+      "targets": ["notifications:markAllReadPage"]
+    },
+    {
+      "name": "notifications:markRead",
+      "status": "implemented",
+      "targets": ["notifications:markRead"]
+    },
+    {
+      "name": "notifications:setEmailPreference",
+      "status": "implemented",
+      "targets": ["notifications:setEmailPreference"]
+    },
+    {
+      "name": "notifications:unreadForOrg",
+      "status": "implemented",
+      "targets": ["notifications:unreadForOrg"]
+    },
+    {
+      "name": "organizations:activeCapabilities",
+      "status": "implemented",
+      "targets": ["organizations:activeCapabilities"]
+    },
+    {
+      "name": "organizations:applyOrganizationWebhook",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply", "clerkWebhooks:archivePage"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "organizations:archiveFromClerk",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply", "clerkWebhooks:archivePage"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "organizations:backfillPublicHandles",
+      "status": "retired",
+      "reason": "Fresh deployment has no legacy data to backfill. New publication and source-backed ledger paths own projection; legacy release-proof claims cannot run against v2."
+    },
+    {
+      "name": "organizations:checkPublicHandleAvailability",
+      "status": "implemented",
+      "targets": ["organizations:checkPublicHandleAvailability"]
+    },
+    {
+      "name": "organizations:deleteFromClerk",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply", "clerkWebhooks:archivePage"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "organizations:disableArchivedOrgKeysPage",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply", "clerkWebhooks:archivePage"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "organizations:ensureOrganization",
+      "status": "implemented",
+      "targets": ["organizations:ensureOrganization"]
+    },
+    {
+      "name": "organizations:getByPublicHandle",
+      "status": "implemented",
+      "targets": ["organizations:getByPublicHandle"]
+    },
+    {
+      "name": "organizations:listMine",
+      "status": "implemented",
+      "targets": ["organizations:listMine"]
+    },
+    {
+      "name": "organizations:setPublicHandle",
+      "status": "implemented",
+      "targets": ["organizations:setPublicHandle"]
+    },
+    {
+      "name": "organizations:upsertFromClerk",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply", "clerkWebhooks:archivePage"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:blockPublisherTransferDispatch",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:claimPublisherTransferDispatch",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:cleanupConnectOperationPii",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:commitConnectAccountOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:completeConnectLinkOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:confirmConnectAccountIdentity",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:expireConnectLinkOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:getConnectedAccountExpectation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:getConnectOnboardingOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:getConnectProfileForActiveOrg",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:getPayoutState",
+      "status": "implemented",
+      "targets": ["payouts:getPayoutState"]
+    },
+    {
+      "name": "payouts:getPublisherTransfer",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:getPublisherTransferReconciliation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:initiatePublisherTransfer",
+      "status": "implemented",
+      "targets": ["payouts:initiatePublisherTransfer"]
+    },
+    {
+      "name": "payouts:markConnectAccountCreateOutcome",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:markPublisherTransferDispatchAmbiguous",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:markPublisherTransferRequiresReconciliation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:prepareConnectAccountOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:prepareConnectLinkOperation",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:preparePublisherTransfer",
+      "status": "implemented",
+      "targets": ["payouts:preparePublisherTransfer"]
+    },
+    {
+      "name": "payouts:projectConnectedAccount",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:projectConnectedPayout",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:projectStripeTransfer",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:recordDefinitivePublisherTransferFailure",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:recoverPublisherTransferDispatches",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:refreshConnectedAccount",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:refreshOnboarding",
+      "status": "implemented",
+      "targets": ["payouts:refreshOnboarding"]
+    },
+    {
+      "name": "payouts:releaseMatureEarnings",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:releaseMatureEarningsGlobal",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:replaceClosedAccount",
+      "status": "retired",
+      "reason": "No app callers; connect.prepare owns account lifecycle, old replacement action cannot bypass ownership reconciliation."
+    },
+    {
+      "name": "payouts:resolveFinanceReconciliationCase",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:resumePublisherTransferDispatch",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:setConnectedAccount",
+      "status": "replaced",
+      "targets": [
+        "payouts:dispatch",
+        "payouts:recoverTransfers",
+        "connect:resume",
+        "connect:recover",
+        "operators:resolveProviderCase"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "payouts:startOnboarding",
+      "status": "implemented",
+      "targets": ["payouts:startOnboarding"]
+    },
+    {
+      "name": "projects:cancelRetirement",
+      "status": "implemented",
+      "targets": ["projects:cancelRetirement"]
+    },
+    {
+      "name": "projects:create",
+      "status": "implemented",
+      "targets": ["projects:create"]
+    },
+    {
+      "name": "projects:get",
+      "status": "implemented",
+      "targets": ["projects:get"]
+    },
+    {
+      "name": "projects:list",
+      "status": "implemented",
+      "targets": ["projects:list"]
+    },
+    {
+      "name": "projects:notifyRetirementConsumersPage",
+      "status": "replaced",
+      "targets": ["lifecycleNotices:consumers"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "projects:reconcileRetirementConsumerNotice",
+      "status": "replaced",
+      "targets": ["lifecycleNotices:consumers"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "projects:remove",
+      "status": "implemented",
+      "targets": ["projects:remove"]
+    },
+    {
+      "name": "projects:retire",
+      "status": "implemented",
+      "targets": ["projects:retire"]
+    },
+    {
+      "name": "projects:retireSunsetProjects",
+      "status": "implemented",
+      "targets": ["projects:retireSunsetProjects"]
+    },
+    {
+      "name": "projects:runProjectCleanupPage",
+      "status": "replaced",
+      "targets": ["lifecycleNotices:consumers"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "projects:scheduleRetirement",
+      "status": "implemented",
+      "targets": ["projects:scheduleRetirement"]
+    },
+    {
+      "name": "projects:update",
+      "status": "implemented",
+      "targets": ["projects:update"]
+    },
+    {
+      "name": "publishReadiness:clearPassingTest",
+      "status": "implemented",
+      "targets": ["publishReadiness:clearPassingTest"]
+    },
+    {
+      "name": "publishReadiness:getCurrent",
+      "status": "implemented",
+      "targets": ["publishReadiness:getCurrent"]
+    },
+    {
+      "name": "publishReadiness:getTarget",
+      "status": "implemented",
+      "targets": ["publishReadiness:getTarget"]
+    },
+    {
+      "name": "publishReadiness:recordPassingTest",
+      "status": "implemented",
+      "targets": ["publishReadiness:recordPassingTest"]
+    },
+    {
+      "name": "publishReadinessAction:testConnection",
+      "status": "implemented",
+      "targets": ["publishReadinessAction:testConnection"]
+    },
+    {
+      "name": "quality:getLeasedTarget",
+      "status": "implemented",
+      "targets": ["quality:getLeasedTarget"]
+    },
+    {
+      "name": "quality:getPublicSnapshot",
+      "status": "implemented",
+      "targets": ["quality:getPublicSnapshot"]
+    },
+    {
+      "name": "quality:getPublisherQuality",
+      "status": "implemented",
+      "targets": ["quality:getPublisherQuality"]
+    },
+    {
+      "name": "quality:leaseDueTargets",
+      "status": "replaced",
+      "targets": ["quality:runDueProbes", "quality:recordProbeResult"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "quality:listPublicIncidents",
+      "status": "implemented",
+      "targets": ["quality:listPublicIncidents"]
+    },
+    {
+      "name": "quality:listSubscriptions",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "quality:recomputeGatewayQuality",
+      "status": "implemented",
+      "targets": ["quality:recomputeGatewayQuality"]
+    },
+    {
+      "name": "quality:recordProbeResult",
+      "status": "implemented",
+      "targets": ["quality:recordProbeResult"]
+    },
+    {
+      "name": "quality:runDueProbes",
+      "status": "implemented",
+      "targets": ["quality:runDueProbes"]
+    },
+    {
+      "name": "quality:setSubscription",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "quality:subscriberCount",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "quality:syncPublishedTarget",
+      "status": "replaced",
+      "targets": ["quality:runDueProbes", "quality:recordProbeResult"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "qualityProbeAction:runScheduledProbe",
+      "status": "implemented",
+      "targets": ["qualityProbeAction:runScheduledProbe"]
+    },
+    {
+      "name": "registrySync:claim",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "registrySync:dispatchEvent",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "registrySync:getEvent",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "registrySync:markAcked",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "registrySync:markFailed",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "registrySync:resumeDeadLetter",
+      "status": "retired",
+      "reason": "Deferred or removed by accepted PR 1 classification; see inventory.json."
+    },
+    {
+      "name": "reviews:getAggregate",
+      "status": "implemented",
+      "targets": ["reviews:getAggregate"]
+    },
+    {
+      "name": "reviews:getViewerState",
+      "status": "implemented",
+      "targets": ["reviews:getViewerState"]
+    },
+    {
+      "name": "reviews:listModerationQueue",
+      "status": "implemented",
+      "targets": ["reviews:listModerationQueue"]
+    },
+    {
+      "name": "reviews:listPublic",
+      "status": "implemented",
+      "targets": ["reviews:listPublic"]
+    },
+    {
+      "name": "reviews:listPublicPaginated",
+      "status": "implemented",
+      "targets": ["reviews:listPublicPaginated"]
+    },
+    {
+      "name": "reviews:moderate",
+      "status": "implemented",
+      "targets": ["reviews:moderate"]
+    },
+    {
+      "name": "reviews:moderationHistory",
+      "status": "implemented",
+      "targets": ["reviews:moderationHistory"]
+    },
+    {
+      "name": "reviews:report",
+      "status": "implemented",
+      "targets": ["reviews:report"]
+    },
+    {
+      "name": "reviews:resolveReportsPage",
+      "status": "implemented",
+      "targets": ["reviews:resolveReportsPage"]
+    },
+    {
+      "name": "reviews:respondAsPublisher",
+      "status": "implemented",
+      "targets": ["reviews:respondAsPublisher"]
+    },
+    {
+      "name": "reviews:upsert",
+      "status": "implemented",
+      "targets": ["reviews:upsert"]
+    },
+    {
+      "name": "reviews:withdraw",
+      "status": "implemented",
+      "targets": ["reviews:withdraw"]
+    },
+    {
+      "name": "search:embedAllPublished",
+      "status": "retired",
+      "reason": "Fresh deployment has no legacy data to backfill. New publication and source-backed ledger paths own projection; legacy release-proof claims cannot run against v2."
+    },
+    {
+      "name": "search:embedProject",
+      "status": "implemented",
+      "targets": ["search:embedProject"]
+    },
+    {
+      "name": "search:expireQueryEmbedding",
+      "status": "implemented",
+      "targets": ["search:expireQueryEmbedding"]
+    },
+    {
+      "name": "search:fetchSearchListings",
+      "status": "implemented",
+      "targets": ["search:fetchSearchListings"]
+    },
+    {
+      "name": "search:finishQueryEmbedding",
+      "status": "implemented",
+      "targets": ["search:finishQueryEmbedding"]
+    },
+    {
+      "name": "search:getProjectForEmbed",
+      "status": "implemented",
+      "targets": ["search:getProjectForEmbed"]
+    },
+    {
+      "name": "search:listPublishedPublicProjects",
+      "status": "replaced",
+      "targets": ["search:embedProject"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "search:prepareQueryEmbedding",
+      "status": "implemented",
+      "targets": ["search:prepareQueryEmbedding"]
+    },
+    {
+      "name": "search:searchCatalogue",
+      "status": "implemented",
+      "targets": ["search:searchCatalogue"]
+    },
+    {
+      "name": "search:searchCatalogueForGateway",
+      "status": "implemented",
+      "targets": ["search:searchCatalogueForGateway"]
+    },
+    {
+      "name": "search:upsertEmbedding",
+      "status": "implemented",
+      "targets": ["search:upsertEmbedding"]
+    },
+    {
+      "name": "specImportLimits:acquire",
+      "status": "implemented",
+      "targets": ["specImportLimits:acquire"]
+    },
+    {
+      "name": "specImportLimits:release",
+      "status": "implemented",
+      "targets": ["specImportLimits:release"]
+    },
+    {
+      "name": "specImportLimits:renew",
+      "status": "implemented",
+      "targets": ["specImportLimits:renew"]
+    },
+    {
+      "name": "specs:deprecateVersion",
+      "status": "implemented",
+      "targets": ["specs:deprecateVersion"]
+    },
+    {
+      "name": "specs:getDraft",
+      "status": "implemented",
+      "targets": ["specs:getDraft"]
+    },
+    {
+      "name": "specs:getPublishedForGateway",
+      "status": "implemented",
+      "targets": ["specs:getPublishedForGateway"]
+    },
+    {
+      "name": "specs:getPublishedForGatewayInternal",
+      "status": "replaced",
+      "targets": ["lifecycleNotices:consumers"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "specs:getVersion",
+      "status": "implemented",
+      "targets": ["specs:getVersion"]
+    },
+    {
+      "name": "specs:listVersions",
+      "status": "implemented",
+      "targets": ["specs:listVersions"]
+    },
+    {
+      "name": "specs:notifyDeprecatedVersionConsumersPage",
+      "status": "replaced",
+      "targets": ["lifecycleNotices:consumers"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "specs:publish",
+      "status": "implemented",
+      "targets": ["specs:publish"]
+    },
+    {
+      "name": "specs:saveDraft",
+      "status": "implemented",
+      "targets": ["specs:saveDraft"]
+    },
+    {
+      "name": "specs:undeprecateVersion",
+      "status": "implemented",
+      "targets": ["specs:undeprecateVersion"]
+    },
+    {
+      "name": "upstreamCredentials:listForProject",
+      "status": "implemented",
+      "targets": ["upstreamCredentials:listForProject"]
+    },
+    {
+      "name": "upstreamCredentials:remove",
+      "status": "implemented",
+      "targets": ["upstreamCredentials:remove"]
+    },
+    {
+      "name": "upstreamCredentials:upsert",
+      "status": "implemented",
+      "targets": ["upstreamCredentials:upsert"]
+    },
+    {
+      "name": "usage:getForOrgById",
+      "status": "implemented",
+      "targets": ["usage:getForOrgById"]
+    },
+    {
+      "name": "usage:listForOrg",
+      "status": "implemented",
+      "targets": ["usage:listForOrg"]
+    },
+    {
+      "name": "users:deleteFromClerk",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "users:ensureUser",
+      "status": "implemented",
+      "targets": ["users:ensureUser"]
+    },
+    {
+      "name": "users:upsertFromClerk",
+      "status": "replaced",
+      "targets": ["clerkWebhooks:apply"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "wallets:applyAdminAdjustment",
+      "status": "replaced",
+      "targets": [
+        "wallets:getCheckpoint",
+        "wallets:beginDecrease",
+        "wallets:applyDecrease",
+        "billing:projectPaidPayment"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "wallets:claimReleaseProbeAccounting",
+      "status": "retired",
+      "reason": "Fresh deployment has no legacy data to backfill. New publication and source-backed ledger paths own projection; legacy release-proof claims cannot run against v2."
+    },
+    {
+      "name": "wallets:ensureWallet",
+      "status": "retired",
+      "reason": "No app callers; signed ensureOrganization binds first-org grant and wallet."
+    },
+    {
+      "name": "wallets:getGatewayWallet",
+      "status": "replaced",
+      "targets": [
+        "wallets:getCheckpoint",
+        "wallets:beginDecrease",
+        "wallets:applyDecrease",
+        "billing:projectPaidPayment"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "wallets:getMyWallet",
+      "status": "implemented",
+      "targets": ["wallets:getMyWallet"]
+    },
+    {
+      "name": "wallets:grantPaymentCredits",
+      "status": "replaced",
+      "targets": [
+        "wallets:getCheckpoint",
+        "wallets:beginDecrease",
+        "wallets:applyDecrease",
+        "billing:projectPaidPayment"
+      ],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "wallets:recordUsage",
+      "status": "implemented",
+      "targets": ["wallets:recordUsage"]
+    },
+    {
+      "name": "webhookDeliveryAction:deliverWebhook",
+      "status": "implemented",
+      "targets": ["webhookDeliveryAction:deliverWebhook"]
+    },
+    {
+      "name": "webhooks:claimDelivery",
+      "status": "implemented",
+      "targets": ["webhooks:claimDelivery"]
+    },
+    {
+      "name": "webhooks:deleteEndpoint",
+      "status": "implemented",
+      "targets": ["webhooks:deleteEndpoint"]
+    },
+    {
+      "name": "webhooks:getDeliveryForAction",
+      "status": "replaced",
+      "targets": ["webhooks:claimDelivery"],
+      "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
+    },
+    {
+      "name": "webhooks:getEndpoint",
+      "status": "implemented",
+      "targets": ["webhooks:getEndpoint"]
+    },
+    {
+      "name": "webhooks:listDeliveries",
+      "status": "implemented",
+      "targets": ["webhooks:listDeliveries"]
+    },
+    {
+      "name": "webhooks:recordDeliveryAttempt",
+      "status": "implemented",
+      "targets": ["webhooks:recordDeliveryAttempt"]
+    },
+    {
+      "name": "webhooks:revealSecret",
+      "status": "implemented",
+      "targets": ["webhooks:revealSecret"]
+    },
+    {
+      "name": "webhooks:rotateSecret",
+      "status": "implemented",
+      "targets": ["webhooks:rotateSecret"]
+    },
+    {
+      "name": "webhooks:upsertEndpoint",
+      "status": "implemented",
+      "targets": ["webhooks:upsertEndpoint"]
+    }
+  ],
+  "http": {
+    "POST /clerk-webhook": "http.ts: signed Clerk receipt projection",
+    "POST /stripe-webhook": "stripeEvents receipt/reconciliation projection",
+    "POST /resend-webhook": "http.ts: signature-verified dormant provider callback",
+    "POST /gateway-search": "http.ts: gateway org/key budgets",
+    "POST /web-search": "http.ts: separate server secret and HMAC connection budget",
+    "legacy edge routes": "Retired; PR 5 signed /edge-snapshot, /usage, /wallet-close-ack, /wallet-checkpoint pair exclusively with next Worker",
+    "machine-fund": "Retired: x402 disabled"
+  }
+}

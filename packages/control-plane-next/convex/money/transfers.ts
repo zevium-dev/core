@@ -1,3 +1,4 @@
+import { createNotification } from "../lib/notifications";
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -112,6 +113,13 @@ export async function claimTransfer(
       paidDeltaAtoms: 0,
       transferId: id,
     });
+    await createNotification(ctx, {
+      organizationId: t.publisherOrganizationId,
+      kind: "transfer_failed",
+      title: "Publisher transfer failed",
+      body: "The provider rejected this transfer. Funds are available for a new transfer.",
+      refId: `transfer-failed:${id}`,
+    });
     await ctx.db.patch(id, {
       status: "failed",
       dispatchState: "failed",
@@ -196,6 +204,13 @@ export async function projectTransfer(
       paidDeltaAtoms: -delta,
       transferId: id,
     });
+  await createNotification(ctx, {
+    organizationId: t.publisherOrganizationId,
+    kind: "transfer_sent",
+    title: "Publisher transfer recorded",
+    body: "Your transfer was confirmed by the payment provider.",
+    refId: `transfer-paid:${id}`,
+  });
   await ctx.db.patch(id, {
     stripeTransferId: fact.id,
     reversedCents: reversed,
@@ -225,6 +240,13 @@ export async function transferFailure(
       allocatedDeltaAtoms: -t.amountAtoms,
       paidDeltaAtoms: 0,
       transferId: id,
+    });
+    await createNotification(ctx, {
+      organizationId: t.publisherOrganizationId,
+      kind: "transfer_failed",
+      title: "Publisher transfer failed",
+      body: "The provider rejected this transfer. Funds are available for a new transfer.",
+      refId: `transfer-failed:${id}`,
     });
     await ctx.db.patch(id, {
       status: "failed",

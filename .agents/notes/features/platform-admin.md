@@ -22,6 +22,14 @@ Staff-only `/admin` surface for Zevium operators: moderation, quality gates, use
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next-only `/admin/operations` uses realtime paginated cases, evidence, needs-review payments and wallet close states. Server staff checks protect provider adoption/quarantine, retained rejected-final export/recovery, resolve/void (no debit or earnings), same-generation payment retry and drained/no-effect admin abandonment. Actor/reason audit notes are retained. Details expand inline; no list/detail navigation. Legacy remains default.
+
+Code pointers: `apps/web/src/components/operator-console.tsx`; `packages/control-plane-next/convex/operators.ts`; `packages/control-plane-next/convex/admin.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 - **Realtime lists (#363)**: orgs, projects, and transfer operations use native Convex `usePaginatedQuery`; filter/URL changes reset cursors in the same render. Loaded rows update or disappear after mutations without client merge effects, row copies, or forced refetches. `ListBoundary` contains query errors and retries by remounting the subscription. Stock Table, common UTC/money/credits formatters, and HTTP StatusBadge replace local copies. Test-only org-map helpers were removed from `admin-filters.ts`.
 
 ### Implementation notes

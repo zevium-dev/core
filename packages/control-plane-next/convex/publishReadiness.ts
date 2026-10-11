@@ -13,7 +13,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { requireProjectMember } from "./lib/auth";
+import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
 import { isActive } from "./lib/identity";
 export const READINESS_TTL_MS = 15 * 60_000;
 export async function credentialSetFingerprint(
@@ -155,5 +155,13 @@ export const getCurrent = query({
         : null,
       ...(await readinessValidity(ctx, project)),
     };
+  },
+});
+
+export const authorizeTest = internalQuery({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { org } = await requireProjectAdmin(ctx, args.projectId);
+    return { clerkOrgId: org.clerkOrgId };
   },
 });

@@ -1,3 +1,4 @@
+import type { FunctionReturnType } from "convex/server";
 import { StatusBadge } from "#/components/status-badge";
 import { formatDateTime, formatNumber } from "#/lib/format";
 import {
@@ -33,11 +34,9 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
-import type {
-  PlatformStats,
-  AdminUsageView,
-} from "../../../../../convex/admin";
+import type { PlatformStats } from "../../../../../convex/admin";
 
+type AdminUsageView = FunctionReturnType<typeof api.admin.recentUsage>[number];
 export const Route = createFileRoute("/admin/")({
   component: AdminOverviewPage,
   head: () => ({

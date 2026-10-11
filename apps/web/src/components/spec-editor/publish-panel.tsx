@@ -263,6 +263,7 @@ export function PublishPanel({
         </p>
       ) : null}
       <PublishVersionDialog
+        draftHash={confirmedDraftHash}
         projectId={projectId}
         versions={versions}
         canPublish={

@@ -245,6 +245,7 @@ export const identityTables = {
     deprecatedAt: v.optional(v.number()),
     sunsetAt: v.optional(v.number()),
     deprecationMessage: v.optional(v.string()),
+    noticeRevision: v.optional(v.number()),
   })
     .index("by_version", ["projectId", "version"])
     .index("by_project_time", ["projectId", "publishedAt"]),

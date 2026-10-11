@@ -26,6 +26,14 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next inbox/preferences use verified organization context, bounded unread counts and paged mark-all. Resend remains dormant without key; durable per-recipient receipts survive cleanup and revisions. Webhook history/settings are admin-only, secrets use encrypted version-bound envelopes with one-time reveal/grace, workers lease attempts and recover bounded pages. Lifecycle consumer fanout uses successful project-level rollups; deprecation revisions fence older continuations. Component counts: 28 total, including 24 restored for Resend.
+
+Code pointers: `packages/control-plane-next/convex/notifications.ts`; `packages/control-plane-next/convex/notificationEmail.ts`; `packages/control-plane-next/convex/webhooks.ts`; `packages/control-plane-next/convex/lifecycleNotices.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild foundation — 2026-10-11
 
 PR #436 now preserves `notificationPreferences` and permanent `notificationEmailDeliveries` as separate tables in `packages/control-plane-next/convex/schema/read.ts`. Notifications retain email revision/offset and `queued` fanout state. The table budget is 34 application tables; PR 6 owns worker/component integration, with current live behavior unchanged. [Rebuild schema and handoff](../architecture/convex-rebuild.md#pr-1-implementation-and-handoff--2026-10-11).

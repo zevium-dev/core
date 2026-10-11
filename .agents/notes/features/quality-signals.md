@@ -34,6 +34,14 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Replacement quality lives on project snapshots plus `qualityEvents`. At most 24 probes and 100 current-version metered outcomes (sampled at probe completion, at most every five minutes; settlements never write the shared quality/project row); exception rows do not become successful evidence. Lease/version fencing prevents stale probes; three failed checks suspend, three passes restore desired visibility. Historical incidents retain their observed outcome. Existing pinned HTTPS/DNS protection is reused.
+
+Code pointers: `packages/control-plane-next/convex/quality.ts`; `packages/control-plane-next/convex/qualityProbeAction.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 - **Quality state ownership (#355)**: metadata edits and retirement cancellation preserve `qualityStatus`, suspension time/reason, recovery passes, `desiredVisibility`, and `publicationGeneration`. Only the quality workflow restores a suspended listing. Regression coverage: `convex/project-authorization.test.ts` and `convex/project-retirement.test.ts`.
 
 No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-10):

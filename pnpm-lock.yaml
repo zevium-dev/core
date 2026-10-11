@@ -278,6 +278,9 @@ importers:
       '@convex-dev/rate-limiter':
         specifier: ^0.4.2
         version: 0.4.2(@standard-schema/spec@1.1.0)(convex@1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0)(typescript@5.9.3)(zod@4.6.5)
+      '@convex-dev/resend':
+        specifier: ^0.2.9
+        version: 0.2.9(convex-helpers@0.1.128(@standard-schema/spec@1.1.0)(convex@1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0)(typescript@5.9.3)(zod@4.6.5))(convex@1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6))(react@19.3.0)
       '@zevium/shared':
         specifier: workspace:*
         version: link:../shared

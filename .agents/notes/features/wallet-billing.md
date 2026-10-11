@@ -59,6 +59,14 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next cycle summaries use exact finite rollup fan-in. Members see own usage and redacted key references; admin dimensions and member detail are bounded and explicitly partial. The operator preview retries a needs-review generation without resetting applied effects/cursor and exposes guarded stuck-close recovery. Completed reconciliation resolves its payment case. Web defaults to legacy until PR 7.
+
+Code pointers: `packages/control-plane-next/convex/lib/billingRead.ts`; `packages/control-plane-next/convex/operators.ts`; `apps/web/src/lib/control-plane.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild PR 5 — 2026-10-11
 
 `wallets.edgeBootstrapId` fences the durable edge owner before admission; cold wallets can drain before their first call. Negative closes enqueue authenticated wake delivery through `NEXT_GATEWAY_URL`, with cron retry until an actual drain ACK. A wake receipt never grants permission to reclaim.

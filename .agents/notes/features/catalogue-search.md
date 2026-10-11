@@ -45,6 +45,14 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Replacement `catalogue.ts`, `search.ts` and `lib/catalogue.ts` implement scalar-only public DTOs, bounded indexed browse/tag pages, transactional facet counters and fenced query embeddings. Direct anonymous Convex search never spends provider budget; next web uses a trusted server/HMAC boundary, gateway uses org/key budgets. Keyword sort is relevance; other sort modes apply without a keyword. Facets/totals describe the tag/global catalogue, not arbitrary combined-filter totals. Short filtered pages retain continuation cursors. See PR 6 handoff for explicit bounds.
+
+Code pointers: `packages/control-plane-next/convex/catalogue.ts`; `packages/control-plane-next/convex/search.ts`; `packages/shared/src/edge/read.ts`; `apps/web/src/lib/catalogue-search.server.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 ### Isolated rebuild PR 5 review — 2026-10-11
 
 The isolated PR #441 gateway pairing (`apps/gateway/src/next/pipeline.ts`) reads one signed public catalogue manifest for browsing/MCP fallback search. It trusts generation-time public filtering, performs no per-listing route/org RPCs, and cold-fills through the coordinator. A failed fill reports unavailable rather than successful empty results. The web/semantic replacement stays in PR 6. [Gateway PR 5 notes](gateway.md#isolated-rebuild-pr-5--2026-10-11).

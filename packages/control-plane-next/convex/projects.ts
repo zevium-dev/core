@@ -1,3 +1,6 @@
+import { retirementNotice } from "./lifecycleNotices";
+import { fireWebhookEvent } from "./webhooks";
+import { syncCatalogue, adjustStat } from "./lib/catalogue";
 import { paginationOptsValidator } from "convex/server";
 import { v, ConvexError } from "convex/values";
 import { isValidSlug, sha256Hex } from "@zevium/shared";
@@ -120,6 +123,7 @@ export const create = mutation({
         distribution: { one: 0, two: 0, three: 0, four: 0, five: 0 },
       },
     });
+    await adjustStat(ctx, "draft", id, 1);
     await ctx.db.insert("projectDrafts", { projectId: id, text: "", ...draft });
     return projectDto((await ctx.db.get(id))!);
   },
@@ -189,7 +193,19 @@ export const update = mutation({
       .toLowerCase();
     patch.revision = project.revision + 1;
     await ctx.db.patch(project._id, patch);
-    return projectDto((await ctx.db.get(project._id))!);
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+        projectId: project._id,
+        visibility: after.visibility,
+      });
+    await retirementNotice(ctx, project, after);
+    if (after.discoverable)
+      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
+        projectId: after._id,
+      });
+    return projectDto(after);
   },
 });
 async function retireProject(ctx: MutationCtx, project: Doc<"projects">) {
@@ -235,6 +251,7 @@ async function retireProject(ctx: MutationCtx, project: Doc<"projects">) {
       cleanupPhase: "complete",
     },
   });
+  await syncCatalogue(ctx, project, (await ctx.db.get(project._id))!);
 }
 export const retire = internalMutation({
   args: { projectId: v.id("projects") },
@@ -300,7 +317,19 @@ export const scheduleRetirement = mutation({
       internal.projects.retireScheduled,
       { projectId: project._id, revision },
     );
-    return projectDto((await ctx.db.get(project._id))!);
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+        projectId: project._id,
+        visibility: after.visibility,
+      });
+    await retirementNotice(ctx, project, after);
+    if (after.discoverable)
+      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
+        projectId: after._id,
+      });
+    return projectDto(after);
   },
 });
 export const cancelRetirement = mutation({
@@ -318,7 +347,19 @@ export const cancelRetirement = mutation({
         project.visibility === "public" &&
         project.qualityStatus === "active",
     });
-    return projectDto((await ctx.db.get(project._id))!);
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+        projectId: project._id,
+        visibility: after.visibility,
+      });
+    await retirementNotice(ctx, project, after);
+    if (after.discoverable)
+      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
+        projectId: after._id,
+      });
+    return projectDto(after);
   },
 });
 export const retireScheduled = internalMutation({

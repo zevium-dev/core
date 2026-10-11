@@ -105,7 +105,7 @@ export function useSpecDraft({
         hash: result.draftHash ?? null,
         savedAt: result.lastSavedAt,
       };
-      if (result.conflict) {
+      if ("conflict" in result && result.conflict) {
         dispatch({ type: "conflict", snapshot });
         return;
       }

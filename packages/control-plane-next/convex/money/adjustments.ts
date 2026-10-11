@@ -224,7 +224,10 @@ export async function reconcilePaymentPage(
       )
       .paginate({ numItems: FINANCE_PAGE_SIZE, cursor: job.cursor ?? null });
     for (const row of page.page)
-      if (row.rowKind === "case" && row.kind === "publisher_hold")
+      if (
+        row.rowKind === "case" &&
+        (row.kind === "publisher_hold" || row.kind === "payment")
+      )
         await ctx.db.patch(row._id, {
           status: "resolved",
           updatedAt: Date.now(),

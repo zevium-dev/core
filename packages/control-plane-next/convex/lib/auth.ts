@@ -86,3 +86,25 @@ export async function requireSpecVersionAdmin(
   const result = await requireProjectAdmin(ctx, version.projectId);
   return { ...result, version };
 }
+
+export async function requireOrgMemberBySlug(
+  ctx: Pick<QueryCtx, "auth" | "db">,
+  _slug: string,
+) {
+  return requireActiveOrg(ctx);
+}
+export async function isAdmin(ctx: Pick<QueryCtx, "auth">) {
+  const identity = await ctx.auth.getUserIdentity();
+  return (
+    !!identity &&
+    (process.env.ADMIN_USER_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .includes(identity.subject)
+  );
+}
+export async function requireAdmin(ctx: Pick<QueryCtx, "auth">) {
+  if (!(await isAdmin(ctx))) throw new ConvexError("Staff access required");
+  return requireIdentity(ctx);
+}

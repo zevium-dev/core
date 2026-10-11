@@ -17,6 +17,14 @@ Verified ratings and reviews on API detail pages. Only a consumer organization t
 
 ## Tech
 
+### Isolated rebuild PR 6 — 2026-10-11
+
+**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
+
+Next reviews admit any active admin/member consumer org with at least one successful lifetime call, including free calls. Own publisher and non-success-only callers are denied. Hidden edits stay hidden. Moderation checks content revision and generation, stores immutable display snapshots, and resolves reports in bounded old-generation pages.
+
+Code pointers: `packages/control-plane-next/convex/reviews.ts`; `packages/control-plane-next/convex/schema/read.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
+
 TECH.md has no reviews-specific bullet. Review eligibility + publisher responses drive the signed-in provider split in the **Navigation providers** bullet, kept verbatim in [catalogue-search](catalogue-search.md#tech).
 
 Code facts (read from source 2026-10-10, not from TECH.md):

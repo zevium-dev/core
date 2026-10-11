@@ -41,6 +41,7 @@ export const readTables = {
         updatedAt: v.number(),
         kind: v.literal("query"),
         queryHash: v.string(),
+        leaseToken: v.string(),
         expiresAt: v.number(),
         dimensions: v.literal(768),
       }),
@@ -114,6 +115,19 @@ export const readTables = {
         state: v.union(v.literal("open"), v.literal("closed")),
         closedAt: v.optional(v.number()),
         reason: v.string(),
+        lastOutcome: v.union(
+          ...(
+            [
+              "healthy",
+              "http_error",
+              "network_error",
+              "timeout",
+              "blocked_target",
+              "dns_error",
+              "tls_error",
+            ] as const
+          ).map(v.literal),
+        ),
         failureCount: v.number(),
         recoveryPasses: v.number(),
       }),
@@ -191,6 +205,17 @@ export const readTables = {
         ),
         reason: v.string(),
         snapshot: content,
+        display: v.object({
+          createdAt: v.number(),
+          projectName: v.string(),
+          publisherName: v.string(),
+          response: v.union(
+            v.null(),
+            v.object({ body: v.string(), updatedAt: v.number() }),
+          ),
+          reportCount: v.number(),
+          reports: v.array(v.object({ reason: v.string(), at: v.number() })),
+        }),
       }),
       v.object({
         reviewId: v.id("reviews"),

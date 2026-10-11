@@ -226,6 +226,7 @@ export function connectedAccountDisplay(
 export type EarningStatus =
   | "pending_risk"
   | "available"
+  | "released"
   | "allocated_to_transfer"
   | "transferred"
   | "paid"
@@ -238,6 +239,8 @@ export function earningStatusLabel(status: EarningStatus): string {
       return "Pending risk review";
     case "available":
       return "Available";
+    case "released":
+      return "Risk hold released";
     case "allocated_to_transfer":
       return "Transfer in progress";
     case "transferred":
@@ -260,6 +263,7 @@ export function earningStatusVariant(status: EarningStatus): BadgeVariant {
     case "failed":
       return "destructive";
     case "pending_risk":
+    case "released":
     case "available":
     case "allocated_to_transfer":
       return "outline";

@@ -56,7 +56,7 @@ import {
 
 type ConnectedPayout = {
   id: string;
-  status: "pending" | "paid" | "failed" | "canceled";
+  status: "pending" | "in_transit" | "paid" | "failed" | "canceled";
   amount: number;
   currency: string;
   failureCode?: string;
@@ -357,6 +357,7 @@ function EarningsLedgerCard({
     status:
       | "pending_risk"
       | "available"
+      | "released"
       | "allocated_to_transfer"
       | "transferred"
       | "reversed"

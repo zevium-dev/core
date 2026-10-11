@@ -1,3 +1,4 @@
+import { cycleBreakdown as readCycleBreakdown } from "./lib/billingRead";
 import {
   financePage,
   FINANCE_PAGE_INTERVAL_MS,
@@ -459,7 +460,13 @@ export const getBillingState = query({
     return {
       access,
       wallet: { balance: wallet?.balance ?? 0 },
-      packs: access.capabilities.manageBilling ? CREDIT_PACKS : [],
+      packs: access.capabilities.manageBilling
+        ? CREDIT_PACKS.map((p) => ({
+            packId: p.id,
+            priceCents: p.amount,
+            credits: p.credits,
+          }))
+        : [],
       checkout,
       payments: payments.map((p) => ({
         id: p._id,
@@ -474,4 +481,9 @@ export const getBillingState = query({
       })),
     };
   },
+});
+
+export const cycleBreakdown = query({
+  args: { orgSlug: v.string() },
+  handler: readCycleBreakdown,
 });
