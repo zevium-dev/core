@@ -9,6 +9,11 @@ export default defineConfig({
       // fixtures configure their own sources; empty bindings keep runs hermetic.
       miniflare: {
         bindings: {
+          NEXT_DEPLOYMENT_ID: "next-fixture",
+          NEXT_ADMISSION_KEYS: JSON.stringify({
+            current: "k1",
+            keys: { k1: "test-only-secret-never-use-in-production" },
+          }),
           CLERK_SECRET_KEY: "",
           CONVEX_URL: "",
           GATEWAY_INTERNAL_SECRET: "test-admission-secret",

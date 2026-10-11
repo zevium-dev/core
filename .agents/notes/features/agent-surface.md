@@ -47,6 +47,10 @@ Item 4 (machine-native payments, x402): [machine-payments](machine-payments.md).
 
 ## Tech
 
+### Isolated rebuild PR 5 — 2026-10-11
+
+The opt-in next pairing routes API-key and configured OAuth MCP calls through the same source-backed admission/finalization path as HTTP. Existing forwarder/MCP preparation preserves the 1 MiB refund boundary. OAuth provider/JWKS/identity refresh runs only in `EdgeOAuthDO` alarms; token storage is encrypted, authority lasts at most 30 seconds and never beyond token expiry. Catalogue fallback uses signed complete manifests plus fresh public route/org state; semantic-search pairing remains PR 6. No token/x402/capability execution is enabled. Code: `apps/gateway/src/next/{oauth,pipeline,snapshots}.ts`; [PR 5 handoff](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11).
+
 ### Accepted changes — implementation pending (2026-10-11)
 
 P0 #428 coordinates the shared spec converter; #110 already owns listing-scoped MCP schemas, #350 remains P2 SDK work. #425 must hide token listings from discovery/docs/tools and prevent execution. #424 must gate x402 offers/proofs/sessions on HTTP and MCP. These are pending code changes; current implementation details below are retained.

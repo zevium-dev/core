@@ -1,6 +1,6 @@
 # Gateway (metered call path)
 
-> Status: built; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
+> Status: built; isolated rebuild PR 5 pairing implemented behind `CONTROL_PLANE_MODE=next`; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
 > Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/gateway/src/index.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/admit.ts`, `packages/shared/src/admission-proof.ts`, `convex/specs.ts`, `convex/wallets.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/finalize.ts`, `apps/gateway/src/cache.ts`, `apps/gateway/src/convex-http.ts`, `apps/gateway/src/headers.ts`, `apps/gateway/src/idempotency.ts`, `apps/gateway/src/cors.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/errors.ts`, `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/spec-source.ts`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/usage.ts`, `packages/shared/src/pricing-policy.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -38,6 +38,10 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. When the machine rail is explicitly enabled and configured, the envelope also carries x402 V2 top-up requirements. Verified payment returns a payer-bound session. (FLOW 3.4; owned by [machine-payments](machine-payments.md))
 
 ## Tech
+
+### Isolated rebuild PR 5 — 2026-10-11
+
+`CONTROL_PLANE_MODE=next` selects signed 30-second edge authority and source-backed SQLite admissions/finals; default deployments retain the current path until PR 7. Snapshot/OAuth/wallet alarms own control-plane and provider I/O. Direct calls stream through the existing forwarder; MCP retains bounded buffering before finalization. Key revocation, encrypted route headers, contiguous drain ACKs, exception recovery and append-only DO migration details live in the [PR 5 handoff](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11). Code: `apps/gateway/src/next/`, `packages/shared/src/edge/`, `packages/control-plane-next/convex/{edgeSnapshots,edgeMaintenance,http}.ts`. Tests: `apps/gateway/scripts/next-acceptance.mjs`, `test/next-wallet.test.ts`, next `tests/edge.test.ts`. Token execution, capability routing and x402 stay unavailable in this pairing.
 
 ### Accepted changes — implementation pending (2026-10-11)
 

@@ -1,3 +1,9 @@
+import {
+  sealProjection,
+  readRing,
+  projection,
+} from "@zevium/shared/edge/replication";
+import { drainAck } from "../contracts/snapshots";
 import { stripeWebhook } from "./stripeEvents";
 import { recordUsageBatch } from "./wallets";
 import { ingestUsage } from "../contracts/settlement";
@@ -174,4 +180,127 @@ for (const [path, destination] of [
   ["/stripe-connect-v2-webhook", "v2"],
 ] as const)
   router.route({ path, method: "POST", handler: stripeWebhook(destination) });
+for (const path of ["/edge-snapshot", "/wallet-grants"])
+  router.route({
+    path,
+    method: "GET",
+    handler: httpAction(async (ctx, request) => {
+      if (
+        !(await validInternalSecret(
+          request.headers.get("x-internal-secret"),
+          process.env.GATEWAY_INTERNAL_SECRET,
+        ))
+      )
+        return new Response("Unauthorized", { status: 401 });
+      try {
+        const params = new URL(request.url).searchParams;
+        const kind = projection.shape.kind.parse(
+          path === "/wallet-grants" ? "wallet" : params.get("kind"),
+        );
+        const scope = text.parse(params.get("scope")),
+          nonce = text.parse(params.get("nonce"));
+        const result = await ctx.runQuery(internal.edgeSnapshots.read, {
+          kind,
+          scope,
+          ...(params.has("cursor")
+            ? {
+                cursor: z.string().min(1).max(8192).parse(params.get("cursor")),
+              }
+            : {}),
+        });
+        return Response.json(
+          await sealProjection(
+            {
+              ...result,
+              kind,
+              scope,
+              nonce,
+              revision: result.generatedAt,
+              deploymentId: process.env.NEXT_DEPLOYMENT_ID!,
+            },
+            readRing(process.env.NEXT_SNAPSHOT_KEYS),
+          ),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return new Response("Snapshot unavailable", { status: 503 });
+      }
+    }),
+  });
+router.route({
+  path: "/wallet-activate",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (
+      !(await validInternalSecret(
+        request.headers.get("x-internal-secret"),
+        process.env.GATEWAY_INTERNAL_SECRET,
+      ))
+    )
+      return new Response("Unauthorized", { status: 401 });
+    try {
+      const args = await readBoundedJson(
+        request,
+        z.strictObject({
+          clerkOrgId: text,
+          bootstrapId: text,
+          deploymentId: text,
+        }),
+        16_384,
+      );
+      await ctx.runMutation(internal.edgeSnapshots.activate, args);
+      return new Response(null, { status: 204 });
+    } catch {
+      return new Response("Activation unavailable", { status: 503 });
+    }
+  }),
+});
+router.route({
+  path: "/wallet-drain",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (
+      !(await validInternalSecret(
+        request.headers.get("x-internal-secret"),
+        process.env.GATEWAY_INTERNAL_SECRET,
+      ))
+    )
+      return new Response("Unauthorized", { status: 401 });
+    try {
+      const ack = await readBoundedJson(request, drainAck, 16_384);
+      return Response.json(
+        await ctx.runMutation(internal.wallets.ackDrain, {
+          ackJson: JSON.stringify(ack),
+        }),
+      );
+    } catch {
+      return new Response("Drain unavailable", { status: 503 });
+    }
+  }),
+});
+router.route({
+  path: "/mcp-identity",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (
+      !(await validInternalSecret(
+        request.headers.get("x-internal-secret"),
+        process.env.GATEWAY_INTERNAL_SECRET,
+      ))
+    )
+      return new Response("Unauthorized", { status: 401 });
+    try {
+      const args = await readBoundedJson(
+        request,
+        z.strictObject({ userId: text, orgId: text }),
+        16_384,
+      );
+      return Response.json(
+        await ctx.runQuery(internal.keySettings.resolveMcpIdentity, args),
+      );
+    } catch {
+      return new Response("Identity unavailable", { status: 503 });
+    }
+  }),
+});
 export default router;

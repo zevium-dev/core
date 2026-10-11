@@ -21,9 +21,13 @@ Publishers store the credentials their upstream API requires; the gateway attach
 
 ## Tech
 
+### Isolated rebuild PR 5 — 2026-10-11
+
+Private signed routes carry AES-GCM transport envelopes bound to deployment/project/revision/key version. `NEXT_TRANSPORT_KEYS` is independent of snapshot signing, request authentication and stored-credential encryption. Only the executing Worker decrypts route headers; public projections omit them, and coordinator storage never keeps plaintext. Code: `packages/shared/src/edge/replication.ts`, next `convex/edgeSnapshots.ts`, gateway `src/next/pipeline.ts`. Transport AAD/rotation tests live in next `tests/edge.test.ts`.
+
 ### Isolated rebuild PR 2 — 2026-10-11
 
-Next stores one required `aes-gcm-aad-v1` envelope, with canonical versioned 32-byte key material and AAD binding purpose, project/header, monotonic generation and key version. Delete/recreate cannot reuse a generation. Limit 32 headers per project; metadata APIs return no envelope/plaintext. Credential writes invalidate readiness and increment project revision. Code: `packages/control-plane-next/convex/upstreamCredentials.ts`, `lib/credentialCrypto.ts`, `tests/publishing.test.ts`. Gateway decryption/snapshot delivery remains PR 5.
+Next stores one required `aes-gcm-aad-v1` envelope, with canonical versioned 32-byte key material and AAD binding purpose, project/header, monotonic generation and key version. Delete/recreate cannot reuse a generation. Limit 32 headers per project; metadata APIs return no envelope/plaintext. Credential writes invalidate readiness and increment project revision. Code: `packages/control-plane-next/convex/upstreamCredentials.ts`, `lib/credentialCrypto.ts`, `tests/publishing.test.ts`. Gateway decryption/snapshot delivery is implemented by isolated PR 5 above.
 
 **Dogfood — 2026-10-10**
 

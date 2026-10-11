@@ -1,9 +1,14 @@
+import { readRing } from "@zevium/shared/edge/replication";
 import { ConvexError } from "convex/values";
 import { parseSpec, matchOperation } from "@zevium/shared";
 import type { MutationCtx } from "../_generated/server";
 import type { Id, TableNames } from "../_generated/dataModel";
 import { settlement, type Settlement } from "../../contracts/settlement";
-import { fingerprint, verifyAdmission } from "../../contracts/transport";
+import {
+  fingerprint,
+  verify,
+  verifyAdmission,
+} from "../../contracts/transport";
 import { appendWalletEntry, facts, getWallet } from "./walletLedger";
 import { consumeSlices, validateSlices, type Slice } from "./lots";
 import { recordEarnings, recordRollups } from "./rollups";
@@ -34,7 +39,14 @@ export async function settleOne(
   if (!parsed.success) return reject("invalid", "Invalid settlement");
   const event = parsed.data,
     now = Date.now();
-  const secret = process.env.NEXT_ADMISSION_SECRET;
+  const ring = process.env.NEXT_ADMISSION_KEYS
+    ? readRing(process.env.NEXT_ADMISSION_KEYS)
+    : null;
+  const secret = ring
+    ? event.admissionKeyId && Object.hasOwn(ring.keys, event.admissionKeyId)
+      ? ring.keys[event.admissionKeyId]
+      : undefined
+    : process.env.NEXT_ADMISSION_SECRET;
   if (!secret || !process.env.NEXT_DEPLOYMENT_ID)
     return reject(event.settleRefId, "Settlement unavailable", true);
   if (
@@ -42,6 +54,20 @@ export async function settleOne(
     !(await verifyAdmission(event, secret))
   )
     return reject(event.settleRefId, "Admission evidence rejected");
+  if (event.admissionKeyId && !ring)
+    return reject(event.settleRefId, "Settlement unavailable", true);
+  if (ring) {
+    const { finalFingerprint, ...final } = event;
+    if (
+      !finalFingerprint ||
+      !(await verify(
+        { purpose: "final:v2", facts: final },
+        finalFingerprint,
+        secret,
+      ))
+    )
+      return reject(event.settleRefId, "Final evidence rejected");
+  }
   const immutableFingerprint = await fingerprint(facts(event));
   const prior = await ctx.db
     .query("usageEvents")
@@ -77,6 +103,15 @@ export async function settleOne(
       event.settleRefId,
       "Finalization sequence gap",
       event.edgeSequence > wallet.settledThroughEdgeSequence + 1,
+    );
+  if (event.recoveryUnknown)
+    return recordException(
+      ctx,
+      event,
+      wallet,
+      immutableFingerprint,
+      now,
+      "Worker lost final outcome during restart",
     );
   // Only explicit evidence failures become exceptions. Infrastructure failures roll back/retry.
   let evidence: Awaited<ReturnType<typeof validateEvidence>>;
