@@ -336,6 +336,86 @@
       "reason": "Legacy job/command contract removed; replacement domain owns indexed durable state and v2 guards. Actual web and gateway callers compile against generated replacement bindings."
     },
     {
+      "name": "connections:activate",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:beginRefresh",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:claimByState",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:cleanup",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:completeRefresh",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:createPending",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:fail",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:getForOrg",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:listForOrg",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:prepareStart",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:revoke",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:scheduleRenewals",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connections:selectForGateway",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connectionsNode:completeAuthorization",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connectionsNode:refresh",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
+      "name": "connectionsNode:revokeAtProvider",
+      "status": "retired",
+      "reason": "Connected accounts are not on the next control plane yet; the next gateway refuses connection-required operations with 503 at 0 credits. Port tracked in #448."
+    },
+    {
       "name": "cronTasks:checkLowBalances",
       "status": "replaced",
       "targets": [],
