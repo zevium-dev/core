@@ -92,6 +92,10 @@ export async function recordEarnings(
         clawedBackGrossCredits: 0,
         clawedBackAtoms: 0,
         releasedAtoms: 0,
+        releaseAfter:
+          Date.parse(`${day}T00:00:00.000Z`) +
+          86400000 +
+          PUBLISHER_RISK_HOLD_MS,
         availableAt:
           Date.parse(`${day}T00:00:00.000Z`) +
           86400000 +

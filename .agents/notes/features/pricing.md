@@ -78,6 +78,10 @@ Pricing has no screen of its own; it surfaces in other features:
 
 ## Tech
 
+### Isolated PR 4 fee facts — 2026-10-11
+
+Replacement Checkout (`packages/control-plane-next/convex/billing.ts`) keeps face value, estimated/charged fee, actual processor fee and actual-minus-charged variance separate. The optional fee line is default-off under #318. Credits track principal only; refunds include every paid cent with cumulative proportional principal/fee allocation and no customer true-up. This is isolated backend behavior; PR 6 owns paired screens and PR 7 owns cutover. [Implementation](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11).
+
 ### Accepted changes — implementation pending (2026-10-11)
 
 P0 #425 must hide and block per-token LLM listings while retaining #329 code. Token behavior below describes that retained implementation, not approval to launch it. P2 #431 owns revival, precision and unresolved usage reconciliation. Fixed-price no-debt rules and current exchange rate remain unchanged.

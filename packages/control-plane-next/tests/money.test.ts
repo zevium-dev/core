@@ -1004,6 +1004,25 @@ describe("dust moves and exact restoration", () => {
       await t.run((ctx) => ctx.db.query("walletEntries").collect())
     ).find((e) => e.kind === "expiry");
     expect(expiry).toMatchObject({ amount: -100, breakageCredits: 100 });
+    await t.mutation(internal.wallets.restoreDecrease, {
+      walletId: f.walletId,
+      ref: again.closeId!,
+      closeId: "expired-restore",
+    });
+    const breakage = await t.run((ctx) =>
+      ctx.db.query("usageRollups").collect(),
+    );
+    for (const kind of ["daily", "lifetime"] as const) {
+      expect(
+        breakage
+          .filter((r) => r.kind === kind && r.scope === "platform")
+          .reduce(
+            (sum, r) =>
+              sum + ("breakageAtoms" in r ? (r.breakageAtoms ?? 0) : 0),
+            0,
+          ),
+      ).toBe(1000000);
+    }
     expect(
       await t.run((ctx) => ctx.db.query("publisherEarnings").collect()),
     ).toEqual([]);

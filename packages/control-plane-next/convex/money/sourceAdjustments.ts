@@ -1,3 +1,4 @@
+import { recordBreakage } from "./financialRollups";
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -136,7 +137,10 @@ export async function restoreSource(
     .query("walletEntries")
     .withIndex("by_ref", (q) => q.eq("refId", refId))
     .unique();
-  if (prior)
+  if (prior) {
+    await ctx.db.patch(entry._id, {
+      restoredAt: entry.restoredAt ?? Date.now(),
+    });
     return appendWalletEntry(
       ctx,
       {
@@ -153,6 +157,7 @@ export async function restoreSource(
       },
       lot.sourceKind === "promo" ? amount : 0,
     );
+  }
   const wallet = await requireDrained(ctx, entry.walletId, closeId);
   if (
     entry.adjustment.kind === "admin"
@@ -188,6 +193,7 @@ export async function restoreSource(
     lot.sourceKind === "promo" ? amount : 0,
   );
   if (!result.applied) return result;
+  await ctx.db.patch(entry._id, { restoredAt: Date.now() });
   const expired = lot.expiresAt !== undefined && lot.expiresAt <= Date.now();
   await ctx.db.patch(lot._id, {
     reversedCredits: add(lot.reversedCredits, -amount),
@@ -201,7 +207,7 @@ export async function restoreSource(
     expiredCredits: add(source.expiredCredits, expired ? amount : 0),
     state: expired ? "expired" : "available",
   });
-  if (expired)
+  if (expired) {
     await appendWalletEntry(
       ctx,
       {
@@ -215,6 +221,8 @@ export async function restoreSource(
       },
       lot.sourceKind === "promo" ? -amount : 0,
     );
+    await recordBreakage(ctx, `expiry:${refId}`, amount);
+  }
   return { ...result, wallet: await getWallet(ctx, entry.walletId) };
 }
 export async function adminEntries(

@@ -22,16 +22,24 @@ export async function requestClose(
       throw new ConvexError("Closure facts changed");
     return wallet;
   }
-  if (wallet.gateState !== "open")
+  if (wallet.gateState !== "open" && wallet.gateState !== "closed")
     throw new ConvexError("Wallet maintenance in progress");
   await ctx.db.patch(walletId, {
-    gateState: "closing",
+    gateState: wallet.gateState === "closed" ? "maintenance" : "closing",
     gateRevision: add(wallet.gateRevision, 1),
     close: {
       id,
       reason,
       requestedAt: Date.now(),
       ...(command ? { command } : {}),
+      ...(wallet.gateState === "closed"
+        ? {
+            fromClosed: true,
+            edgeFinalSequence: wallet.settledThroughEdgeSequence,
+            settledThrough: wallet.settledThroughEdgeSequence,
+            ackAt: Date.now(),
+          }
+        : {}),
     },
   });
   return getWallet(ctx, walletId);
@@ -92,7 +100,7 @@ export async function requireDrained(
 ) {
   const wallet = await getWallet(ctx, walletId);
   if (
-    wallet.gateState !== "closing" ||
+    (wallet.gateState !== "closing" && wallet.gateState !== "maintenance") ||
     wallet.close?.id !== closeId ||
     wallet.close.ackAt === undefined ||
     wallet.close.edgeFinalSequence !== wallet.settledThroughEdgeSequence ||
@@ -113,7 +121,10 @@ export async function finishClose(
     epoch: add(wallet.epoch, 1),
     gateRevision: add(wallet.gateRevision, 1),
     gateState:
-      !org || org.archivedAt !== undefined || wallet.close?.reason === "archive"
+      wallet.close?.fromClosed ||
+      !org ||
+      org.archivedAt !== undefined ||
+      wallet.close?.reason === "archive"
         ? "closed"
         : "open",
     settledThroughEdgeSequence: 0,

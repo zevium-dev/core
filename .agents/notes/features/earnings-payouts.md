@@ -1,8 +1,8 @@
 # Earnings & payouts
 
 > Status: #398 fixed; partial (#363 list/presentation fixes complete) (P2 — built ahead of tag on Stripe Connect; settlement schedule + statement export absent); daily risk buckets accepted for rebuild #353 · Updated: 2026-10-11
-> Rebuild status: isolated PR 3 settlement projection, wider total shards and same-org promo protection implemented; production reads and cutover unchanged.
-> Code: `packages/control-plane-next/convex/money/rollups.ts`, `convex/earnings.ts`, `convex/payouts.ts`, `convex/accounting.ts`, `convex/billing.ts` (publisher reconciliation), `convex/admin.ts` (`retryPublisherTransfer`), `convex/http.ts` (`/stripe-connect-webhook`, `/stripe-connect-v2-webhook`), `packages/shared/src/connect-countries.ts`, `apps/web/src/routes/app/earnings.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/lib/format.ts`, `convex/earnings.test.ts`
+> Rebuild status: isolated PR 3 settlement projection, wider total shards and same-org promo protection implemented; isolated PR 4 risk release, pending-first/newest-first publisher clawbacks, bounded restoration, transfer recovery and Connect/payout projection implemented; production reads and cutover unchanged.
+> Code: `packages/control-plane-next/convex/money/{rollups,adjustments,publisherLedger}.ts`, `convex/earnings.ts`, `convex/payouts.ts`, `convex/accounting.ts`, `convex/billing.ts` (publisher reconciliation), `convex/admin.ts` (`retryPublisherTransfer`), `convex/http.ts` (`/stripe-connect-webhook`, `/stripe-connect-v2-webhook`), `packages/shared/src/connect-countries.ts`, `apps/web/src/routes/app/earnings.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/lib/format.ts`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [pricing](pricing.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
 > Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
@@ -33,11 +33,25 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 
 ## Tech
 
+PR #439 throughput hardening: isolated rebuild earning release and payment restoration/clawback share `packages/control-plane-next/convex/money/throughput.ts` admission (ten pages/second, 128 KiB full-document writes per page). Release discovery spaces workers/continuations; deployment throughput errors retry after two seconds without opening corruption cases. Existing release leases remain cron-recoverable if scheduling fails. [Budget and CI scale validation](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11).
+
+### Isolated rebuild PR 4 — 2026-10-11
+
+`packages/control-plane-next/convex/money/{publisherLedger,financialRollups,transfers,adjustments,reconciliationCases}.ts` and `{payouts,connect,stripeEvents}.ts` implement daily risk release, source-specific 95/5 reversals/restoration, whole-cent transfer allocation, provider outcome recovery and separate bank payout projection. Publisher balances change on ledger transitions, never per settled call. Earned gross/net stay immutable; held + released + reversed equals earned. Already-paid clawbacks can make publisher available balance negative. Payment-specific reconciliation holds block transfers from temporary restoration balances.
+
+PR #439 uses `publisherEarnings.by_payment_state_day` to drain pending buckets newest-first before released buckets newest-first, across publishers while preserving payment attribution. Wallet/publisher reversals carry restoration markers; `by_unrestored` scans only outstanding journals. Status-only refund/dispute updates create no new reconciliation generation. Multi-publisher/payment tests verify original-source, 95/5, and publisher journal conservation.
+
+Review defaults **pending owner sign-off**: A — the pending-first/newest-first order above; B — `needs_review` keeps the entire consumer wallet frozen for now (PR 6 operator UI), with P1 [#440](https://github.com/zevium-dev/core/issues/440) to lock only the bad payment's sources; C — accept the remaining window in which released earnings transfer before a refund clawback reaches them. The seven-day hold covers most exposure; it cannot guarantee recovery from already transferred money. [Proposed defaults](../decisions/2026-10-11-payment-review-defaults.md).
+
+Daily `netAtoms` remains execution analytics, **not releasable money**. Release uses earning inventory and acceptance-day pending risk; total shards remain 128 and project shards use modulo 16. Corrupt releases are isolated. Unknown transfer outcomes retain allocation beyond the 23-hour safe replay window; paged candidate evidence requires review. Accounts v2 creation has its own 29-day replay policy and retains unresolved operation PII. Connected-account and payout projections reject stale revision completions. Bank payout status never moves wallet/publisher money. House orgs use this same path.
+
+All replacement Stripe calls are test-mode-only. No live destination/caller changed. [PR 4 complete handoff and safe interpretations](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11).
+
 Isolated PR #438 review: original-source/day earnings and publisher-total/platform rollups use 128 shards; publisher project/endpoint and consumer dimensions retain 16. Same-org promo slices keep gross attribution with zero publisher net/fee and explicit promo cost. Paid/admin and unrelated-org promo retain 95/5. Daily net is not releasable inventory; PR 4 releases from earnings and acceptance-day pending risk, mapping earning shards modulo 16 for project totals. [Proposed promo policy](../decisions/2026-10-11-promo-self-consumption.md) awaits owner sign-off.
 
 ### Isolated rebuild PR 3 — 2026-10-11
 
-Settlement now creates 16-shard original-source daily buckets with exact 95/5 atoms, acceptance-day end + seven-day availability, and transactional pending-risk rollups. It never writes publisherBalances per call. Risk release, payment clawbacks and transfers remain PR 4. [Implementation and handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
+Settlement now creates 128-shard original-source daily buckets with exact 95/5 atoms, acceptance-day end + seven-day availability, and transactional pending-risk rollups. It never writes publisherBalances per call. PR 4 implements risk release, payment clawbacks and transfers below. [Implementation and handoff](../architecture/convex-rebuild.md#pr-3-implementation-and-handoff--2026-10-11).
 
 ### Isolated rebuild foundation — 2026-10-11
 
@@ -81,6 +95,8 @@ Connect webhook subscriptions (`/stripe-connect-webhook` payout events, `/stripe
 - Transfers are org-admin-initiated (`payouts.initiatePublisherTransfer` from `/app/earnings`), not scheduled; onboarding via `payouts.startOnboarding` / `refreshOnboarding` / `replaceClosedAccount`
 
 ## Decisions
+
+- [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off; follow-up #440.
 
 - 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 

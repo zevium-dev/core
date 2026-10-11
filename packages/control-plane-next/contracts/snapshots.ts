@@ -15,7 +15,7 @@ export const envelope = z.strictObject({
   keyVersion: identity,
   format: z.literal("aes-gcm-aad-v1"),
 });
-const gate = z.enum(["open", "closing", "closed"]);
+const gate = z.enum(["open", "closing", "closed", "maintenance"]);
 /** Preserve the current gateway catalogue fields; pricing remains scalar. */
 export const catalogueListing = z.strictObject({
   projectId: identity,
@@ -115,7 +115,8 @@ export const checkpoint = z
       c.validUntil > c.generatedAt &&
       c.validUntil - c.generatedAt <= EXECUTABLE_AUTHORITY_MS &&
       c.lots.every((l) => l.walletId === c.walletId) &&
-      (c.gateState !== "closing" || c.closeId !== undefined),
+      (!["closing", "maintenance"].includes(c.gateState) ||
+        c.closeId !== undefined),
     "Invalid wallet authority",
   );
 const snapshotBase = {

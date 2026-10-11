@@ -14,4 +14,34 @@ for (const state of ["pending", "moving"] as const)
     internal.wallets.recoverMerges,
     { state, cursor: null },
   );
+crons.interval(
+  "recover Stripe receipts",
+  { minutes: 1 },
+  internal.stripeEvents.recover,
+  {},
+);
+crons.interval(
+  "reconcile payment sources",
+  { minutes: 1 },
+  internal.billing.recoverAdjustments,
+  {},
+);
+crons.interval(
+  "release earning buckets",
+  { minutes: 1 },
+  internal.payouts.releaseDue,
+  {},
+);
+crons.interval(
+  "recover publisher transfers",
+  { minutes: 1 },
+  internal.payouts.recoverTransfers,
+  {},
+);
+crons.interval(
+  "recover Connect operations",
+  { minutes: 1 },
+  internal.connect.recover,
+  {},
+);
 export default crons;

@@ -79,6 +79,7 @@ export const settlementTables = {
         grossCredits: v.number(),
         netAtoms: v.number(),
         promoCostAtoms: v.optional(v.number()),
+        breakageAtoms: v.optional(v.number()),
         pendingRiskAtoms: v.number(),
         reversedAtoms: v.number(),
         failedAtoms: v.number(),
@@ -110,6 +111,7 @@ export const settlementTables = {
         grossCredits: v.number(),
         netAtoms: v.number(),
         promoCostAtoms: v.optional(v.number()),
+        breakageAtoms: v.optional(v.number()),
         pendingRiskAtoms: v.number(),
         reversedAtoms: v.number(),
         failedAtoms: v.number(),
@@ -170,6 +172,7 @@ export const settlementTables = {
     clawedBackAtoms: v.number(),
     releasedAtoms: v.number(),
     availableAt: v.number(),
+    releaseAfter: v.optional(v.number()),
     state: v.union(v.literal("pending"), v.literal("released")),
     adjustmentGeneration: v.number(),
     createdAt: v.number(),
@@ -183,7 +186,9 @@ export const settlementTables = {
       "shard",
     ])
     .index("by_payment", ["paymentId", "day"])
+    .index("by_payment_state_day", ["paymentId", "state", "day"])
     .index("by_due", ["state", "availableAt"])
+    .index("by_release", ["state", "releaseAfter"])
     .index("by_publisher_day", ["publisherOrganizationId", "day"]),
   publisherBalances: defineTable({
     publisherOrganizationId: v.id("organizations"),
@@ -191,6 +196,7 @@ export const settlementTables = {
     allocatedAtoms: v.number(),
     paidAtoms: v.number(),
     reversedAtoms: v.number(),
+    failedAtoms: v.optional(v.number()),
     sequence: v.number(),
     transferSequence: v.number(),
     updatedAt: v.number(),
@@ -199,6 +205,8 @@ export const settlementTables = {
     publisherOrganizationId: v.id("organizations"),
     refId: v.string(),
     sequence: v.number(),
+    immutableFingerprint: v.optional(v.string()),
+    reversedDeltaAtoms: v.optional(v.number()),
     kind: v.union(
       v.literal("release"),
       v.literal("allocate"),
@@ -215,6 +223,7 @@ export const settlementTables = {
     transferId: v.optional(v.id("publisherTransfers")),
     paymentId: v.optional(v.id("payments")),
     adjustmentId: v.optional(v.id("paymentAdjustments")),
+    restoredAt: v.optional(v.number()),
     grossReversedCredits: v.optional(v.number()),
     platformDeltaAtoms: v.optional(v.number()),
     createdAt: v.number(),
@@ -222,6 +231,8 @@ export const settlementTables = {
     .index("by_ref", ["refId"])
     .index("by_publisher_sequence", ["publisherOrganizationId", "sequence"])
     .index("by_transfer", ["transferId", "sequence"])
+    .index("by_payment_kind", ["paymentId", "kind", "sequence"])
+    .index("by_unrestored", ["paymentId", "kind", "restoredAt", "sequence"])
     .index("by_adjustment", ["adjustmentId", "sequence"]),
   publisherTransfers: defineTable({
     publisherOrganizationId: v.id("organizations"),

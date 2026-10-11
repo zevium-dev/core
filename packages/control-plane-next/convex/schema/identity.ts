@@ -30,6 +30,7 @@ export const identityTables = {
     connect: v.optional(
       v.object({
         accountId: v.string(),
+        revision: v.optional(v.number()),
         platformAccountId: v.string(),
         livemode: v.boolean(),
         status: v.union(
@@ -58,7 +59,19 @@ export const identityTables = {
         providerCursor: v.optional(v.string()),
         country: v.optional(v.string()),
         contactEmail: v.optional(v.string()),
+        link: v.optional(
+          v.object({
+            id: v.string(),
+            state: v.union(v.literal("pending"), v.literal("complete")),
+            origin: v.string(),
+            requestFingerprint: v.string(),
+            createdAt: v.number(),
+          }),
+        ),
         piiExpiresAt: v.optional(v.number()),
+        displayName: v.optional(v.string()),
+        startedAt: v.optional(v.number()),
+        platformAccountId: v.optional(v.string()),
       }),
     ),
   })
