@@ -24,6 +24,14 @@ export async function beginDustMerge(
     (lot.expiresAt !== undefined && lot.expiresAt <= Date.now())
   )
     return null;
+  // A container holding only review-locked balances has nothing movable; never freeze for it.
+  const movable = await ctx.db
+    .query("fundingLotSources")
+    .withIndex("by_lot_spend", (q) =>
+      q.eq("lotId", lot._id).eq("state", "available"),
+    )
+    .first();
+  if (!movable) return null;
   const target = await ctx.db
     .query("fundingLots")
     .withIndex("by_merge_target", (q) =>
@@ -84,7 +92,7 @@ export async function moveDustPage(
     });
   for (const source of page.page) {
     const amount = source.remainingCredits;
-    if (!amount) continue;
+    if (!amount || source.state === "locked") continue;
     const result = await appendWalletEntry(ctx, {
       walletId: lot.walletId,
       kind: "lot_move",
@@ -102,6 +110,9 @@ export async function moveDustPage(
     if (!result.applied)
       throw new ConvexError("Merge cursor conflicts with journal");
     const existing = await sourceRow(ctx, target._id, source.originLotId);
+    // Locks cover every row of a payment at once; a mixed origin would unlock silently.
+    if (existing?.state === "locked")
+      throw new ConvexError("Locked funding source cannot merge");
     if (existing) {
       await ctx.db.patch(existing._id, {
         creditsIn: add(existing.creditsIn, amount),

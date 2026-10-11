@@ -115,8 +115,12 @@ export async function reverseSource(
     await ctx.db.patch(source._id, {
       remainingCredits: left,
       reversedCredits: add(source.reversedCredits, slice.credits),
-      state: lotState(left),
+      state: source.state === "locked" ? "locked" : lotState(left),
     });
+    if (source.state === "locked")
+      await ctx.db.patch(input.walletId, {
+        lockedCredits: add(wallet.lockedCredits ?? 0, -slice.credits),
+      });
   }
   return result;
 }
@@ -205,8 +209,13 @@ export async function restoreSource(
     reversedCredits: add(source.reversedCredits, -amount),
     remainingCredits: add(source.remainingCredits, expired ? 0 : amount),
     expiredCredits: add(source.expiredCredits, expired ? amount : 0),
-    state: expired ? "expired" : "available",
+    state:
+      source.state === "locked" ? "locked" : expired ? "expired" : "available",
   });
+  if (source.state === "locked" && !expired)
+    await ctx.db.patch(entry.walletId, {
+      lockedCredits: add(wallet.lockedCredits ?? 0, amount),
+    });
   if (expired) {
     await appendWalletEntry(
       ctx,

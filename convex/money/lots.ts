@@ -126,7 +126,8 @@ export async function allocate(
 ): Promise<Slice[]> {
   money(credits);
   const wallet = await getWallet(ctx, walletId);
-  if (wallet.balance === 0 || wallet.balance < credits)
+  const spendable = wallet.balance - (wallet.lockedCredits ?? 0);
+  if (spendable === 0 || spendable < credits)
     throw new ConvexError("Insufficient credits");
   if (!credits) return [];
   const containers = await ctx.db
@@ -190,7 +191,8 @@ export async function validateSlices(
       source.sourceRef !== slice.sourceRef ||
       source.paymentId !== slice.paymentId ||
       (lot.expiresAt !== undefined && lot.expiresAt <= admittedAt) ||
-      (consume && source.remainingCredits < slice.credits)
+      (consume &&
+        (source.state === "locked" || source.remainingCredits < slice.credits))
     )
       throw new ConvexError("Funding evidence rejected");
     totals.set(lot._id, add(totals.get(lot._id) ?? 0, slice.credits));

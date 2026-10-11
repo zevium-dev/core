@@ -1,7 +1,7 @@
 # Wallet & billing
 
 > Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
-> Code: `convex/{billing,stripeEvents,wallets,usage}.ts`, `convex/money/`, `tests/{money,finance,financeThroughput}.test.ts`
+> Code: `convex/{billing,stripeEvents,wallets,usage}.ts`, `convex/money/`, `tests/{money,finance,financeThroughput,sourceLocks}.test.ts`, `tests/sourceLocksRacesHarness.ts`, `apps/gateway/scripts/next-acceptance.mjs`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
 > Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
@@ -43,6 +43,7 @@ Current screen: `/app/billing`. Org switcher selects workspace for this and ever
 Org-scoped — the org owns the wallet; admins manage it, members view their own attribution.
 
 - Balance (live), Buy Credits (hosted checkout, credit-pack products — larger denominations surfaced first), top-up history
+- Credits from a payment under review are on hold: shown under the balance, not spendable, other credits still work. They return once the payment is reconciled
 - Usage: current-cycle consumption + **projected** end-of-cycle spend; breakdown per member, per key, per API, per endpoint
 - Charges history: itemized, each charge links to the exact call
 - Spend controls (P1): budget with 50/75/100% threshold alerts (email + in-app), signed budget webhooks, hard-cap toggle
@@ -64,7 +65,7 @@ Activity (`apps/web/src/routes/app/settings/activity.tsx`) keys only its `Activi
 
 Legacy WalletSqliteDO test data is disposable by the 2026-10-11 owner decision. Exact-target discard (default) or optional pinned-release export still needs owner sign-off before v6; see the activation runbook. No existing NextWalletDO journal is covered by that discard approval.
 
-Root money modules own append-only wallet journals, materialized balances, promo/admin/paid FIFO lots and indexed original-source balances. Dust moves retain zero-delta source journals; 32-source admissions fail before upstream when fragmented. Verified test-mode Checkout grants principal atomically; refunds/disputes close/drain before paged exact-source reclamation and publisher clawback/restoration. Every page is generation fenced and globally throughput limited. Authentic unchargeable finals become retained zero-debit exceptions; no debt or synthetic grant. needs_review currently keeps the whole wallet frozen (#440). Fees remain off under #318. Full refunds return amountPaidCents; Stripe live keys/objects are refused.
+Root money modules own append-only wallet journals, materialized balances, promo/admin/paid FIFO lots and indexed original-source balances. Dust moves retain zero-delta source journals; 32-source admissions fail before upstream when fragmented. Verified test-mode Checkout grants principal atomically; refunds/disputes close/drain before paged exact-source reclamation and publisher clawback/restoration. Every page is generation fenced and globally throughput limited. Authentic unchargeable finals become retained zero-debit exceptions; no debt or synthetic grant. `needs_review` now drains then quarantines only affected original funding sources (#440); unrelated paid and promotional funds reopen. `fundingLotSources.state=locked` excludes those rows from allocation and dust moves, including inside mixed lots. `wallets.lockedCredits` tracks quarantined remaining inventory without changing the ledger; executable checkpoint balance is ledger balance minus locked credits. Dust discovery skips containers with no unlocked source; merging into a locked target row is refused. `billing.getBillingState` returns `wallet.lockedCredits` for the on-hold line. Lock pages fence checkpoints with gate revisions. Operator retry waits for quarantine completion, creates a fresh generation/close, restores only payment reversals, reapplies canonical facts and unlocks sources before reopening. Failed/canceled refunds or dispute reinstatement follow the same drained path. Lost DO journals still require real recovery; no timeout substitutes for drain. Fees remain off under #318. Full refunds return amountPaidCents; Stripe live keys/objects are refused.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
@@ -74,7 +75,7 @@ Root money modules own append-only wallet journals, materialized balances, promo
 
 - 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
-- [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off; follow-up #440.
+- [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off before activation; scoped B implemented in #440.
 
 - [Promo self-consumption protection](../decisions/2026-10-11-promo-self-consumption.md): proposed, pending owner sign-off; same-org protection implemented in isolated PR #438.
 

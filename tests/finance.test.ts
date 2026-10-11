@@ -554,7 +554,7 @@ describe("PR 4 review regressions", () => {
       ),
     ).toHaveLength(12);
   });
-  it("escalates repeated reconciliation errors once and keeps the wallet frozen", async () => {
+  it("escalates once, waits for drain, and reopens with only affected sources locked", async () => {
     const t = harness(),
       f = await t.run((ctx) => financeFixture(ctx));
     const generation = await adjust(t, f.paymentId, {
@@ -577,7 +577,7 @@ describe("PR 4 review regressions", () => {
       attempts: 8,
       state: "needs_review",
     });
-    expect(p.reconciliation.nextAttemptAt).toBeUndefined();
+    expect(p.reconciliation.nextAttemptAt).toBeDefined();
     const cases = await t.run((ctx) =>
       ctx.db.query("financeReconciliationCases").collect(),
     );
@@ -587,6 +587,16 @@ describe("PR 4 review regressions", () => {
     expect((await t.run((ctx) => ctx.db.get(f.walletId)))!.gateState).toBe(
       "closing",
     );
+    await complete(t, f.paymentId);
+    expect(await t.run((ctx) => ctx.db.get(f.walletId))).toMatchObject({
+      gateState: "open",
+      balance: 100000,
+      lockedCredits: 100000,
+    });
+    expect(
+      (await t.run((ctx) => ctx.db.get(f.paymentId)))!.reconciliation
+        .nextAttemptAt,
+    ).toBeUndefined();
   });
   it("conserves two payments across two publishers with newest pending then newest released clawbacks", async () => {
     const t = harness(),

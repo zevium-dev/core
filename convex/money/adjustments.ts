@@ -6,6 +6,7 @@ import { requestClose, requireDrained, finishClose } from "./barrier";
 import { reverseSource, restoreSource } from "./sourceAdjustments";
 import { reverseEarning, restoreEarning } from "./publisherLedger";
 import { fingerprint } from "../../contracts/transport";
+import { lotState } from "./lots";
 import { openCase } from "./reconciliationCases";
 export const FINANCE_PAGE_SIZE = 8;
 export type AdjustmentFact =
@@ -132,7 +133,9 @@ export async function projectAdjustment(
   }
   const generation = add(p.reconciliation.generation, 1);
   const closeId =
-    p.reconciliation.state !== "complete" && p.reconciliation.closeId
+    p.reconciliation.state !== "complete" &&
+    !p.reconciliation.reviewLock?.complete &&
+    p.reconciliation.closeId
       ? p.reconciliation.closeId
       : `payment:${paymentId}:${generation}`;
   await ctx.db.patch(paymentId, {
@@ -170,7 +173,8 @@ export async function reconcilePaymentPage(
     !p ||
     p.reconciliation.generation !== generation ||
     p.reconciliation.state === "complete" ||
-    p.reconciliation.state === "needs_review"
+    (p.reconciliation.state === "needs_review" &&
+      p.reconciliation.reviewLock?.complete)
   )
     return "done";
   let job = p.reconciliation;
@@ -184,7 +188,7 @@ export async function reconcilePaymentPage(
     await ctx.db.patch(paymentId, {
       reconciliation: {
         ...job,
-        state: "retry",
+        state: job.state === "needs_review" ? "needs_review" : "retry",
         nextAttemptAt: Date.now() + 60_000,
       },
     });
@@ -195,7 +199,7 @@ export async function reconcilePaymentPage(
     await ctx.db.patch(paymentId, {
       reconciliation: {
         ...job,
-        state: "retry",
+        state: job.state === "needs_review" ? "needs_review" : "retry",
         nextAttemptAt: Date.now() + 60_000,
       },
     });
@@ -215,8 +219,63 @@ export async function reconcilePaymentPage(
     });
     return "more";
   };
+  if (job.state === "needs_review") {
+    const page = await ctx.db
+      .query("fundingLotSources")
+      .withIndex("by_payment", (q) => q.eq("paymentId", paymentId))
+      .paginate({
+        numItems: FINANCE_PAGE_SIZE,
+        cursor: job.reviewLock?.cursor ?? null,
+      });
+    let locked = 0;
+    for (const source of page.page) {
+      if (source.state === "locked") continue;
+      locked = add(locked, source.remainingCredits);
+      await ctx.db.patch(source._id, { state: "locked" });
+    }
+    // Inventory changes invalidate every pinned checkpoint, even with no ledger delta.
+    await ctx.db.patch(p.walletId, {
+      lockedCredits: add(wallet.lockedCredits ?? 0, locked),
+      gateRevision: add(wallet.gateRevision, 1),
+    });
+    await ctx.db.patch(paymentId, {
+      reconciliation: {
+        ...job,
+        reviewLock: { complete: page.isDone, cursor: page.continueCursor },
+        nextAttemptAt: page.isDone ? undefined : Date.now() + 300_000,
+      },
+      updatedAt: Date.now(),
+    });
+    if (!page.isDone) return "more";
+    await finishClose(ctx, p.walletId, closeId);
+    return "done";
+  }
   const phase = job.phase ?? "restore_publisher";
   if (phase === "unlock") {
+    const locked = await ctx.db
+      .query("fundingLotSources")
+      .withIndex("by_payment_state", (q) =>
+        q.eq("paymentId", paymentId).eq("state", "locked"),
+      )
+      .take(FINANCE_PAGE_SIZE);
+    let credits = 0;
+    for (const source of locked) {
+      const lot = (await ctx.db.get(source.lotId))!;
+      credits = add(credits, source.remainingCredits);
+      await ctx.db.patch(source._id, {
+        state:
+          lot.expiresAt !== undefined && lot.expiresAt <= Date.now()
+            ? "expired"
+            : lotState(source.remainingCredits),
+      });
+    }
+    if (locked.length) {
+      await ctx.db.patch(p.walletId, {
+        lockedCredits: add(wallet.lockedCredits ?? 0, -credits),
+        gateRevision: add(wallet.gateRevision, 1),
+      });
+      return advance({});
+    }
     const page = await ctx.db
       .query("financeReconciliationCases")
       .withIndex("by_payment", (q) =>
@@ -261,6 +320,7 @@ export async function reconcilePaymentPage(
         q
           .eq("paymentId", paymentId)
           .eq("kind", "reversal")
+          .eq("adjustment.kind", "payment")
           .eq("restoredAt", undefined),
       )
       .take(FINANCE_PAGE_SIZE);
@@ -447,10 +507,11 @@ export async function reconcilePaymentPage(
         state: "needs_review",
         publisherTargetCredits: add(job.publisherTargetCredits, applied),
         remainingCredits: remaining,
-        nextAttemptAt: undefined,
+        reviewLock: { complete: false },
+        nextAttemptAt: Date.now(),
       },
     });
-    return "done";
+    return "more";
   }
   return advance({
     remainingCredits: remaining,
@@ -460,4 +521,58 @@ export async function reconcilePaymentPage(
     sourceCursor:
       remaining === 0 || page.isDone ? undefined : page.continueCursor,
   });
+}
+
+/** Keep partial effects and the current close; quarantine completes only after a real drain. */
+export async function reviewPayment(
+  ctx: MutationCtx,
+  p: Doc<"payments">,
+  attempts: number,
+) {
+  await openCase(ctx, {
+    kind: "payment",
+    paymentId: p._id,
+    operationId: `payment-reconcile:${p._id}:${p.reconciliation.generation}`,
+    reason:
+      "Payment reconciliation exhausted page retries; affected sources require review",
+  });
+  await ctx.db.patch(p._id, {
+    reconciliation: {
+      ...p.reconciliation,
+      attempts,
+      state: "needs_review",
+      reviewLock: { complete: false },
+      nextAttemptAt: Date.now(),
+    },
+    updatedAt: Date.now(),
+  });
+}
+/** Retry from canonical facts under a fresh fence: prior effects are restored before recomputing. */
+export async function retryReviewedPayment(
+  ctx: MutationCtx,
+  p: Doc<"payments">,
+) {
+  if (!p.reconciliation.reviewLock?.complete)
+    throw new ConvexError("Source quarantine must finish before retrying");
+  const generation = add(p.reconciliation.generation, 1);
+  const closeId = `payment:${p._id}:${generation}`;
+  await ctx.db.patch(p._id, {
+    revision: add(p.revision, 1),
+    updatedAt: Date.now(),
+    reconciliation: {
+      state: "retry",
+      attempts: 0,
+      generation,
+      closeId,
+      phase: "restore_publisher",
+      targetCredits: 0,
+      walletReversedCredits: 0,
+      publisherTargetCredits: 0,
+      nextAttemptAt: Date.now(),
+    },
+  });
+  const wallet = await getWallet(ctx, p.walletId);
+  if (wallet.gateState === "open" || wallet.gateState === "closed")
+    await requestClose(ctx, p.walletId, closeId, "refund");
+  return generation;
 }

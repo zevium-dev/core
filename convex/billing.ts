@@ -27,8 +27,7 @@ import {
 } from "./lib/stripe";
 import { grantLot } from "./money/lots";
 import { ensureWallet } from "./money/walletLedger";
-import { openCase } from "./money/reconciliationCases";
-import { reconcilePaymentPage } from "./money/adjustments";
+import { reconcilePaymentPage, reviewPayment } from "./money/adjustments";
 const pack = v.union(
   v.literal("pack_10"),
   v.literal("pack_50"),
@@ -369,35 +368,33 @@ export const reconcileFailure = internalMutation({
     )
       return;
     const attempts = (p.reconciliation.attempts ?? 0) + 1;
-    const exhausted = attempts >= 8;
+    if (attempts >= 8) return reviewPayment(ctx, p, attempts);
     await ctx.db.patch(p._id, {
       reconciliation: {
         ...p.reconciliation,
         attempts,
-        state: exhausted ? "needs_review" : "retry",
-        nextAttemptAt: exhausted ? undefined : Date.now() + 60_000,
+        state: "retry",
+        nextAttemptAt: Date.now() + 60_000,
       },
     });
-    if (exhausted)
-      await openCase(ctx, {
-        kind: "payment",
-        paymentId: p._id,
-        operationId: `payment-reconcile:${p._id}:${args.generation}`,
-        reason:
-          "Payment reconciliation exhausted page retries; wallet remains frozen",
-      });
   },
 });
 export const recoverAdjustments = internalMutation({
   args: {},
   handler: async (ctx) => {
     let delay = 0;
-    for (const state of ["pending", "retry", "processing"] as const) {
+    for (const state of [
+      "pending",
+      "retry",
+      "processing",
+      "needs_review",
+    ] as const) {
       const rows = await ctx.db
         .query("payments")
         .withIndex("by_reconcile", (q) =>
           q
             .eq("reconciliation.state", state)
+            .gt("reconciliation.nextAttemptAt", 0)
             .lte("reconciliation.nextAttemptAt", Date.now()),
         )
         .take(25);
@@ -459,7 +456,10 @@ export const getBillingState = query({
     }
     return {
       access,
-      wallet: { balance: wallet?.balance ?? 0 },
+      wallet: {
+        balance: wallet?.balance ?? 0,
+        lockedCredits: wallet?.lockedCredits ?? 0,
+      },
       packs: access.capabilities.manageBilling
         ? CREDIT_PACKS.map((p) => ({
             packId: p.id,

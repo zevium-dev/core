@@ -412,6 +412,83 @@ try {
   assert.equal(state.usage[0].billingOutcome, "exception");
   assert.equal(state.wallet.settledThroughEdgeSequence, 1);
   console.log("exceptions passed");
+  // Lock only after an admitted call settles; survive restart with other funding usable.
+  const scoped = await convex("seed", {
+    run: `edge-scoped-${run}`,
+    paid: true,
+  });
+  // A loaded host can exceed the 2s cold fill; only a pre-upstream 503 is retried.
+  let scopedCall;
+  for (let attempt = 0; !scopedCall; attempt++) {
+    const entered = waitForUpstream();
+    entered.catch(() => {});
+    const attemptCall = fetch(
+      `http://127.0.0.1:${worker.port}/gateway/${scoped.handle}/echo/echo?slow`,
+      { method: "POST", headers: { authorization: `Bearer ${scoped.secret}` } },
+    );
+    attemptCall.catch(() => {});
+    const early = await Promise.race([entered.then(() => null), attemptCall]);
+    if (!early) scopedCall = attemptCall;
+    else {
+      assert.ok(
+        early.status === 503 && attempt < 5,
+        `Scoped admission failed: ${early.status} ${await early.text()}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  }
+  await convex("review", { paymentId: scoped.paymentId });
+  assert.equal(
+    await convex("advanceRefund", { paymentId: scoped.paymentId }),
+    "waiting",
+  );
+  release();
+  assert.equal((await scopedCall).status, 200);
+  await waitDrain(scoped);
+  assert.equal(
+    await convex("advanceRefund", { paymentId: scoped.paymentId }),
+    "done",
+  );
+  state = await convex("inspect", { walletId: scoped.walletId });
+  assert.equal(state.wallet.gateState, "open");
+  assert.equal(state.wallet.lockedCredits, 99995);
+  assert.equal(state.wallet.balance, 99995);
+  await flush(scoped);
+  const blockedCalls = calls;
+  assert.equal((await call(scoped)).status, 402);
+  assert.equal(calls, blockedCalls);
+  const unrelatedPayment = await convex("reviewCredits", {
+    walletId: scoped.walletId,
+  });
+  await flush(scoped);
+  assert.equal((await call(scoped)).status, 200); // promotional source
+  await flush(scoped);
+  await worker.stop();
+  await start();
+  let restarted = await call(scoped);
+  // Restart drops in-memory key caches; a loaded host may 503 the cold fill before upstream.
+  for (let attempt = 0; restarted.status === 503 && attempt < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    restarted = await call(scoped);
+  }
+  assert.equal(restarted.status, 200); // unrelated paid source after SQLite restart
+  await flush(scoped);
+  state = await convex("inspect", { walletId: scoped.walletId });
+  assert.equal(state.wallet.lockedCredits, 99995);
+  assert.equal(state.wallet.balance, 100090);
+  assert.equal(state.usage.length, 3);
+  assert.equal(state.usage[2].fundingSlices[0].paymentId, unrelatedPayment);
+  assert.ok(
+    state.cases.some(
+      (c) =>
+        c.rowKind === "case" &&
+        c.paymentId === scoped.paymentId &&
+        c.status === "open",
+    ),
+  );
+  console.log(
+    "Scoped payment quarantine, in-flight settlement and restart passed",
+  );
   // Kill workerd after durable admission, while upstream has not returned.
   const crash = await convex("seed", { run: `edge-crash-${run}` });
   const crashWait = waitForUpstream();
