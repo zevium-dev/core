@@ -1,107 +1,23 @@
-import { v } from "convex/values";
-import { internalMutation, mutation } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
-
-export const upsertFromClerk = internalMutation({
-  args: {
-    clerkUserId: v.string(),
-    name: v.string(),
-    email: v.string(),
-  },
-  handler: async (ctx, args): Promise<Id<"users">> => {
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-
-    if (existing === null) {
-      return await ctx.db.insert("users", {
-        clerkUserId: args.clerkUserId,
-        name: args.name,
-        email: args.email,
-      });
-    }
-
-    await ctx.db.patch(existing._id, {
-      name: args.name,
-      email: args.email,
-    });
-    return existing._id;
-  },
-});
-
-/** Remove Clerk's personal-data mirror. Safe for webhook retries. */
-export const deleteFromClerk = internalMutation({
-  args: { clerkUserId: v.string() },
-  handler: async (ctx, args): Promise<void> => {
-    const tombstone = await ctx.db
-      .query("userTombstones")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-    if (tombstone === null) {
-      await ctx.db.insert("userTombstones", {
-        clerkUserId: args.clerkUserId,
-        deletedAt: Date.now(),
-      });
-    }
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-
-    if (existing !== null) {
-      await ctx.db.delete(existing._id);
-    }
-  },
-});
-
-/**
- * Mirror the authenticated Clerk identity into the users table.
- * Safe to call on every app boot; returns the canonical row.
- */
+import { mutation } from "./_generated/server";
+import { ConvexError } from "convex/values";
+import { requireIdentity } from "./lib/auth";
+import { userDto } from "./lib/dto";
 export const ensureUser = mutation({
   args: {},
-  handler: async (ctx): Promise<Doc<"users">> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (identity === null) {
-      throw new Error("Not authenticated");
-    }
-
-    const clerkUserId = identity.subject;
-    const joinedName = [identity.givenName, identity.familyName]
-      .filter(Boolean)
-      .join(" ");
-    const name =
-      identity.name ||
-      joinedName ||
-      identity.nickname ||
-      identity.email ||
-      "User";
-    const email = identity.email ?? "";
-
-    const existing = await ctx.db
+  handler: async (ctx) => {
+    const claims = await requireIdentity(ctx);
+    const user = await ctx.db
       .query("users")
-      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", clerkUserId))
+      .withIndex("by_clerk", (q) => q.eq("clerkUserId", claims.subject))
       .unique();
-
-    if (existing === null) {
-      const userId = await ctx.db.insert("users", {
-        clerkUserId,
-        name,
-        email,
-      });
-      const created = await ctx.db.get(userId);
-      if (created === null) {
-        throw new Error("Failed to load created user");
-      }
-      return created;
-    }
-
-    await ctx.db.patch(existing._id, { name, email });
-    const updated = await ctx.db.get(existing._id);
-    if (updated === null) {
-      throw new Error("Failed to load updated user");
-    }
-    return updated;
+    if (user?.deletedAt !== undefined)
+      throw new ConvexError("Not authenticated");
+    if (user) return userDto(user);
+    const id = await ctx.db.insert("users", {
+      clerkUserId: claims.subject,
+      email: claims.email,
+      lastClerkEventAt: 0,
+    });
+    return userDto((await ctx.db.get(id))!);
   },
 });

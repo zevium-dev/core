@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
@@ -16,10 +17,9 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { parseTagsInput } from "#/lib/project-helpers";
-export function DetailsCard({ project }: { project: Doc<"projects"> }) {
+export function DetailsCard({ project }: { project: ProjectView }) {
   const [nameEdit, setName] = useState<string | undefined>();
   const name = nameEdit ?? project.name;
   const [descriptionEdit, setDescription] = useState<string | undefined>();

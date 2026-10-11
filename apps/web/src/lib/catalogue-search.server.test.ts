@@ -11,7 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 it("refuses spoofed connection headers without trusted runtime metadata", async () => {
-  vi.stubEnv("NEXT_CONVEX_SITE_URL", "https://next.invalid");
+  vi.stubEnv("CONVEX_SITE_URL", "https://next.invalid");
   vi.stubEnv("NEXT_WEB_SEARCH_SECRET", "test-server-budget-secret");
   state.request = new Request("https://web.invalid", {
     headers: { "cf-connecting-ip": "1.2.3.4" },
@@ -25,7 +25,7 @@ it("refuses spoofed connection headers without trusted runtime metadata", async 
   expect(fetcher).not.toHaveBeenCalled();
 });
 it("forwards an HMAC budget key without persisting or forwarding the raw IP", async () => {
-  vi.stubEnv("NEXT_CONVEX_SITE_URL", "https://next.invalid");
+  vi.stubEnv("CONVEX_SITE_URL", "https://next.invalid");
   vi.stubEnv("NEXT_WEB_SEARCH_SECRET", "test-server-budget-secret");
   state.request = Object.assign(
     new Request("https://web.invalid", {
@@ -49,7 +49,7 @@ it("forwards an HMAC budget key without persisting or forwarding the raw IP", as
   });
 });
 it("shares one HMAC key for rotating addresses inside an IPv6 /64", async () => {
-  vi.stubEnv("NEXT_CONVEX_SITE_URL", "https://next.invalid");
+  vi.stubEnv("CONVEX_SITE_URL", "https://next.invalid");
   vi.stubEnv("NEXT_WEB_SEARCH_SECRET", "test-server-budget-secret");
   const fetcher = vi.fn<typeof fetch>(async () =>
     Response.json({ items: [], degraded: false }),

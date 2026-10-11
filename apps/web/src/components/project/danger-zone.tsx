@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -24,9 +25,8 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
-export function DangerZone({ project }: { project: Doc<"projects"> }) {
+export function DangerZone({ project }: { project: ProjectView }) {
   const navigate = useNavigate();
   const removeProject = useConvexMutation(api.projects.remove);
   const [deleteOpen, setDeleteOpen] = useState(false);

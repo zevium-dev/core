@@ -289,6 +289,11 @@ export async function deliverPinnedHttps(
       body: input.body,
       deadlineAt,
     });
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      response.abort();
+      response.cleanup();
+      return { status: response.statusCode };
+    }
     await consumeBoundedResponse(response);
 
     if (response.statusCode < 300 || response.statusCode >= 400) {

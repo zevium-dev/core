@@ -1,21 +1,21 @@
 import {
   CONNECTION_CALLBACK_PATH,
+  CONNECTION_HEADER,
+  getOAuthProvider,
   isConnectionId,
+  isProviderApiHost,
   isSafeReturnUrl,
   isSchemeName,
   normalizeConnectionLabel,
+  operationConnection,
   type ConnectionTokenFailure,
+  type OpenApiOperation,
+  type ParsedOpenApiSpec,
 } from "@zevium/shared";
 import { BoundedCache } from "./cache";
 import { jsonError } from "./errors";
-import {
-  extractApiKey,
-  type KeyVerifier,
-  type VerifyOutcome,
-} from "./key-verifier";
-import type { PipelineEnv } from "./pipeline";
+import { extractApiKey } from "./key-verifier";
 import { SpecSourceUnavailableError, type SpecSource } from "./spec-source";
-import { isWalletSession } from "./wallet-session";
 
 /**
  * Connected accounts at the edge.
@@ -179,8 +179,14 @@ export class InternalHttpConnections implements ConnectionsBackend {
   }
 }
 
+export type ConnectionCaller =
+  | { status: "ok"; orgId: string; keyId: string }
+  | { status: "invalid" | "disabled" | "unavailable" };
+
 export type ConnectionsDeps = {
-  keyVerifier: KeyVerifier;
+  /** API-key identity from signed key evidence, lifecycle gates applied. */
+  authenticate(secret: string): Promise<ConnectionCaller>;
+  /** Route as the caller org sees it; private APIs only for their owner. */
   specSource: SpecSource;
   connections?: ConnectionsBackend;
   idGenerator?: () => string;
@@ -290,12 +296,11 @@ async function handleCallback(
 
 async function authenticate(
   request: Request,
-  env: PipelineEnv,
   deps: ConnectionsDeps,
   requestId: string,
 ): Promise<{ orgId: string; keyId: string } | Response> {
   const secret = extractApiKey(request);
-  if (!secret || isWalletSession(secret)) {
+  if (!secret) {
     return jsonError(
       401,
       "missing_api_key",
@@ -303,48 +308,22 @@ async function authenticate(
       requestId,
     );
   }
-  const outcome: VerifyOutcome = deps.keyVerifier.verifyWithStatus
-    ? await deps.keyVerifier.verifyWithStatus(secret)
-    : await deps.keyVerifier
-        .verify(secret)
-        .then((key): VerifyOutcome =>
-          key ? { status: "ok", key } : { status: "invalid" },
-        );
-  if (outcome.status === "unavailable") {
-    return jsonError(
-      503,
-      "verification_unavailable",
-      "API key verification is temporarily unavailable",
-      requestId,
-    );
+  const caller = await deps.authenticate(secret);
+  switch (caller.status) {
+    case "ok":
+      return { orgId: caller.orgId, keyId: caller.keyId };
+    case "unavailable":
+      return jsonError(
+        503,
+        "verification_unavailable",
+        "API key verification is temporarily unavailable",
+        requestId,
+      );
+    case "disabled":
+      return jsonError(403, "key_disabled", "API key is disabled", requestId);
+    default:
+      return jsonError(401, "invalid_api_key", "Invalid API key", requestId);
   }
-  if (outcome.status !== "ok") {
-    return jsonError(401, "invalid_api_key", "Invalid API key", requestId);
-  }
-  const { orgId, keyId } = outcome.key;
-  // Same key gates as metered calls: disabled keys and archived orgs stop here.
-  const rate = await env.WALLET.get(
-    env.WALLET.idFromName(orgId),
-  ).consumeKeyRateLimit(keyId, orgId);
-  if (rate.status === "rejected") {
-    const status =
-      rate.reason === "key_rate_limited"
-        ? 429
-        : rate.reason === "wallet_unavailable"
-          ? 503
-          : 403;
-    const response = jsonError(
-      status,
-      rate.reason,
-      "This API key can't manage connections right now",
-      requestId,
-    );
-    if (rate.retryAfterSeconds !== undefined) {
-      response.headers.set("Retry-After", String(rate.retryAfterSeconds));
-    }
-    return response;
-  }
-  return { orgId, keyId };
 }
 
 async function readStartBody(
@@ -483,7 +462,6 @@ async function handleStart(
 /** `/connections` router. Returns null for paths it doesn't own. */
 export async function handleConnectionsRequest(
   request: Request,
-  env: PipelineEnv,
   deps: ConnectionsDeps,
 ): Promise<Response | null> {
   const url = new URL(request.url);
@@ -525,7 +503,7 @@ export async function handleConnectionsRequest(
       requestId,
     );
   }
-  const caller = await authenticate(request, env, deps, requestId);
+  const caller = await authenticate(request, deps, requestId);
   if (caller instanceof Response) return caller;
 
   if (id === undefined && request.method === "POST") {
@@ -645,4 +623,52 @@ export function connectionErrorResponse(
         { cost: 0 },
       );
   }
+}
+
+/**
+ * Connection for a metered call, resolved before any reservation (cost 0 on
+ * every failure). `undefined` = the operation needs none, or an optional one
+ * isn't available. A connected token only ever goes to the provider's API.
+ */
+export async function resolveCallConnection(input: {
+  request: Request;
+  spec: Pick<ParsedOpenApiSpec, "components" | "security">;
+  operation: OpenApiOperation;
+  upstreamUrl: URL;
+  backend: ConnectionsBackend | undefined;
+  orgId: string;
+  projectId: string;
+  api: string;
+  requestId: string;
+}): Promise<{ id: string; accessToken: string } | Response | undefined> {
+  const requirement = operationConnection(input.spec, input.operation);
+  if (!requirement) return undefined;
+  const provider = getOAuthProvider(requirement.provider)!;
+  const fail = (failure: Parameters<typeof connectionErrorResponse>[0]) =>
+    connectionErrorResponse(failure, {
+      scheme: requirement.scheme,
+      providerName: provider.name,
+      api: input.api,
+      origin: new URL(input.request.url).origin,
+      requestId: input.requestId,
+    });
+  if (!isProviderApiHost(provider, input.upstreamUrl.hostname)) {
+    return fail("upstream_not_allowed");
+  }
+  const selected = input.request.headers.get(CONNECTION_HEADER);
+  if (selected !== null && !isConnectionId(selected)) return fail("invalid");
+  const outcome = input.backend
+    ? await input.backend.token({
+        orgId: input.orgId,
+        projectId: input.projectId,
+        scheme: requirement.scheme,
+        ...(selected === null ? {} : { connectionId: selected }),
+      })
+    : ({ status: "unavailable" } as const);
+  if (outcome.status === "ok") {
+    return { id: outcome.connectionId, accessToken: outcome.accessToken };
+  }
+  return requirement.required || selected !== null
+    ? fail(outcome.status)
+    : undefined;
 }

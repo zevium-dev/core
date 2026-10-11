@@ -13,16 +13,12 @@ import { internal } from "./_generated/api";
 import { internalMutation, internalQuery } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { getOrgByClerkId } from "./lib/auth";
-import {
-  connectionSecretBinding,
-  decryptSecret,
-  type EncryptedSecret,
-} from "./lib/credentialCrypto";
-import {
-  isProviderPublisher,
-  providerClient,
-} from "./lib/oauthProviderClients";
+import { getOrganization, isActive } from "./lib/identity";
+import { connectionSecretBinding, decryptSecret } from "./lib/credentialCrypto";
+import { providerClient } from "./lib/oauthProviderClients";
+import { envelope as encryptedSecret } from "./schema/common";
+
+type EncryptedSecret = Doc<"upstreamCredentials">["envelope"];
 
 /** Open authorization links per consumer org; bounds abandoned flows. */
 export const MAX_PENDING_CONNECTIONS = 50;
@@ -35,16 +31,6 @@ export const CONNECTION_TOMBSTONE_MS = 30 * 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH = 100;
 /** Renewals started per cron run; the rest wait for the next hour. */
 const RENEW_BATCH = 25;
-
-const encryptedSecret = v.object({
-  ciphertext: v.string(),
-  iv: v.string(),
-  keyVersion: v.string(),
-  sealedCiphertext: v.string(),
-  sealedIv: v.string(),
-  sealedKeyVersion: v.string(),
-  sealedVersion: v.literal("v2"),
-});
 
 export type ConnectionStartContext =
   | {
@@ -129,25 +115,30 @@ async function publishedScheme(
   ctx: QueryCtx,
   projectId: Id<"projects">,
 ): Promise<ConnectedAccountScheme[] | null> {
+  const spec = await publishedSpec(ctx, projectId);
+  if (spec === null) return null;
+  try {
+    return collectOAuthSchemes(parseSpec(spec)).schemes;
+  } catch {
+    return [];
+  }
+}
+
+/** Latest published spec text of a live (published, not retired) project. */
+async function publishedSpec(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+): Promise<string | null> {
   const project = await ctx.db.get(projectId);
   if (
     project === null ||
     project.status !== "published" ||
-    project.retiredAt !== undefined
+    project.retirement?.state === "retired" ||
+    project.latestVersionId === undefined
   ) {
     return null;
   }
-  const latest = await ctx.db
-    .query("specVersions")
-    .withIndex("by_project_published", (q) => q.eq("projectId", projectId))
-    .order("desc")
-    .first();
-  if (latest === null) return null;
-  try {
-    return collectOAuthSchemes(parseSpec(latest.spec)).schemes;
-  } catch {
-    return [];
-  }
+  return (await ctx.db.get(project.latestVersionId))?.spec ?? null;
 }
 
 async function byPublicId(
@@ -172,7 +163,8 @@ export const prepareStart = internalQuery({
     scheme: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<ConnectionStartContext> => {
-    if ((await getOrgByClerkId(ctx, args.clerkOrgId)) === null) {
+    const org = await getOrganization(ctx, args.clerkOrgId);
+    if (org === null || !(await isActive(ctx, org))) {
       return { ok: false, error: "organization_unavailable" };
     }
     const projectId = ctx.db.normalizeId("projects", args.projectId);
@@ -190,10 +182,8 @@ export const prepareStart = internalQuery({
     } else {
       return { ok: false, error: "scheme_required" };
     }
-    // Tokens are issued to Zevium's provider apps: only reviewed publishers.
-    const project = (await ctx.db.get(projectId))!;
-    const publisher = await ctx.db.get(project.organizationId);
-    if (!isProviderPublisher(publisher?.publicHandle)) {
+    // Tokens are issued to Zevium's provider apps: house listings only.
+    if (!(await ctx.db.get(projectId))!.houseOperated) {
       return { ok: false, error: "publisher_not_allowed" };
     }
     const client = providerClient(getOAuthProvider(scheme.provider)!);
@@ -207,17 +197,15 @@ export const prepareStart = internalQuery({
     if (pending.length >= MAX_PENDING_CONNECTIONS) {
       return { ok: false, error: "too_many_pending" };
     }
-    const latest = await ctx.db
-      .query("specVersions")
-      .withIndex("by_project_published", (q) => q.eq("projectId", projectId))
-      .order("desc")
-      .first();
     return {
       ok: true,
       scheme: scheme.name,
       provider: scheme.provider,
       clientId: client.clientId,
-      scopes: requestedScopes(parseSpec(latest!.spec), scheme),
+      scopes: requestedScopes(
+        parseSpec((await publishedSpec(ctx, projectId))!),
+        scheme,
+      ),
     };
   },
 });

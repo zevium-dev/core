@@ -1,8 +1,7 @@
 # Listing lifecycle
 
-> Status: partial (P1 #15 deprecation/retirement + #393 visibility webhooks built; P2 #19 version pinning + spec-diff changelog not built) · Updated: 2026-10-11
-> Rebuild status: PR #437 review fixes implemented (2026-10-11). Isolated rebuild PR 2 route/retirement state implemented; production notification behavior remains on existing plane.
-> Code: `packages/control-plane-next/convex/{projects,clerkWebhooks}.ts`, `convex/projects.ts` (`update`, `scheduleRetirement`, `cancelRetirement`, `remove`, `retire`, `retireSunsetProjects`, `notifyRetirementConsumersPage`), `convex/specs.ts` (`publish`, `deprecateVersion`, `undeprecateVersion`), `convex/quality.ts` (`setSubscription`), `convex/lib/publicRoutes.ts`, `convex/project-visibility-webhooks.test.ts`, `convex/deprecation.test.ts`, `convex/project-retirement.test.ts`, `convex/project-lifecycle.test.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/mock.ts`, `apps/web/src/components/project/visibility-card.tsx`, `apps/web/src/components/project/danger-zone.tsx`, `apps/web/src/components/spec-editor/rail-versions.tsx`, `apps/web/src/components/spec-editor/version-lifecycle-dialogs.tsx`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{projects,specs,clerkWebhooks}.ts`, `convex/lib/publicRoutes.ts`, `convex/lifecycleNotices.ts`, `tests/publishing.test.ts`
 > Related: [publishing-specs](publishing-specs.md), [quality-signals](quality-signals.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [catalogue-search](catalogue-search.md), [registry-v2](../architecture/registry-v2.md), [roadmap](../product/roadmap.md)
 
 > Email (#320): built, dormant until configured. Code: `convex/notificationEmail.ts`, `convex/notificationEmailAction.ts`, `convex/lib/notificationEmail.ts`, `convex/notificationEmail.test.ts`.
@@ -34,37 +33,9 @@ Related surfaces:
 
 ## Tech
 
-### PR #442 review fixes — 2026-10-11
+Publish reserves routes permanently in the same transaction. Metadata updates patch explicit fields and preserve suspension. Seven-day retirement notice, version deprecation, generation-fenced cleanup and permanent tombstones remain. Consumer notice/email fan-out pages successful project consumers; version notices conservatively reach project-scoped consumers. Archive immediately denies new activity and retains immutable versions/finance for admitted settlement and reconciliation.
 
-**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
-
-Next lifecycle updates share a six/hour/project limit. Inbox notices update canonically; email is sent for initial deprecation/retirement, cancellation and completed retirement, not message/date edits. Consumer fan-out uses 25-org pages paced five seconds apart; email recipient lookup is separately globally throttled. Publisher text is escaped and URL delimiters broken with zero-width spaces in email. Code: `packages/control-plane-next/convex/{lifecycleNotices,projects,specs,notificationEmail,notificationEmailAction}.ts`.
-
-### Isolated rebuild PR 2 — 2026-10-11
-
-PR #437 review fixes: draft bodies now live in `projectDrafts`, so 50-project archive/sunset batches read small project rows without approaching Convex’s read limit. Retirement retains draft bodies and immutable versions; cleanup clears readiness through project metadata. Regression coverage: `packages/control-plane-next/tests/publishing.test.ts` exercises 55 near-limit drafts through both paged archive and repeated sunset batches.
-
-Next reserves `(publisher handle, project slug)` inside publication, locks handles after any route reservation, preserves tombstones/version history, enforces seven-day notice and fences scheduled retirement by revision. Cancel/metadata patches retain quality suspension and publication generation. Terminal cleanup deletes runtime credentials/webhook config while retaining accounting. Code: `packages/control-plane-next/convex/projects.ts`, `specs.ts`, `lib/publicRoutes.ts`, `tests/publishing.test.ts`. PR 6 must attach consumer notices/fanout before cutover; PR 5 implements executable snapshots and direct gateway 410 behavior in `packages/control-plane-next/convex/edgeSnapshots.ts` and `apps/gateway/src/next/pipeline.ts`, behind the pairing switch. Version sunsets remain informational; only project retirement supplies the execution cutoff. Regression: next `tests/edge.test.ts`.
-
-- **Email (#320)**: existing lifecycle/listing notices now use optional Resend delivery, including consumer-org project-retirement notices and their changed/canceled revisions. Version-deprecation now also fans out to existing version consumers in indexed 50-row usage pages (legacy unversioned usage included), deduping notices per org and rejecting stale/restored schedules. Changed publisher deprecation content also updates its canonical notice. Setup, recipient selection, stale-job fencing, and preferences: [webhooks-notifications](webhooks-notifications.md#transactional-email-320).
-
-- **Suspension preservation (#355)**: `projects.update` and `cancelRetirement` use targeted patches. Clearing a description or canceling retirement removes only the intended optional fields; quality suspension/recovery metadata, desired visibility, and `publicationGeneration` survive. Cancellation still increments `retirementRevision`, invalidating stale fanout jobs. Regression coverage: `project-authorization.test.ts` and `project-retirement.test.ts`.
-
-From [architecture overview](../architecture/overview.md):
-
-- **Registry lifecycle**: organization and public-route tombstones are authoritative over restored mutable rows. Every org lookup fails closed when `organizationTombstones` contains its Clerk id; every public/execution route lookup requires one exact active reservation binding org id, project id, publisher handle, project slug, and absent `retiredAt`. Org archive, route retirement, key revocation, and legacy-key rotation-required remain terminal stream states. Publisher removal requires a scheduled sunset; immediate retirement is an internal mutation callable only by deployment operators for maintenance. First publish permanently reserves `(publisher handle, project slug)`; project removal archives source/tombstone rows and never physically deletes immutable versions. Direct Convex catalogue/spec/search lookups fail closed immediately; Wallet DO receives a zero/disabled archived checkpoint. Receiver must join every route/key/catalogue read against org kill state, require catalogue's exact active route revision, deny unknown/rotation-required keys, and serve retired public URLs as `410` tombstones.
-- **Deprecation signaling**: RFC 8594 headers on gateway responses for deprecated spec versions — `Deprecation: @<epoch-seconds>`, `Sunset: <HTTP-date>`, `Link: <catalogue-url>; rel="deprecation"`
-
-Receiver status (registry v2, not implemented): [registry-v2](../architecture/registry-v2.md).
-
-Code facts (read from source 2026-10-10, not from TECH.md):
-
-- **Explicit visibility changes (#393)**: publisher `projects.update` and staff `admin.setProjectVisibility` emit only for an actual transition; payload and retry behavior live in [webhooks-notifications](webhooks-notifications.md). Publisher public→private remains rejected for published projects (retirement required); draft visibility changes and staff overrides retain their existing rules.
-- Two levels exist. **Version deprecation** (`specs.deprecateVersion`/`undeprecateVersion`, admin only): sets `deprecatedAt`, `sunsetAt` (≥7 days), message 1–1000 chars, `version_deprecated` notification; spec body unchanged; version sunset stays informational until project retirement; cannot restore after cutoff. **Project retirement** (`projects.scheduleRetirement`, public published projects only): `MIN_DEPRECATION_NOTICE_MS` = 7 days, message required, publisher `project_retirement` notification, paginated consumer fanout from `usageEvents` (`notifyRetirementConsumersPage` + late-settlement reconcile). Retirement freezes catalogue discovery while detail page and gateway stay available until sunset; `cancelRetirement` allowed only before sunset.
-- Cron `projects.retireSunsetProjects` retires due projects; retirement disables probes, blocks gateway, cleans runtime secrets, retains audit/evidence. `projects.remove` of a published project requires a scheduled sunset that has passed; result is `deletionState: "tombstoned"`.
-- Gateway sets `Deprecation`/`Link`/`Sunset` in `apps/gateway/src/pipeline.ts` and on `/mock` in `apps/gateway/src/mock.ts`. Link host hardcoded `https://zevium.dev/catalogue/...`.
-- Detail page shows a Deprecated banner with sunset date + message from `latestVersion`.
-- "New subscriptions freeze": `quality.setSubscription` (table `listingSubscriptions`, per consumer org) refuses activation once `deprecationStartedAt`/`sunsetAt`/`retirementState`/`retiredAt`/`deletionState` is set or publisher org archived. No web caller of `setSubscription` exists.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

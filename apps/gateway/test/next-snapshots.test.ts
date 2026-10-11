@@ -18,7 +18,7 @@ it("persists a large spec and credential projection without truncation", async (
   };
   const config: NextEnv = {
     ...bindings,
-    NEXT_CONVEX_SITE_URL: "https://next.invalid",
+    CONVEX_SITE_URL: "https://next.invalid",
     NEXT_SNAPSHOT_KEYS: JSON.stringify(ring),
   };
   const payload = {
@@ -73,7 +73,7 @@ it("installs only complete stable catalogue generations and persists them across
   };
   const config: NextEnv = {
     ...bindings,
-    NEXT_CONVEX_SITE_URL: "https://next.invalid",
+    CONVEX_SITE_URL: "https://next.invalid",
     NEXT_SNAPSHOT_KEYS: JSON.stringify(ring),
   };
   let reads = 0,
@@ -186,7 +186,7 @@ it("single-flights missing scopes, keeps no identity, and deletes negative state
     await runInDurableObject(stub, async (_instance, ctx) => {
       const coordinator = new EdgeSnapshotDO(ctx, {
         ...bindings,
-        NEXT_CONVEX_SITE_URL: "https://next.invalid",
+        CONVEX_SITE_URL: "https://next.invalid",
         NEXT_SNAPSHOT_KEYS: JSON.stringify(ring),
       });
       const results = await Promise.all(
@@ -229,7 +229,7 @@ it("bounds an unresponsive cold fill and leaves no polling or persisted identity
     await runInDurableObject(stub, async (_instance, ctx) => {
       const coordinator = new EdgeSnapshotDO(ctx, {
         ...bindings,
-        NEXT_CONVEX_SITE_URL: "https://next.invalid",
+        CONVEX_SITE_URL: "https://next.invalid",
       });
       const start = Date.now();
       expect(await coordinator.read("route", "missing")).toBeNull();

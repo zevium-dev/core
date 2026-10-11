@@ -597,7 +597,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
     if (!bootstrapId) throw new Error("Wallet recovery required");
     if (!(await this.ctx.storage.get<boolean>("activated"))) {
       const response = await fetch(
-        new URL("/wallet-activate", this.env.NEXT_CONVEX_SITE_URL),
+        new URL("/wallet-activate", this.env.CONVEX_SITE_URL),
         {
           method: "POST",
           headers: {
@@ -700,7 +700,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
       }
       if (ready.length) {
         const response = await fetch(
-          new URL("/ingest-usage", this.env.NEXT_CONVEX_SITE_URL),
+          new URL("/ingest-usage", this.env.CONVEX_SITE_URL),
           {
             method: "POST",
             headers: {
@@ -773,7 +773,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
           this.save(s);
         }
         const response = await fetch(
-          new URL("/wallet-drain", this.env.NEXT_CONVEX_SITE_URL),
+          new URL("/wallet-drain", this.env.CONVEX_SITE_URL),
           {
             method: "POST",
             headers: {

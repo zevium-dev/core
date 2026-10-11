@@ -20,7 +20,7 @@
 
 ## Built
 
-- Reworked the uncommitted generic build on `feat/connected-accounts` (rebased onto `develop` `3d51eb9`): removed publisher OAuth clients, added the registry and env-based clients, Instagram long-lived tokens, renewal and revocation, upstream host lock, a guard on the `next` pipeline. Design: [design/connected-accounts](../design/connected-accounts.md).
+- Reworked the uncommitted generic build on `feat/connected-accounts` (rebased onto `develop` `3d51eb9`): removed publisher OAuth clients, added the registry and env-based clients, Instagram long-lived tokens, renewal and revocation, upstream host lock, and, after develop cut over to the rebuilt control plane (#443), ported everything onto it: `houseOperated` gate, new crypto bindings, signed-evidence gateway pipeline, 37th table (#448). Design: [design/connected-accounts](../design/connected-accounts.md).
 - Follow-ups: #444 media hosting, #445 provider apps and reviews, #446 bring-your-own client.
 
 ## User preferences observed

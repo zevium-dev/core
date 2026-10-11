@@ -10,9 +10,7 @@ for (const name of [
   "CLERK_SECRET_KEY",
   "VITE_BUILD_SHA",
   "VITE_CLERK_PUBLISHABLE_KEY",
-  process.env.VITE_CONTROL_PLANE_MODE === "next"
-    ? "VITE_NEXT_CONVEX_URL"
-    : "VITE_CONVEX_URL",
+  "VITE_CONVEX_URL",
   "VITE_GATEWAY_URL",
 ]) {
   if (!process.env[name]?.trim()) {

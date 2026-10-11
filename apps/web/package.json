@@ -14,9 +14,7 @@
     "preview": "vite preview",
     "test": "vitest run --allowOnly=false",
     "test:csrf-runtime": "node scripts/test-csrf-runtime.mjs",
-    "typecheck": "tsc --noEmit",
-    "typecheck:next": "tsc --noEmit -p tsconfig.next.json",
-    "build:next": "VITE_CONTROL_PLANE_MODE=next node scripts/build.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@clerk/tanstack-react-start": "^1.6.4",

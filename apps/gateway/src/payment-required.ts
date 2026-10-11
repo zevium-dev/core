@@ -1,4 +1,4 @@
-/** Human recovery envelope; configured machine rail adds x402 V2 requirements. */
+/** Human recovery envelope for authenticated, credit-gated calls. */
 const RECOVERY: Record<string, string> = {
   missing_api_key: "Create an API key and send it as a Bearer credential.",
   invalid_api_key:
@@ -9,8 +9,6 @@ const RECOVERY: Record<string, string> = {
   in_flight_budget_exhausted: "Wait for active calls to finish, then retry.",
   weight_exceeds_budget:
     "Reduce the prompt or output limit, or add wallet credits, then retry.",
-  invalid_payment:
-    "Check the payment proof against PAYMENT-REQUIRED and retry the same payment; do not pay again.",
 };
 
 /** Only platform-owned safe text belongs here; never pass upstream errors. */

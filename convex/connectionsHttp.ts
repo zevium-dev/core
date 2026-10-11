@@ -10,6 +10,7 @@ import {
   normalizeConnectionLabel,
 } from "@zevium/shared";
 
+import { validInternalSecret } from "../contracts/transport";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { connectionSecretBinding, encryptSecret } from "./lib/credentialCrypto";
@@ -27,9 +28,11 @@ function json(body: unknown, status: number): Response {
   });
 }
 
-function authorized(request: Request): boolean {
-  const secret = process.env.GATEWAY_INTERNAL_SECRET;
-  return !!secret && request.headers.get("x-internal-secret") === secret;
+async function authorized(request: Request): Promise<boolean> {
+  return await validInternalSecret(
+    request.headers.get("x-internal-secret"),
+    process.env.GATEWAY_INTERNAL_SECRET,
+  );
 }
 
 async function readBody(
@@ -110,7 +113,8 @@ export function registerConnectionRoutes(http: HttpRouter): void {
     path: "/connections-start",
     method: "POST",
     handler: httpAction(async (ctx, request) => {
-      if (!authorized(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authorized(request)))
+        return json({ error: "unauthorized" }, 401);
       const body = await readBody(request);
       const label = normalizeConnectionLabel(body?.label);
       if (
@@ -189,7 +193,8 @@ export function registerConnectionRoutes(http: HttpRouter): void {
     path: "/connections-callback",
     method: "POST",
     handler: httpAction(async (ctx, request) => {
-      if (!authorized(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authorized(request)))
+        return json({ error: "unauthorized" }, 401);
       const body = await readBody(request);
       if (
         body === null ||
@@ -214,7 +219,8 @@ export function registerConnectionRoutes(http: HttpRouter): void {
     path: "/connections-list",
     method: "POST",
     handler: httpAction(async (ctx, request) => {
-      if (!authorized(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authorized(request)))
+        return json({ error: "unauthorized" }, 401);
       const body = await readBody(request);
       if (
         body === null ||
@@ -249,7 +255,8 @@ export function registerConnectionRoutes(http: HttpRouter): void {
     path: "/connections-revoke",
     method: "POST",
     handler: httpAction(async (ctx, request) => {
-      if (!authorized(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authorized(request)))
+        return json({ error: "unauthorized" }, 401);
       const body = await readBody(request);
       if (
         body === null ||
@@ -275,7 +282,8 @@ export function registerConnectionRoutes(http: HttpRouter): void {
     path: "/gateway-connection-token",
     method: "POST",
     handler: httpAction(async (ctx, request) => {
-      if (!authorized(request)) return json({ error: "unauthorized" }, 401);
+      if (!(await authorized(request)))
+        return json({ error: "unauthorized" }, 401);
       const body = await readBody(request);
       if (
         body === null ||

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as pricingPolicy from "../../../../packages/shared/src/pricing-policy";
 import { listSpecEndpoints } from "./spec-endpoints";
 import { parsePublishedEndpoints } from "./openapi-reference";
-import { formatCataloguePriceRange } from "./catalogue-card";
 import { summarizeEndpoints, formatPricingSummary } from "./spec-pricing";
 
 afterEach(() => vi.restoreAllMocks());
@@ -20,23 +19,21 @@ const spec = JSON.stringify({
   },
 });
 describe("token pricing surfaces", () => {
-  it("hides disabled token operations from the reference and price summary while retaining editable rates", () => {
+  it("hides disabled token operations from the reference and price summary and scalar editor controls", () => {
     expect(parsePublishedEndpoints(spec)).toEqual([]);
     expect(listSpecEndpoints(spec)).toMatchObject([
-      { path: "/chat", cost: null, tokenPricing },
       { path: "/hidden", cost: null },
     ]);
     expect(summarizeEndpoints(listSpecEndpoints(spec)!)).toEqual({
-      endpointCount: 2,
+      endpointCount: 1,
       minCredits: null,
       maxCredits: null,
       freeTier: 0,
     });
   });
-  it("preserves token rates in editor and public reference when enabled", () => {
+  it("keeps token editor controls absent even under a test-only pricing override", () => {
     vi.spyOn(pricingPolicy, "isTokenPricingEnabled").mockReturnValue(true);
     expect(listSpecEndpoints(spec)).toMatchObject([
-      { path: "/chat", tokenPricing },
       { path: "/hidden", cost: null },
     ]);
     expect(parsePublishedEndpoints(spec)).toMatchObject([
@@ -44,15 +41,6 @@ describe("token pricing surfaces", () => {
     ]);
     expect(
       formatPricingSummary(summarizeEndpoints(listSpecEndpoints(spec)!)),
-    ).toBe("2 endpoints, 1 priced per token");
-    expect(
-      formatCataloguePriceRange({
-        minCost: 1000,
-        maxCost: 1000,
-        endpointCount: 1,
-        hasFreeTier: false,
-        hasTokenPricing: true,
-      }),
-    ).toBe("Token pricing");
+    ).toBe("1 endpoints");
   });
 });

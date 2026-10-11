@@ -68,5 +68,6 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-11 | [PR 4 payment review defaults](2026-10-11-payment-review-defaults.md)                                | proposed; pending owner sign-off       |
 | 2026-10-11 | [Edge cold fills and issuance clock skew](2026-10-11-edge-cold-fill-and-clock-skew.md)               | accepted (built in PR #441)            |
 | 2026-10-11 | [PR #442 read-surface review defaults](2026-10-11-read-surface-review-defaults.md)                   | proposed; applied in next preview      |
+| 2026-10-11 | [Legacy wallet cutover data](2026-10-11-legacy-wallet-discard.md)                                    | accepted; v6 sign-off pending          |
 | 2026-10-11 | [Connected accounts are the OAuth priority (API only)](2026-10-11-connected-accounts-oauth.md)       | accepted; build choices superseded     |
-| 2026-10-11 | [Zevium owns one OAuth client per provider](2026-10-11-zevium-owned-oauth-clients.md)                | accepted; built in PR (pending review) |
+| 2026-10-11 | [Zevium owns one OAuth client per provider](2026-10-11-zevium-owned-oauth-clients.md)                | accepted; 37th table pending sign-off  |

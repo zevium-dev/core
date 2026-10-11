@@ -12,6 +12,10 @@ async function health(overrides: Partial<Env>) {
     new Request("https://gateway.test/health"),
     {
       ...env,
+      NEXT_DEPLOYMENT_ID: "fixture",
+      NEXT_SNAPSHOT_KEYS: "fixture",
+      NEXT_ADMISSION_KEYS: "fixture",
+      NEXT_TRANSPORT_KEYS: "fixture",
       CONVEX_URL: "https://proof.convex.cloud",
       CONVEX_SITE_URL: "https://proof.convex.site",
       GATEWAY_INTERNAL_SECRET: "x".repeat(32),
@@ -77,7 +81,7 @@ describe("production health configuration matrix", () => {
       ok: true,
       service: "zevium-gateway",
       release: "a".repeat(40),
-      contract: 1,
+      contract: 2,
     });
   });
 
@@ -96,11 +100,13 @@ describe("production health configuration matrix", () => {
   });
 
   for (const missing of [
-    "CONVEX_URL",
+    "NEXT_DEPLOYMENT_ID",
+    "NEXT_SNAPSHOT_KEYS",
+    "NEXT_ADMISSION_KEYS",
+    "NEXT_TRANSPORT_KEYS",
     "CONVEX_SITE_URL",
     "GATEWAY_INTERNAL_SECRET",
-    "CLERK_SECRET_KEY",
-    "ZEVIUM_RELEASE",
+
     "CF_VERSION_METADATA",
   ] as const) {
     it(`fails closed when ${missing} is absent in production`, async () => {

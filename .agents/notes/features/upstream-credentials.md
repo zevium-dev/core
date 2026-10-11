@@ -1,8 +1,7 @@
 # Upstream credentials (publisher secrets)
 
-> Status: built (P0; publication with credentials #389 fixed) · Updated: 2026-10-11
-> Rebuild status: Isolated rebuild PR 2 single-envelope credentials implemented; production dual envelopes remain until cutover.
-> Code: `convex/upstreamCredentials.ts`, `convex/lib/credentialCrypto.ts`, `convex/http.ts` (`/gateway-spec`), `apps/gateway/src/spec-source.ts`, `apps/gateway/src/pipeline.ts`, `apps/web/src/components/project/credentials-card.tsx` (`UpstreamCredentialsCard`), `apps/web/src/routes/app/projects/$projectSlug.tsx`, `apps/web/src/components/project-settings-panel.tsx`, `convex/publishReadiness.ts`, `convex/publishReadiness.test.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/upstreamCredentials.ts`, `convex/lib/credentialCrypto.ts`, `packages/shared/src/edge/replication.ts`, `apps/gateway/src/next/pipeline.ts`
 > Related: [gateway](gateway.md), [publishing-specs](publishing-specs.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md)
 
 Publishers store the credentials their upstream API requires; the gateway attaches them to every forwarded call on the publisher's behalf. Consumers never see or supply them. Without this, no real authenticated API can be listed.
@@ -21,29 +20,9 @@ Publishers store the credentials their upstream API requires; the gateway attach
 
 ## Tech
 
-### Isolated rebuild PR 5 — 2026-10-11
+One required AES-GCM envelope binds purpose/resource/generation/key version. Canonical padded base64 32-byte DB keys are independent of edge signing and transport keys. Credential changes invalidate readiness and advance route revisions. Only executing Worker memory receives decrypted upstream headers; public DTOs, catalogue snapshots and persistent edge storage contain no plaintext. Retain old key versions until all referenced envelopes/journals are gone.
 
-Private signed routes carry AES-GCM transport envelopes bound to deployment/project/revision/key version. `NEXT_TRANSPORT_KEYS` is independent of snapshot signing, request authentication and stored-credential encryption. Only the executing Worker decrypts route headers; public projections omit them, and coordinator storage never keeps plaintext. Code: `packages/shared/src/edge/replication.ts`, next `convex/edgeSnapshots.ts`, gateway `src/next/pipeline.ts`. Transport AAD/rotation tests live in next `tests/edge.test.ts`.
-
-### Isolated rebuild PR 2 — 2026-10-11
-
-Next stores one required `aes-gcm-aad-v1` envelope, with canonical versioned 32-byte key material and AAD binding purpose, project/header, monotonic generation and key version. Delete/recreate cannot reuse a generation. Limit 32 headers per project; metadata APIs return no envelope/plaintext. Credential writes invalidate readiness and increment project revision. Code: `packages/control-plane-next/convex/upstreamCredentials.ts`, `lib/credentialCrypto.ts`, `tests/publishing.test.ts`. Gateway decryption/snapshot delivery is implemented by isolated PR 5 above.
-
-**Dogfood — 2026-10-10**
-
-- **P0 #389:** credential storage/injection worked in dogfood, but publication with credentials already stored failed repeatedly after passing health checks. See [publishing-specs](publishing-specs.md) for the blocker; injection was tested only after publishing without credentials and then restoring a harmless header.
-
-Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
-
-- **Readiness binding (#389)**: `upsert` starts `revision` at 1 and increments it on each write, including writes in the same millisecond. Publication and readiness use the same revision calculation, with an `updatedAt` fallback for legacy rows. Credential changes still require a new health test; the complete gate contract is in [quality-signals](quality-signals.md).
-
-- **Fresh deployment (#354)**: removed security audit/migration APIs, their global generation singleton, and the secret-repair helper. Normal credential encryption, reads, writes, and registry projection remain. Keep configured key versions needed to read existing envelopes; there is no bulk rewrap operator.
-
-- **Publisher secrets**: project Settings writes upstream header credentials and webhook signing secrets as dual AES-256-GCM envelopes in server-only rows. `UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS` is JSON `{ current, keys }`: retained pre-v2 values may be arbitrary nonempty strings for legacy SHA-256-derived decryption, while `current` must be canonical padded base64 decoding to exactly 32 bytes before any dual-envelope write. `sealed*` v2 ciphertext uses purpose + stable resource + key-version AAD, blocking row/purpose transplants. `ciphertext` is a temporary legacy-readable rollback envelope. The current reader still supports plaintext-only rows; partial envelopes fail closed. Every normal write decrypts both newly written envelopes before plaintext is scrubbed, and updates explicitly remove legacy plaintext. Webhook CRUD returns metadata only, explicit signing-secret reveal is org-admin-only, and delivery decrypts only inside server action memory. `GATEWAY_INTERNAL_SECRET` authenticates transport only and is never encryption material. Gateway resolves published spec + upstream secrets through shared-secret-authenticated `GET /gateway-spec`, caches the result for 30s, strips consumer `Authorization`/`x-api-key`, then injects publisher headers before upstream fetch. Public catalogue, discovery, mock, OpenAPI, webhook metadata, and delivery-log payloads never contain secret values.
-
-Webhook signing-secret side of this bullet also applies to [webhooks-notifications](webhooks-notifications.md).
-
-Code facts: `upstreamCredentials.upsert`/`remove` require `org:admin` of the owning org (cross-org lookups fail as "Upstream credential unavailable"); `listForProject` returns metadata only (`id`, `name`, `updatedAt`); writes enqueue a published-project projection.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

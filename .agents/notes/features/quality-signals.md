@@ -1,7 +1,7 @@
 # Quality signals
 
-> Status: partial (P0 #7 quality signals mostly built; credential readiness mismatch #389 fixed; P2 #18 security scan + status pages not built) · Updated: 2026-10-11
-> Code: `convex/projects.ts`, `convex/project-authorization.test.ts`, `convex/project-retirement.test.ts`, `convex/quality.ts`, `convex/qualityProbeAction.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `convex/lib/qualityContract.ts`, `convex/wallets.ts` (`gatewayQualitySamples` insert), `convex/crons.ts` (`probe-published-upstreams`), `packages/shared/src/quality.ts`, `packages/shared/src/openapi.ts` (`extractHealthCheckTarget`), `apps/web/src/components/quality-badges.tsx`, `apps/web/src/components/catalogue-detail.tsx`, `convex/publishReadiness.test.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{quality,qualityProbeAction,publishReadinessAction}.ts`, `convex/lib/webhookTransport.ts`, `tests/probeSafety.test.ts`
 > Related: [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [catalogue-search](catalogue-search.md), [platform-admin](platform-admin.md), [gateway](gateway.md), [webhooks-notifications](webhooks-notifications.md), [roadmap](../product/roadmap.md)
 
 Listing quality is measured and enforced. Catalogue listings carry evidence-based badges (real-call latency, real-call success rate, declared-health reachability, freshness), publication is gated by a reachable declared health endpoint, and repeated health failures suspend a listing until bounded recovery. Curation and quality gates matter more than raw catalogue size.
@@ -34,36 +34,9 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 ## Tech
 
-### PR #442 review fixes — 2026-10-11
+Version/generation/lease-fenced quality work uses bounded probe/call windows, public-IP pinned HTTPS transport and paced fan-out. Three failing probes suspend, three consecutive passes restore desired visibility. Reachability and API success remain distinct with sample floors. Gateway samples refresh on probe completion, up to five minutes; settlement does not contend on project quality writes. Readiness binds exact draft and credential fingerprint.
 
-**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
-
-Probe cron drains due work in 20-project pages with a one-second scheduled continuation and fixed cutoff; leases move claimed rows out of the due range. Quality samples exclude consumer/publisher self-traffic. Visibility recovery restores search embeddings; suspension removes them. Connection tests are limited to five per org per minute before probing. Code: `packages/control-plane-next/convex/{quality,publishReadiness,publishReadinessAction}.ts` and `lib/catalogue.ts`.
-
-### Isolated rebuild PR 6 — 2026-10-11
-
-**Status:** implemented behind next preview switch; legacy remains default until PR 7. Updated: 2026-10-11.
-
-Replacement quality lives on project snapshots plus `qualityEvents`. At most 24 probes and 100 current-version metered outcomes (sampled at probe completion, at most every five minutes; settlements never write the shared quality/project row); exception rows do not become successful evidence. Lease/version fencing prevents stale probes; three failed checks suspend, three passes restore desired visibility. Historical incidents retain their observed outcome. Existing pinned HTTPS/DNS protection is reused.
-
-Code pointers: `packages/control-plane-next/convex/quality.ts`; `packages/control-plane-next/convex/qualityProbeAction.ts`. See [rebuild PR 6 handoff](../architecture/convex-rebuild.md#pr-6-implementation-and-handoff--2026-10-11) for bounds, validation and cutover prerequisites.
-
-- **Quality state ownership (#355)**: metadata edits and retirement cancellation preserve `qualityStatus`, suspension time/reason, recovery passes, `desiredVisibility`, and `publicationGeneration`. Only the quality workflow restores a suspended listing. Regression coverage: `convex/project-authorization.test.ts` and `convex/project-retirement.test.ts`.
-
-No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-10):
-
-- **Health-check declaration**: exactly one parameter-free `GET`/`HEAD` operation marked `x-zevium-health-check: true`, absolute path, no `{}`/`?`/`#` (`extractHealthCheckTarget`); URL joined onto `servers[0].url`.
-- **Publish gate**: `publishReadinessAction.testConnection` (org admin only, `"use node"`) calls `probePublicHttps` without publisher credentials and outside metering/earnings. Only 2xx/3xx records a passing test (`recordPassingTest`) bound to saved-draft SHA-256; valid `READINESS_TTL_MS` = 15 min. `specs.publish` refuses without a current pass. Result statuses: `ready`, `reachable_unhealthy`, `blocked_target`, `timeout`, `unreachable`, `missing_health_check`.
-- **Credential binding (#389)**: `recordPassingTest`, `getCurrent`, and `specs.publish` share `credentialRevision` (`max(revision ?? updatedAt)`, 0 for no credentials) and `credentialSetFingerprint` (sorted identity, name, revision, timestamp). This keeps the editor and publish gate consistent for current and legacy rows; credential additions, rotations, and removals invalidate the pass even when the aggregate revision stays unchanged. Tests reproduce save draft → attach `X-Dogfood-Token` → passing credential-free health action → publish `0.0.1`, plus legacy rows and change/retest recovery.
-- **Probe safety** (`qualityProbeAction.ts`): HTTPS only, public IPv4/IPv6 only, DNS pin checked against remote address, `PROBE_TIMEOUT_MS` 8s, `MAX_PROBE_REDIRECTS` 2. Outcomes: `healthy`, `http_error`, `timeout`, `dns_error`, `tls_error`, `network_error`, `blocked_target`.
-- **Scheduled probes**: cron every 5 min → `quality.runDueProbes` leases up to `PROBE_BATCH_SIZE` 20 targets (`qualityProbeTargets`, lease 60s, `PROBE_INTERVAL_MS` 5 min); results idempotent by `executionId` in `qualityProbeResults`; stale version/generation results dropped.
-- **Snapshot** (`qualitySnapshots`, one per project, current published version only; each version starts fresh): reachability over last 24 probes, floor 3 samples (`reachabilityPercent` = any HTTP response); API success/latency p50 over last 100 `gatewayQualitySamples` (privacy-minimized real gateway outcomes written in `wallets.ts`), floor 20; freshness `stale` after 30 min since last measurement. Contract `QualitySnapshotContract` in shared; below floor returns `null` metrics + `insufficient*Data: true`.
-- **Suspension/recovery**: incident opens when ≥3 of last 5 probes non-healthy (`qualityIncidents`); project forced `visibility: "private"`, `qualityStatus: "suspended"`, `desiredVisibility` remembered, `quality_suspended` notification with reason. 3 consecutive healthy probes resolve incident, restore desired visibility, `quality_restored` notification. Intermediate state `recovering` stays unlisted.
-- Public queries: `quality.getPublicSnapshot`, `quality.listPublicIncidents`; snapshot also embedded in `catalogue.listPublic`/`getPublicDetail`/search results. Subscriptions `quality.setSubscription`/`listSubscriptions`/`subscriberCount` on `listingSubscriptions`.
-- **Catalogue projection (#331)**: `syncCatalogueListing` copies bounded current-version aggregate evidence into `catalogueListings.quality`; normal browse pages map the projection directly with no per-card snapshot/version reads. Compatibility browse and semantic hydration also read projected quality. Probe results, gateway recomputation and initial target setup refresh it; republishing clears old-version evidence. Freshness is derived on read, never frozen at projection time. Existing rows gain evidence on the next quality sync; `internal.catalogue.backfillCatalogueListingsPage({ cursor: null })` can populate all existing rows immediately.
-- **Delivery (#331): built.** Publisher UI: `apps/web/src/components/project-quality-panel.tsx`; UI regressions: `catalogue-card-quality.test.tsx` and `project-quality-panel.test.tsx` in the same components directory.
-- **Publisher query (#331)**: `quality.getPublisherQuality` uses `requireProjectMember`, returns the same `qualitySnapshotContract` as public detail, reads at most 24 current-version probes via `by_project_version_checked`, and returns suspension/recovery state. No raw gateway samples, execution IDs, or upstream URLs are exposed. UI uses a realtime Convex query, skeleton and sanitized retry state.
-- UI: `QualityBadges` renders "API quality: insufficient data (n/20)", "Reachability: insufficient data (n/3)", "Data fresh|stale"; shared by API detail, catalogue cards (compact mode), and the publisher Quality tab. Finite-number guards prevent missing percentages/latencies from rendering as `undefined` or `NaN`.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

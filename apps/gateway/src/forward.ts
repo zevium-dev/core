@@ -1,6 +1,7 @@
 import { filterRequestHeaders } from "./headers";
 import { scopeUpstreamIdempotencyKey } from "./idempotency";
-import type { Admission } from "./admit";
+import type { PublishedSpec } from "./spec-source";
+import type { VerifiedKey } from "./key-verifier";
 
 const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
 export type ForwardResult = { response: Response } | { timedOut: boolean };
@@ -8,9 +9,12 @@ export type ForwardResult = { response: Response } | { timedOut: boolean };
 /** Forward once, preserving the request body stream and bounded header wait. */
 export async function forward(
   request: Request,
-  admission: Pick<Admission, "published" | "verified" | "upstreamUrl"> & {
-    tokenRequest?: Admission["tokenRequest"];
-    connection?: Admission["connection"];
+  admission: {
+    published: PublishedSpec;
+    verified: VerifiedKey;
+    upstreamUrl: URL;
+    /** Caller's connected account; its token replaces any publisher auth. */
+    connection?: { id: string; accessToken: string };
   },
   fetchImpl: typeof fetch = fetch,
   prepareResponse?: (response: Response) => Promise<Response>,
@@ -20,7 +24,6 @@ export async function forward(
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
     upstreamHeaders.set(name, value);
   }
-  // The caller's connected account wins over any publisher Authorization.
   if (admission.connection) {
     upstreamHeaders.set(
       "authorization",
@@ -45,8 +48,7 @@ export async function forward(
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = admission.tokenRequest?.body ?? request.body;
-    if (admission.tokenRequest) upstreamHeaders.delete("content-length");
+    init.body = request.body;
     // Required by fetch when body is a stream.
     init.duplex = "half";
   }

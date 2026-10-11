@@ -1,3 +1,5 @@
+> Historical design: superseded by the 2026-10-11 Convex rebuild and [activation runbook](convex-activation.md). Legacy registry transport is deleted; x402 is disabled. Do not activate this older protocol.
+
 # Registry v2
 
 Status: producer remains; gateway receiver deleted (#359). Updated: 2026-10-10.

@@ -1,354 +1,214 @@
-import { paginationOptsValidator } from "convex/server";
-import { v } from "convex/values";
-import { action, mutation, query, type ActionCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
-import { getActiveOrgById, isAdmin, requireAdmin } from "./lib/auth";
+import { paginationOptsValidator, type PaginationOptions } from "convex/server";
+import { v, ConvexError } from "convex/values";
+import { query, mutation, action, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { isAdmin, requireAdmin } from "./lib/auth";
+import { projectDto } from "./lib/dto";
+import { isActive } from "./lib/identity";
+import { syncCatalogue } from "./lib/catalogue";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
-import {
-  reconcileStripeTransferProvider,
-  assertConnectedAccountIdentity,
-  stripeLivemodeFromSecretKey,
-  transferToStripe,
-  verifyStripePlatformIdentity,
-} from "./payouts";
-import { stripeClient } from "./billing";
-import { api, internal } from "./_generated/api";
-import type Stripe from "stripe";
-
-import { enqueuePublishedProjectProjection } from "./registrySync";
-import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
-
-/** Cap for month-to-date usage count (by_at index range scan). */
-const USAGE_STATS_CAP = 50_000;
-const ADMIN_PAGE_SIZE_MAX = 50;
-
-function startOfUtcMonth(now: number): number {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-}
-
-/**
- * Safe admin check (no throw). Returns false for unauthenticated,
- * env-unset, or non-admin users. Safe for any authed caller.
- */
-export const isAdminQuery = query({
-  args: {},
-  handler: async (ctx): Promise<boolean> => {
-    return await isAdmin(ctx);
-  },
+import { daily, sum, monthStart, dayStart } from "./lib/readRollups";
+import { prepareTransfer } from "./money/transfers";
+import { openCase, caseEvidence } from "./money/reconciliationCases";
+const page = (opts: PaginationOptions) => ({
+  ...opts,
+  numItems: Math.max(1, Math.min(50, opts.numItems)),
+  maximumRowsRead: 100,
+  maximumBytesRead: 512 * 1024,
 });
-
-export type PlatformStats = {
-  orgs: number;
-  projects: {
-    draft: number;
-    published: number;
-  };
-  projectsTotal: number;
-  usageThisMonth: number;
-  usageCapped: boolean;
-  usageCap: number;
-};
-
-/**
- * Platform-wide counts. All bounded/indexed.
- * usageThisMonth scans by_at index from month start, capped at USAGE_STATS_CAP.
- */
+export const isAdminQuery = query({ args: {}, handler: isAdmin });
 export const platformStats = query({
   args: {},
-  handler: async (ctx): Promise<PlatformStats> => {
+  handler: async (ctx) => {
     await requireAdmin(ctx);
-
-    const allOrgs = await ctx.db.query("organizations").collect();
-    const allProjects = await ctx.db.query("projects").collect();
-    const draft = allProjects.filter((p) => p.status === "draft").length;
-    const published = allProjects.filter(
-      (p) => p.status === "published",
-    ).length;
-
-    const monthStart = startOfUtcMonth(Date.now());
-    const monthEvents = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_at", (q) => q.gte("at", monthStart))
-      .take(USAGE_STATS_CAP);
-
+    const count = async (facetKey: string) => {
+      const rows = await ctx.db
+        .query("catalogueIndex")
+        .withIndex("by_facet", (q) =>
+          q.eq("kind", "facet").eq("facetKey", facetKey),
+        )
+        .take(16);
+      return rows.reduce((n, r) => n + (r.kind === "facet" ? r.count : 0), 0);
+    };
+    const orgs = await count("stats:orgs"),
+      draft = await count("stats:draft"),
+      published = await count("stats:published"),
+      usage = sum(
+        await daily(
+          ctx,
+          "platform",
+          "platform",
+          "total",
+          "all",
+          monthStart(Date.now()),
+          dayStart(Date.now()) + 86400000,
+        ),
+      );
     return {
-      orgs: allOrgs.length,
+      orgs,
       projects: { draft, published },
-      projectsTotal: allProjects.length,
-      usageThisMonth: monthEvents.length,
-      usageCapped: monthEvents.length >= USAGE_STATS_CAP,
-      usageCap: USAGE_STATS_CAP,
+      projectsTotal: draft + published,
+      usageThisMonth: usage.calls,
+      usageCapped: false,
+      usageCap: 0,
     };
   },
 });
-
-export type AdminOrgView = {
-  handle: string;
-  name: string;
-  slug: string;
-  balance: number;
-};
-
 export const listOrgs = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-
-    const result = await ctx.db
+    const rows = await ctx.db
       .query("organizations")
       .order("desc")
-      .paginate(args.paginationOpts);
-
-    const page: AdminOrgView[] = [];
-    for (const org of result.page) {
-      const wallet = await ctx.db
-        .query("wallets")
-        .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
-        .unique();
-      page.push({
-        handle: org.publicHandle ?? org.slug,
-        name: org.name,
-        slug: org.slug,
-        balance: wallet?.balance ?? 0,
-      });
-    }
-
-    return { ...result, page };
+      .paginate(page(args.paginationOpts));
+    return {
+      ...rows,
+      page: await Promise.all(
+        rows.page.map(async (org) => {
+          const wallet = await ctx.db
+            .query("wallets")
+            .withIndex("by_owner", (q) =>
+              q.eq("ownerKey", `org:${org.clerkOrgId}`),
+            )
+            .unique();
+          return {
+            handle: org.publicHandle,
+            name: org.name,
+            slug: org.slug,
+            balance: wallet?.balance ?? 0,
+          };
+        }),
+      ),
+    };
   },
 });
-
-export type AdminProjectView = {
-  handle: string;
-  organizationHandle: string;
-  organizationName: string;
-  name: string;
-  slug: string;
-  status: Doc<"projects">["status"];
-  visibility: Doc<"projects">["visibility"];
-};
-
 export const listProjects = query({
   args: {
     paginationOpts: paginationOptsValidator,
     status: v.optional(v.union(v.literal("draft"), v.literal("published"))),
-    visibility: v.optional(v.union(v.literal("private"), v.literal("public"))),
+    visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-
-    const status = args.status;
-    const visibility = args.visibility;
-    const paginationOpts = {
-      ...args.paginationOpts,
-      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
-        ? Math.min(
-            Math.max(args.paginationOpts.numItems, 1),
-            ADMIN_PAGE_SIZE_MAX,
-          )
-        : ADMIN_PAGE_SIZE_MAX,
-      maximumRowsRead: ADMIN_PAGE_SIZE_MAX + 1,
-      maximumBytesRead: 256 * 1024,
-    };
-
-    const result =
-      visibility !== undefined && status !== undefined
-        ? await ctx.db
+    const rows = await (
+      args.status
+        ? ctx.db
             .query("projects")
-            .withIndex("by_visibility_status", (q) =>
-              q.eq("visibility", visibility).eq("status", status),
-            )
-            .order("desc")
-            .paginate(paginationOpts)
-        : visibility !== undefined
-          ? await ctx.db
-              .query("projects")
-              .withIndex("by_visibility_status", (q) =>
-                q.eq("visibility", visibility),
-              )
-              .order("desc")
-              .paginate(paginationOpts)
-          : status !== undefined
-            ? await ctx.db
-                .query("projects")
-                .withIndex("by_status", (q) => q.eq("status", status))
-                .order("desc")
-                .paginate(paginationOpts)
-            : await ctx.db
-                .query("projects")
-                .order("desc")
-                .paginate(paginationOpts);
-
-    const page: AdminProjectView[] = await Promise.all(
-      result.page.map(async (p) => {
-        const organization = await ctx.db.get(p.organizationId);
-        const organizationHandle =
-          organization?.publicHandle ?? organization?.slug ?? "archived";
-        return {
-          handle: `${organizationHandle}/${p.slug}`,
-          organizationHandle,
-          organizationName: organization?.name ?? "Archived organization",
-          name: p.name,
-          slug: p.slug,
-          status: p.status,
-          visibility: p.visibility,
-        };
-      }),
-    );
-
-    return { ...result, page };
+            .withIndex("by_status", (q) => q.eq("status", args.status!))
+        : ctx.db.query("projects")
+    )
+      .order("desc")
+      .paginate(page(args.paginationOpts));
+    return {
+      ...rows,
+      page: await Promise.all(
+        rows.page
+          .filter((p) => !args.visibility || p.visibility === args.visibility)
+          .map(async (p) => {
+            const org = await ctx.db.get(p.organizationId);
+            return {
+              handle: p.slug,
+              organizationHandle: org?.publicHandle ?? "",
+              organizationName: org?.name ?? "Unavailable publisher",
+              name: p.name,
+              slug: p.slug,
+              status: p.status,
+              visibility: p.visibility,
+            };
+          }),
+      ),
+    };
   },
 });
-
-export type AdminUsageView = {
-  _id: Id<"usageEvents">;
-  organizationId: Id<"organizations">;
-  projectId: Id<"projects">;
-  endpoint: string;
-  method: string;
-  credits: number;
-  status: number;
-  latencyMs: number;
-  keyId: string;
-  at: number;
-};
-
-/** Newest 100 usage events platform-wide via by_at index. */
 export const recentUsage = query({
   args: {},
-  handler: async (ctx): Promise<AdminUsageView[]> => {
+  handler: async (ctx) => {
     await requireAdmin(ctx);
-
-    const events = await ctx.db
+    const rows = await ctx.db
       .query("usageEvents")
-      .withIndex("by_at", (q) => q.lte("at", Date.now()))
+      .withIndex("by_at")
       .order("desc")
       .take(100);
-
-    return events.map((e) => ({
+    return rows.map((e) => ({
       _id: e._id,
-      organizationId: e.organizationId,
+      organizationId: e.consumerOrganizationId,
       projectId: e.projectId,
       endpoint: e.endpoint,
       method: e.method,
       credits: e.credits,
       status: e.status,
       latencyMs: e.latencyMs,
-      keyId: e.keyId,
+      keyId: e.keyId ?? "",
       at: e.at,
     }));
   },
 });
-
-/**
- * Platform admin kill-switch: force a project's visibility.
- * Notifies the owning org + fires project.visibility_changed webhook.
- */
 export const setProjectVisibility = mutation({
   args: {
     organizationHandle: v.string(),
     projectSlug: v.string(),
     visibility: v.union(v.literal("private"), v.literal("public")),
   },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
-
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_public_handle", (q) =>
-        q.eq("publicHandle", args.organizationHandle),
-      )
-      .unique();
-    const project =
-      organization === null
-        ? null
-        : await ctx.db
+    const org = await ctx.db
+        .query("organizations")
+        .withIndex("by_handle", (q) =>
+          q.eq("publicHandle", args.organizationHandle),
+        )
+        .unique(),
+      project = org
+        ? await ctx.db
             .query("projects")
             .withIndex("by_org_slug", (q) =>
-              q
-                .eq("organizationId", organization._id)
-                .eq("slug", args.projectSlug),
+              q.eq("organizationId", org._id).eq("slug", args.projectSlug),
             )
-            .unique();
-    if (project === null) {
-      throw new Error("Project not found");
-    }
-    if ((await getActiveOrgById(ctx, project.organizationId)) === null) {
-      throw new Error("Project organization is archived");
-    }
-
-    if (args.visibility === "public") {
-      const organization = await ctx.db.get(project.organizationId);
-      const latest = await ctx.db
-        .query("specVersions")
-        .withIndex("by_project_published", (q) =>
-          q.eq("projectId", project._id),
-        )
-        .order("desc")
-        .first();
-      if (
-        organization === null ||
-        !isPublishedSurfaceAllowed(organization, latest)
-      ) {
-        throw new Error(
-          "Project cannot be public until it has a published version and the publisher has a public handle",
-        );
-      }
-    }
-
-    if (project.visibility === args.visibility) return project;
-
-    await ctx.db.patch(project._id, { visibility: args.visibility });
-    await enqueuePublishedProjectProjection(ctx, project._id);
-
-    const org = await ctx.db.get(project.organizationId);
-    if (org !== null) {
-      await createNotification(ctx, {
-        clerkOrgId: org.clerkOrgId,
-        kind: "visibility_changed",
-        title: "Project visibility changed",
-        body: `A Zevium admin made your project "${project.name}" ${args.visibility}.`,
-        refId: `visibility_changed:${project._id}:${Date.now()}`,
-      });
-    }
-
+            .unique()
+        : null;
+    if (
+      !project ||
+      !org ||
+      !(await isActive(ctx, org)) ||
+      project.retirement?.state === "retired"
+    )
+      throw new ConvexError("Project not found");
+    if (
+      args.visibility === "public" &&
+      (!project.latestVersionId ||
+        project.qualityStatus !== "active" ||
+        project.retirement)
+    )
+      throw new ConvexError(
+        "Resolve publication, retirement or quality issues before making this project public",
+      );
+    if (project.visibility === args.visibility) return projectDto(project);
+    await ctx.db.patch(project._id, {
+      visibility: args.visibility,
+      desiredVisibility: args.visibility,
+      discoverable: args.visibility === "public" && project.endpointCount > 0,
+      revision: project.revision + 1,
+    });
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    await createNotification(ctx, {
+      organizationId: org._id,
+      kind: "visibility_changed",
+      title: "Project visibility changed",
+      body: `A Zevium admin made ${project.name} ${args.visibility}.`,
+      refId: `visibility:${project._id}:${after.revision}`,
+    });
     await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
       projectId: project._id,
       visibility: args.visibility,
     });
-
-    const updated = await ctx.db.get(project._id);
-    if (updated === null) {
-      throw new Error("Failed to load project");
-    }
-    await enqueuePublishedProjectProjection(ctx, project._id);
-    return updated;
+    return projectDto(after);
   },
 });
-
-export type AdminPublisherTransferView = {
-  id: Id<"publisherTransfers">;
-  publisherOrganizationId: Id<"organizations">;
-  publisherOrganizationName: string;
-  publisherOrganizationSlug?: string;
-  stripeConnectedAccountId: string;
-  amount: number;
-  currency: string;
-  status: Doc<"publisherTransfers">["status"];
-  failureReason?: string;
-  stripeTransferId?: string;
-  idempotencyKey: string;
-  dispatchState?: Doc<"publisherTransferDispatches">["state"];
-  dispatchAttemptCount?: number;
-  reconciliationReason?: string;
-  createdAt: number;
-  updatedAt: number;
-};
-
-/** Operator view of Stripe Connect transfer state, without bank details. */
 export const listPublisherTransfers = query({
   args: {
+    paginationOpts: paginationOptsValidator,
     status: v.optional(
       v.union(
         v.literal("created"),
@@ -358,51 +218,88 @@ export const listPublisherTransfers = query({
         v.literal("reversed"),
       ),
     ),
-    paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-
-    const q = ctx.db.query("publisherTransfers");
-    const result = args.status
-      ? await q
-          .order("desc")
-          .filter((qq) => qq.eq(qq.field("status"), args.status!))
-          .paginate(args.paginationOpts)
-      : await q.order("desc").paginate(args.paginationOpts);
-
-    const page: AdminPublisherTransferView[] = await Promise.all(
-      result.page.map(async (transfer) => {
-        const organization = await ctx.db.get(transfer.publisherOrganizationId);
-        const dispatch = await ctx.db
-          .query("publisherTransferDispatches")
-          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
-          .unique();
-        return {
-          id: transfer._id,
-          publisherOrganizationId: transfer.publisherOrganizationId,
-          publisherOrganizationName:
-            organization?.name ?? "Deleted organization",
-          publisherOrganizationSlug: organization?.slug,
-          stripeConnectedAccountId: transfer.stripeConnectedAccountId,
-          amount: transfer.amount,
-          currency: transfer.currency,
-          status: transfer.status,
-          failureReason: transfer.failureReason,
-          stripeTransferId: transfer.stripeTransferId,
-          idempotencyKey: transfer.idempotencyKey,
-          dispatchState: dispatch?.state,
-          dispatchAttemptCount: dispatch?.attemptCount,
-          reconciliationReason: dispatch?.reconciliationReason,
-          createdAt: transfer.createdAt,
-          updatedAt: transfer.updatedAt,
-        };
-      }),
-    );
-    return { ...result, page };
+    const source = args.status
+      ? ctx.db
+          .query("publisherTransfers")
+          .withIndex("by_status", (q) => q.eq("status", args.status!))
+      : ctx.db.query("publisherTransfers");
+    const rows = await source.order("desc").paginate(page(args.paginationOpts));
+    return {
+      ...rows,
+      page: await Promise.all(
+        rows.page.map(async (t) => {
+          const org = await ctx.db.get(t.publisherOrganizationId);
+          return {
+            id: t._id,
+            publisherOrganizationId: t.publisherOrganizationId,
+            publisherOrganizationName: org?.name ?? "Unavailable publisher",
+            publisherOrganizationSlug: org?.slug,
+            stripeConnectedAccountId: t.destination,
+            amount: t.amountCents,
+            currency: t.currency,
+            status: t.status,
+            failureReason: t.failureCode,
+            stripeTransferId: t.stripeTransferId,
+            idempotencyKey: t.idempotencyKey,
+            dispatchState: t.dispatchState,
+            dispatchAttemptCount: t.attempts,
+            reconciliationReason: t.failureCode,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+          };
+        }),
+      ),
+    };
   },
 });
-
+export const prepareRetry = internalMutation({
+  args: { transferId: v.id("publisherTransfers") },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const t = await ctx.db.get(args.transferId);
+    if (!t) throw new ConvexError("Transfer not found");
+    if (t.status !== "failed") return t._id;
+    const operationId = `operator-retry:${t._id}`,
+      existing = await ctx.db
+        .query("financeReconciliationCases")
+        .withIndex("by_operation", (q) =>
+          q.eq("rowKind", "case").eq("operationId", operationId),
+        )
+        .unique();
+    if (existing?.rowKind === "case" && existing.transferId)
+      return existing.transferId;
+    if (t.dispatchState !== "failed")
+      throw new ConvexError("Resolve the unknown transfer outcome first");
+    const org = await ctx.db.get(t.publisherOrganizationId);
+    if (!org) throw new ConvexError("Publisher not found");
+    const id = await prepareTransfer(ctx, org),
+      caseId = await openCase(ctx, {
+        kind: "transfer",
+        operationId,
+        transferId: id,
+        organizationId: org._id,
+        reason: "Operator retry after definitive transfer failure",
+      });
+    await caseEvidence(ctx, caseId, "provider_request", `prior:${t._id}`);
+    await ctx.db.patch(caseId, {
+      status: "resolved",
+      resolution: "New transfer allocated after definitive failure",
+    });
+    return id;
+  },
+});
+export const retryPublisherTransfer = action({
+  args: { transferId: v.id("publisherTransfers") },
+  handler: async (ctx, args): Promise<{ transferId: string }> => {
+    await requireAdmin(ctx);
+    const transferId = await ctx.runMutation(internal.admin.prepareRetry, args);
+    await ctx.runAction(internal.payouts.dispatch, { id: transferId });
+    return { transferId };
+  },
+});
 export const listFinanceReconciliationCases = query({
   args: {
     paginationOpts: paginationOptsValidator,
@@ -417,345 +314,41 @@ export const listFinanceReconciliationCases = query({
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    const result = await ctx.db
+    const rows = await ctx.db
       .query("financeReconciliationCases")
       .withIndex("by_status_updated", (q) =>
-        args.status === undefined ? q : q.eq("status", args.status),
+        args.status
+          ? q.eq("rowKind", "case").eq("status", args.status)
+          : q.eq("rowKind", "case"),
       )
       .order("desc")
-      .paginate(args.paginationOpts);
-    return result;
-  },
-});
-
-async function requireAdminInAction(ctx: ActionCtx): Promise<void> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (identity === null) throw new Error("Not authenticated");
-  const configured = process.env.ADMIN_USER_IDS;
-  if (configured === undefined || configured.trim() === "") {
-    throw new Error("Admin access not configured");
-  }
-  const allowed = configured
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0);
-  if (!allowed.includes(identity.subject))
-    throw new Error("Not authorized as admin");
-}
-
-/** Retries a failed/scheduled transfer with its original Stripe idempotency key. */
-export const retryPublisherTransfer = action({
-  args: { transferId: v.id("publisherTransfers") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ transferId: Id<"publisherTransfers"> }> => {
-    await requireAdminInAction(ctx);
-    const transfer = await ctx.runMutation(
-      internal.payouts.getPublisherTransfer,
-      {
-        transferId: args.transferId,
-      },
-    );
-    if (transfer.status === "succeeded" || transfer.status === "reversed") {
-      return { transferId: transfer._id };
-    }
-    const expectedLivemode = stripeLivemodeFromSecretKey(
-      process.env.STRIPE_SECRET_KEY,
-    );
-    await verifyStripePlatformIdentity(stripeClient(), expectedLivemode);
-    await transferToStripe(ctx, transfer);
-    return { transferId: transfer._id };
-  },
-});
-
-/** List-only v2 recovery. Non-exact provider state never authorizes create. */
-type AdminTransferReconciliationResult =
-  | {
-      transferId: Id<"publisherTransfers">;
-      kind: "exact";
-      stripeTransferId: string;
-      pages: number;
-    }
-  | {
-      transferId: Id<"publisherTransfers">;
-      kind: "none" | "multiple" | "conflict" | "inconsistent" | "truncated";
-      exactIds: string[];
-      conflictIds: string[];
-      pages: number;
-    };
-
-export const reconcilePublisherTransfer = action({
-  args: { transferId: v.id("publisherTransfers") },
-  handler: async (ctx, args): Promise<AdminTransferReconciliationResult> => {
-    await requireAdminInAction(ctx);
-    const prepared: {
-      transfer: Doc<"publisherTransfers">;
-      dispatch: Doc<"publisherTransferDispatches">;
-    } = await ctx.runMutation(
-      internal.payouts.getPublisherTransferReconciliation,
-      { transferId: args.transferId },
-    );
-    const { transfer, dispatch } = prepared;
-    const result = await reconcileStripeTransferProvider(
-      stripeClient().transfers,
-      transfer,
-      {
-        firstAttemptAt: dispatch.firstAttemptAt!,
-        observedThrough: Date.now(),
-      },
-    );
-    if (result.kind !== "exact") {
-      return {
-        transferId: transfer._id,
-        kind: result.kind,
-        exactIds: result.exactIds,
-        conflictIds: result.conflictIds,
-        pages: result.pages,
-      };
-    }
-    const snapshot = result.snapshot;
-    await ctx.runMutation(internal.payouts.projectStripeTransfer, {
-      stripeTransferId: snapshot.id,
-      publisherTransferId:
-        snapshot.metadata.publisherTransferId ?? transfer._id,
-      amount: snapshot.amount,
-      amountReversed: snapshot.amount_reversed,
-      currency: snapshot.currency,
-      destination:
-        typeof snapshot.destination === "string"
-          ? snapshot.destination
-          : (snapshot.destination?.id ?? ""),
-      platformAccountId: snapshot.metadata.platformAccountId,
-      correlationNonce: snapshot.metadata.correlationNonce,
-      correlationHmac: snapshot.metadata.correlationHmac,
-      metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
-      requestFingerprint: snapshot.metadata.requestFingerprint,
-      failed: false,
-      failureReason: undefined,
-    });
+      .paginate(page(args.paginationOpts));
     return {
-      transferId: transfer._id,
-      kind: "exact" as const,
-      stripeTransferId: snapshot.id,
-      pages: result.pages,
+      ...rows,
+      page: await Promise.all(
+        rows.page.map(async (row) => ({
+          ...row,
+          transferAmountCents:
+            row.rowKind === "case" && row.transferId
+              ? ((await ctx.db.get(row.transferId))?.amountCents ?? null)
+              : null,
+        })),
+      ),
     };
   },
 });
-
-export const resolvePublisherTransferReconciliation = action({
-  args: {
-    caseId: v.id("financeReconciliationCases"),
-    resolution: v.union(v.literal("adopt"), v.literal("quarantine")),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ status: string; transferId?: string }> => {
-    await requireAdminInAction(ctx);
-    const row = await ctx.runQuery(api.admin.getFinanceReconciliationCase, {
-      caseId: args.caseId,
-    });
-    if (row === null) throw new Error("Finance reconciliation case not found");
-    if (args.resolution === "quarantine") {
-      await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
-        caseId: args.caseId,
-        status: "quarantined",
-        resolution: "operator_quarantined",
-      });
-      return { status: "quarantined" };
-    }
-    if (row.kind !== "transfer" || row.transferId === undefined) {
-      throw new Error("Only transfer reconciliation cases can be adopted");
-    }
-    const transfer = await ctx.runMutation(
-      internal.payouts.getPublisherTransfer,
-      { transferId: row.transferId },
-    );
-    const expectedLivemode = stripeLivemodeFromSecretKey(
-      process.env.STRIPE_SECRET_KEY,
-    );
-    const stripe = stripeClient();
-    await verifyStripePlatformIdentity(stripe, expectedLivemode);
-    let snapshot: Stripe.Transfer;
-    if (transfer.stripeTransferId !== undefined) {
-      snapshot = await stripe.transfers.retrieve(transfer.stripeTransferId);
-    } else {
-      const candidates = (
-        await stripe.transfers.list({
-          destination: transfer.stripeConnectedAccountId,
-          limit: 100,
-        })
-      ).data.filter(
-        (candidate) =>
-          candidate.metadata.publisherTransferId === String(transfer._id) &&
-          candidate.amount === transfer.amount &&
-          candidate.currency.toLowerCase() ===
-            transfer.currency.toLowerCase() &&
-          (typeof candidate.destination === "string"
-            ? candidate.destination
-            : candidate.destination?.id) === transfer.stripeConnectedAccountId,
-      );
-      if (candidates.length !== 1) {
-        await ctx.runMutation(
-          internal.payouts.resolveFinanceReconciliationCase,
-          {
-            caseId: args.caseId,
-            status: "open",
-            candidateIds: candidates.map((candidate) => candidate.id),
-            resolution: "operator_review_required",
-          },
-        );
-        return { status: "open", transferId: String(transfer._id) };
-      }
-      snapshot = await stripe.transfers.retrieve(candidates[0]!.id);
-    }
-    await ctx.runMutation(internal.payouts.projectStripeTransfer, {
-      stripeTransferId: snapshot.id,
-      publisherTransferId: snapshot.metadata.publisherTransferId,
-      amount: snapshot.amount,
-      amountReversed: snapshot.amount_reversed,
-      currency: snapshot.currency,
-      destination:
-        typeof snapshot.destination === "string"
-          ? snapshot.destination
-          : (snapshot.destination?.id ?? ""),
-      platformAccountId: snapshot.metadata.platformAccountId,
-      correlationNonce: snapshot.metadata.correlationNonce,
-      correlationHmac: snapshot.metadata.correlationHmac,
-      metadataRepairVersion:
-        snapshot.metadata.metadataRepairVersion === undefined
-          ? undefined
-          : Number(snapshot.metadata.metadataRepairVersion),
-      // stripe-node exposes lastResponse at runtime but omits it from resource types
-      providerRequestId: (
-        snapshot as Stripe.Transfer & {
-          lastResponse?: { requestId?: string };
-        }
-      ).lastResponse?.requestId,
-      failed: false,
-      failureReason: undefined,
-    });
-    await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
-      caseId: args.caseId,
-      status: "adopted",
-      candidateIds: [snapshot.id],
-      resolution: "operator_adopted_exact_provider_snapshot",
-    });
-    return { status: "adopted", transferId: String(transfer._id) };
-  },
-});
-
 export const getFinanceReconciliationCase = query({
   args: { caseId: v.id("financeReconciliationCases") },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    return await ctx.db.get(args.caseId);
-  },
-});
-
-export const resolveConnectAccountReconciliation = action({
-  args: {
-    caseId: v.id("financeReconciliationCases"),
-    resolution: v.union(v.literal("adopt"), v.literal("quarantine")),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ status: string; accountId?: string }> => {
-    await requireAdminInAction(ctx);
-    const row = await ctx.runQuery(api.admin.getFinanceReconciliationCase, {
-      caseId: args.caseId,
-    });
-    if (
-      row === null ||
-      row.kind !== "account_create" ||
-      row.operationId === undefined
-    ) {
-      throw new Error("Connect account reconciliation case not found");
-    }
-    if (args.resolution === "quarantine") {
-      await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
-        caseId: args.caseId,
-        status: "quarantined",
-        resolution: "operator_quarantined",
-      });
-      return { status: "quarantined" };
-    }
-    const operation = await ctx.runQuery(
-      internal.payouts.getConnectOnboardingOperation,
-      { operationId: row.operationId },
-    );
-    if (
-      operation === null ||
-      operation.country === undefined ||
-      operation.providerRequestFingerprint === undefined
-    ) {
-      throw new Error(
-        "Connect account operation lacks immutable request facts",
-      );
-    }
-    const expectedLivemode = stripeLivemodeFromSecretKey(
-      process.env.STRIPE_SECRET_KEY,
-    );
-    const stripe = stripeClient();
-    await verifyStripePlatformIdentity(stripe, expectedLivemode);
-    const accounts = await stripe.v2.core.accounts
-      .list({ applied_configurations: ["recipient"], limit: 100 })
-      .autoPagingToArray({ limit: 100_000 });
-    const matches = accounts.filter((account) => {
-      try {
-        assertConnectedAccountIdentity(account, {
-          clerkOrgId: operation.clerkOrgId,
-          organizationId: operation.organizationId,
-          expectedLivemode,
-          operationId: operation.operationId,
-          country: operation.country,
-        });
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
-      caseId: args.caseId,
-      status: matches.length === 1 ? "resolved" : "open",
-      candidateIds: matches.map((account) => account.id).slice(0, 1_000),
-      resolution:
-        matches.length === 1
-          ? "operator_verified_account_candidate"
-          : "operator_review_required",
-    });
-    if (matches.length !== 1) {
-      return { status: "open" };
-    }
-    const account = await stripe.v2.core.accounts.retrieve(matches[0]!.id, {
-      include: [
-        "configuration.recipient",
-        "defaults",
-        "identity",
-        "requirements",
-      ],
-    });
-    assertConnectedAccountIdentity(account, {
-      accountId: account.id,
-      clerkOrgId: operation.clerkOrgId,
-      organizationId: operation.organizationId,
-      expectedLivemode,
-      operationId: operation.operationId,
-      country: operation.country,
-    });
-    const committed = await ctx.runMutation(
-      internal.payouts.commitConnectAccountOperation,
-      {
-        organizationId: operation.organizationId,
-        operationId: operation.operationId,
-        stripeConnectedAccountId: account.id,
-        expectedLivemode,
-        platformAccountId: process.env.STRIPE_PLATFORM_ACCOUNT_ID,
-      },
-    );
-    if (!committed.accepted) return { status: "open" };
-    return { status: "resolved", accountId: account.id };
+    const row = await ctx.db.get(args.caseId);
+    return row?.rowKind === "case"
+      ? {
+          ...row,
+          transferAmountCents: row.transferId
+            ? ((await ctx.db.get(row.transferId))?.amountCents ?? null)
+            : null,
+        }
+      : null;
   },
 });

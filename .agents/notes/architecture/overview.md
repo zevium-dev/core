@@ -1,6 +1,6 @@
 # Architecture overview
 
-> Updated: 2026-10-10 (split from former root `TECH.md`, last updated 2026-08-12)
+> Updated: 2026-10-11 (split from former root `TECH.md`, last updated 2026-08-12)
 > Greenfield rules apply: zero users, data disposable, rebuild beats migrate.
 > Feature-level implementation lives in each `../features/*.md` Tech section. This file owns only cross-cutting architecture.
 
@@ -54,51 +54,44 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 .agents/notes/    # agent memory: product, features, architecture, decisions, research
 ```
 
-Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`). Local setup: [dev-environment](dev-environment.md). Web app internals: [web-app](web-app.md).
+Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `pnpm exec convex deploy`). Local setup: [dev-environment](dev-environment.md). Web app internals: [web-app](web-app.md).
 
 ## Architecture
 
-```
-                    ┌──────────────────────────────────────────┐
-  Browser ◀────────▶│ CONVEX (control plane, single region)    │
-   realtime sync    │  orgs mirror, projects, specs+versions,  │
-   (dashboards,     │  catalogue, credit LEDGER (truth),       │
-    editors)        │  usage events, analytics rollups,        │
-                    │  vector search, crons                    │
-                    └───────▲──────────────┬───────────────────┘
-                            │ webhooks     │ registry outbox (receiver pending)
-                            │ (Clerk,Stripe│  + wallet reconciliation)
-                            │  events)     ▼
-┌─────────┐         ┌──────────────────────────────────────────┐
-│ Clerk   │◀───────▶│ CLOUDFLARE WORKER (data plane, edge)     │
-│ auth,   │ key     │  /gateway/{org}/{project}/* + /mcp       │
-│ orgs,   │ verify  │  1. verify API key (edge-cached)         │
-│ API keys│ (cached)│  2. credit gate (Durable Object wallet)  │
-└─────────┘         │  3. inject publisher upstream secrets    │
-┌─────────┐         │  4. stream upstream response             │
-│ Stripe  │─webhook▶│  5. emit usage event → Convex (async)    │
-│Checkout/│ payments│  6. non-2xx → refund reservation         │
-│ Connect │ payouts └──────────────────────────────────────────┘
-└─────────┘
+```mermaid
+flowchart LR
+  Browser[Browser / web] -->|sessions and orgs| Clerk
+  Browser <-->|authenticated queries and mutations| Convex
+  Stripe -->|signed payment and Connect events| Convex
+  Clerk -->|signed identity events| Convex
+  Browser -->|key or MCP OAuth| Worker
+  Worker -->|bounded cold fill and refresh| Convex
+  Worker -->|async signed settlement and drain ACK| Convex
+  Worker -.->|cold OAuth verification only| Clerk
+  Worker -->|credit-gated request / streamed response| Upstream
 ```
 
-Call pipeline detail: [gateway](../features/gateway.md). Credit gate (wallet DO): [wallet-billing](../features/wallet-billing.md). Edge registry: [registry-v2](registry-v2.md).
+Convex owns the ledger and original funding sources. The Worker holds signed, expiring authority and a durable reservation/final journal; it cannot manufacture credits. Mocks use published schemas and do not reach upstream.
+
+Call pipeline detail: [gateway](../features/gateway.md). Credit gate (wallet DO): [wallet-billing](../features/wallet-billing.md). Signed edge snapshots, source-backed admission and replay: [rebuild plan](convex-rebuild.md). Owner activation: [runbook](convex-activation.md).
 
 ### What each domain owns (Convex schema sketch)
 
-| Tables                                                                 | Owner note                                                |
-| ---------------------------------------------------------------------- | --------------------------------------------------------- |
-| `organizations` (Clerk org mirror)                                     | [accounts-orgs](../features/accounts-orgs.md)             |
-| `projects`, `specs`, `specVersions`, `specImportRateLeases`            | [publishing-specs](../features/publishing-specs.md)       |
-| `wallets`, `walletEntries`                                             | [wallet-billing](../features/wallet-billing.md)           |
-| `organizationPayments`, `checkoutIntents`, `payments`, `paymentEvents` | [wallet-billing](../features/wallet-billing.md)           |
-| `usageEvents` + rollups                                                | [publisher-analytics](../features/publisher-analytics.md) |
-| `publisherEarnings`, `publisherTransfers`, `connectedPayouts`          | [earnings-payouts](../features/earnings-payouts.md)       |
-| `specEmbeddings` (`vectorIndex`)                                       | [catalogue-search](../features/catalogue-search.md)       |
+| Tables                                                                               | Owner note                                                |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `organizations` (Clerk org mirror)                                                   | [accounts-orgs](../features/accounts-orgs.md)             |
+| `projects`, `projectDrafts`, `specVersions`, `routeTombstones`                       | [publishing-specs](../features/publishing-specs.md)       |
+| `wallets`, `walletEntries`                                                           | [wallet-billing](../features/wallet-billing.md)           |
+| `checkoutIntents`, `payments`, `webhookReceipts`, `fundingLots`, `fundingLotSources` | [wallet-billing](../features/wallet-billing.md)           |
+| `usageEvents` + rollups                                                              | [publisher-analytics](../features/publisher-analytics.md) |
+| `publisherEarnings`, `publisherTransfers`, `connectedPayouts`                        | [earnings-payouts](../features/earnings-payouts.md)       |
+| `specEmbeddings` (`vectorIndex`)                                                     | [catalogue-search](../features/catalogue-search.md)       |
 
 `convex/schema.ts` is authoritative; this table is a map, not a schema.
 
-Fresh-deployment cleanup (#354) removes finance/security/registry migration and rollout operators, 14 dead tables, and unused indexes. Runtime ledger/funding checks remain. Registry outbox/streams and `registrySync` stay until #353 replaces key identity proof and moves route reservation out of enqueue. Deployment proof tables, `specImportRateLeases`, and listing subscription tables still have callers/writers and are retained.
+PR 7 replaces the legacy control plane with 36 application tables and component-owned rate-limiter/Resend storage. Registry outbox/streams, machine-payment/session and deployment-proof tables are deleted. Signed snapshots and permanent route tombstones replace the registry transport. Snapshot, admission and transport keys are separate; destinations and deployment IDs must match. Root `contracts/` retains the reviewed frozen inventory and completion mapping. There is no mode switch or fallback to legacy execution.
+
+Cold cache/bootstrap recovery may read the paired Convex HTTP surface; warm admission uses bounded local authority and the wallet DO. Wallet source reservations, terminal settlement and close/drain evidence survive restart. Expired authority fails closed. x402, per-token dispatch and capability routing stay disabled.
 
 ## History
 

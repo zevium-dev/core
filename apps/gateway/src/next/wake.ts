@@ -37,11 +37,7 @@ async function walletControl(
       }),
       4096,
     );
-    if (
-      env.CONTROL_PLANE_MODE !== "next" ||
-      !env.NEXT_WALLET ||
-      body.deploymentId !== env.NEXT_DEPLOYMENT_ID
-    )
+    if (!env.NEXT_WALLET || body.deploymentId !== env.NEXT_DEPLOYMENT_ID)
       return new Response("Wallet control unavailable", { status: 503 });
     const wallet = env.NEXT_WALLET.get(
       env.NEXT_WALLET.idFromName(

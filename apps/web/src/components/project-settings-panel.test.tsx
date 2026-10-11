@@ -1,9 +1,10 @@
+import type { ProjectView } from "#/lib/project-view";
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Doc, Id } from "#/lib/convex-data-model";
+import type { Id } from "#/lib/convex-data-model";
 import { ProjectSettingsPanel } from "./project-settings-panel";
 
 const state = vi.hoisted(() => ({ mode: "ready", role: "org:admin" }));
@@ -33,7 +34,18 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   }),
 }));
 
-const project: Doc<"projects"> = {
+const project: ProjectView = {
+  description: undefined,
+  desiredVisibility: "private",
+  qualityStatus: "active",
+  publicationGeneration: 0,
+  houseOperated: false,
+  retirementState: undefined,
+  retirementRevision: undefined,
+  deprecationStartedAt: undefined,
+  deprecationMessage: undefined,
+  sunsetAt: undefined,
+  retiredAt: undefined,
   _id: "project_test" as Id<"projects">,
   _creationTime: 1,
   organizationId: "org_test" as Id<"organizations">,

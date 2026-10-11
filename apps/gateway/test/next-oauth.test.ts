@@ -37,7 +37,7 @@ it("caches invalid opaque tokens without token identity storage or provider poll
         CLERK_SECRET_KEY: "test-secret",
         MCP_OAUTH_ISSUER: "https://clerk.invalid",
         MCP_OAUTH_RESOURCE: "https://gateway.test/mcp",
-        NEXT_CONVEX_SITE_URL: "https://next.invalid",
+        CONVEX_SITE_URL: "https://next.invalid",
       });
       const token = `oat_${"a".repeat(32)}`;
       expect(await coordinator.read("oat_short")).toEqual({

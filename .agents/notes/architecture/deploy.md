@@ -1,158 +1,29 @@
-# Production Deployment
+# Deployment after the Convex cutover
 
-Production uses one path: green `develop` CI, one GitHub `production`
-environment approval, then one ordered deployment job.
+Updated: 2026-10-11. Root `convex/` is canonical. PR 7 changes code only; shared development, preview, and production activation have **not** been performed.
 
-## Trigger
+**First activation requires the owner-only [Convex activation runbook](convex-activation.md).** It includes matched destinations and keyrings, Clerk/OAuth, Stripe test-mode webhook destinations, Resend, disposable-data reset, the destructive WalletSqliteDO deletion migration, deployment order, browser gates, and rollback limits. Do not run routine automation to perform that initial cutover.
 
-`.github/workflows/deploy-production.yml` runs after the `Continuous
-Integration` workflow succeeds for a push to `develop`.
+## Deployment gates
 
-The deployment job:
+Production workflow `.github/workflows/deploy-production.yml` requires repository variable `CONVEX_REBUILD_ACTIVATED=true`, successful `develop` CI at the exact current SHA, and approval through the protected `production` environment. Preview workflow requires `CONVEX_REBUILD_PREVIEW_ACTIVATED=true` and its existing explicit preview request. Leave both activation variables unset until the owner completes the applicable runbook. Opening this PR does not authorize deployment.
 
-1. Checks out the exact CI SHA.
-2. Confirms the source run was successful `develop` CI.
-3. Confirms the SHA is still current `develop`.
-4. Waits for approval on the protected `production` environment.
-5. Builds the web Worker before mutating providers.
-6. Proves the Convex production target with `convex deploy --dry-run`.
-7. Configures Convex runtime secrets before deploying functions.
-8. Deploys Convex, gateway, then web.
-9. Verifies gateway `/health`, web release metadata, catalogue rendering, and
-   the stable gateway `404` response.
+Routine production order is: build web, prove Convex target, validate paired configuration, configure Convex, deploy root Convex, upload/promote gateway, upload/promote web, then verify exact release SHA and gateway contract `2`. The production concurrency group never cancels an active release. A first-time Durable Object migration requires the owner's explicit Worker deployment before version-only uploads resume.
 
-Concurrency group `production-release` serializes releases and never cancels a
-running deployment.
+## Configuration ownership
 
-## Configuration
+The runbook's tables are the authoritative names-only inventory. GitHub environment secrets use `PRODUCTION_` or `PREVIEW_` prefixes for `NEXT_SNAPSHOT_KEYS`, `NEXT_ADMISSION_KEYS`, `NEXT_TRANSPORT_KEYS`, `GATEWAY_INTERNAL_SECRET`, `REGISTRY_KEY_PROJECTION_HMAC_SECRET`, `UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`, and `NEXT_WEB_SEARCH_SECRET`. Cloudflare, Convex deploy, and Clerk credentials retain their workflow-specific names. Production variables supply `PRODUCTION_DEPLOYMENT_ID`, `PRODUCTION_CONVEX_URL`, `PRODUCTION_CONVEX_SITE_URL`, `PRODUCTION_GATEWAY_URL`, and `PRODUCTION_WEB_URL`.
 
-The GitHub `production` environment owns these secrets:
+`NEXT_*` identifies the accepted signed protocol, not a runtime mode. There is no control-plane switch. The three independent transport/admission/snapshot keyrings and deployment ID must match Convex and gateway. Credential encryption keys stay in Convex; key-registration HMAC matches Convex and web; web search HMAC matches Convex and web. Preserve old key IDs through drain and rotation. Never reuse one ring for all purposes.
 
-- `CLOUDFLARE_API_TOKEN`
-- `CONVEX_PRODUCTION_DEPLOY_KEY`
-- `CLERK_PRODUCTION_PUBLISHABLE_KEY`
-- `CLERK_PRODUCTION_SECRET_KEY`
-- `PRODUCTION_REGISTRY_TRANSPORT_KEYRING`: JSON keyring with a current key ID
-  and independently generated 32-byte hexadecimal transport keys. Retain old
-  entries when rotating; stored registry envelopes still refer to them.
-- `PRODUCTION_REGISTRY_KEY_PROJECTION_HMAC_SECRET`: independently generated
-  secret of at least 32 characters, shared by web and Convex key registration.
-- `PRODUCTION_UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`: credential keyring with
-  canonical padded base64 keys encoding 32 bytes. Retain previous versions
-  through the migration and rollback window.
+`pnpm activation:check .tmp/activation.json` validates a private names-to-values configuration bundle offline without printing secrets or contacting providers. Files containing credentials must remain ignored, mode 0600, and outside artifacts. Workflows remove their temporary Worker secret files even on failure.
 
-The workflow validates the registry and credential secrets before provider writes,
-then configures both keyrings and the registration secret in Convex before
-`Deploy Convex`. The same
-registration secret is included additively in the tagged web Worker upload.
-Its temporary runner file has mode `0600`, is removed even on failure, and
-never enters deployment artifacts. Other runtime secrets remain configured
-in Cloudflare or Convex. Secrets never enter logs or artifacts.
+## Verification and recovery
 
-No release API key, release-probe variables, referee SHA, policy-tree digest,
-or separate contract/lifecycle/recovery environment is required.
+Gateway `/health` reports `ok: true`, service `zevium-gateway`, contract `2`, and the expected release. Web HTML exposes the same `zevium-release`. Verify catalogue, project disclosure, mock response, API-key/MCP metering, wallet ledger conservation, and payment/refund exceptions using the runbook. Public curl checks do not satisfy the authenticated money journey.
 
-## Ordering
+Default recovery after money or schema changes is roll forward. Never restore an old Worker against incompatible new schema or Durable Objects. Migration tags are append-only: `v5-next-edge` creates the accepted namespaces; `v6-control-plane-cutover` deletes `WalletSqliteDO` and its data. An old Worker version cannot resurrect deleted DO data. Owner must explicitly attest emptiness or export/reconcile old state before deletion. Detailed stop/rollback boundaries are in the activation runbook.
 
-Convex deploys first because gateway and web may depend on expanded control
-plane behavior. Schema changes must therefore be backward-compatible with the
-currently deployed Workers.
+## Local verification
 
-Gateway deploys second. Wrangler applies append-only Durable Object migrations
-from `apps/gateway/wrangler.jsonc`; never edit or reuse an existing migration
-tag.
-
-Web deploys last. Both Workers upload tagged versions and promote them to 100%
-without changing their preconfigured routes. Tags use
-`production-<git-sha>-<run-id>-<attempt>` so retry uploads have unique tags,
-and gateway `ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
-
-## Fresh Convex deployments
-
-Finance, registry, and security migration/rollout operators were deleted in
-#354. This schema targets fresh deployments; disposable development data may
-need resetting when removed fields no longer validate. No migration audit or
-rollout command gates runtime writes.
-
-Normal publish/enqueue operations reserve permanent public routes. The
-registry outbox and key identity proof remain until #353; the registry-v2
-receiver is still pending as documented in [registry-v2.md](registry-v2.md).
-
-## Failure Handling
-
-Default recovery is roll forward:
-
-1. Read the failed GitHub step and provider output.
-2. Fix the defect in a new PR.
-3. Merge after CI and preview checks pass.
-4. Approve the new production run.
-
-Do not roll back Convex schema or shared Durable Object migrations. Cloudflare
-version history is manual break-glass only when the prior Worker is known to be
-compatible with current Convex and Durable Object state.
-
-The first provider mutation is `Configure registry runtime`, before `Deploy
-Convex`. Failures from that step onward can leave partially updated secrets or
-code; inspect the failed step and roll forward. Keep previous keyring entries
-so existing data remains readable throughout the deployment.
-
-## Verification
-
-Successful workflow evidence is retained for seven days. Independent checks:
-
-```bash
-curl --fail --silent https://gateway.zevium.dev/health
-curl --fail --silent https://www.zevium.dev/
-curl --fail --silent 'https://www.zevium.dev/catalogue?q=&sort=newest'
-```
-
-Gateway health must report `ok: true`, service `zevium-gateway`, contract `1`,
-and current `develop` SHA. Web HTML must contain matching `zevium-release`
-metadata.
-
-The workflow waits for both services to report the expected release before
-checking their contracts; a healthy response from the previous version does not
-complete verification.
-
-## Pipeline notes (moved from former TECH.md)
-
-- **Preview verification**: previews are opt-in: adding the `preview` label to a trusted PR deploys isolated Convex, gateway, and web previews and runs required curl-only checks for web `/`, web `/catalogue`, gateway `/health`, gateway CORS preflight, and a stable gateway 404. Opening, reopening, or pushing to a PR does not deploy; remove and re-add `preview` to rebuild after a push, or run **Pull Request Preview** manually with its PR number. After Convex provisioning, gateway deploy and web build run in parallel; web deployment and gateway deployment converge at the smoke job through explicit job outputs/artifacts. Only the smoke job creates a GitHub deployment record, with the web preview URL; other preview and cleanup jobs retain environment secrets with `deployment: false`. The browser runtime and authenticated publisher/consumer journey are opt-in because they are long and stateful: add `full-e2e` to a PR already labeled `preview`, include both labels when requesting a preview, or run the workflow manually. Publisher and consumer remain sequential because consumer verification reads the publisher-created project artifact. Closed PRs invoke the separate preview cleanup workflow.
-- **Production releases**: one workflow deploys the exact SHA from a successful `Continuous Integration` push on `develop`. GitHub's protected `production` environment is the human approval and provider-credential boundary. The job rechecks current `develop` before every mutation, builds first, proves the Convex target with `convex deploy --dry-run`, configures Convex secrets, deploys Convex, gateway, then web, and waits for both services to report the exact release before verifying public route contracts. Protected registry secrets supply the Convex transport keyring and matching web/Convex key-registration HMAC; malformed keyrings or weak secrets stop before provider writes. Web secrets accompany the tagged upload through a private temporary file removed even on failure, never an artifact. Worker tags are `production-<sha>-<run-id>-<attempt>` so retry uploads remain unambiguous; Durable Object migrations remain append-only. Failures stop and roll forward with a reviewed commit. Convex and shared DO state never roll back; Cloudflare version rollback is manual break-glass for known Worker-only failures. Operator protocol and credential inventory live in this file.
-
-## Preview secrets and browser isolation
-
-The `preview` environment must provide `PREVIEW_REGISTRY_KEY_PROJECTION_HMAC_SECRET`
-(at least 32 characters) and `PREVIEW_UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`
-(the same canonical 32-byte base64 keyring format as production, with independent
-preview keys). Neither secret was present at repository or preview-environment
-level when checked on 2026-10-10; an owner must add both before preview deployment.
-The workflow sets both on the isolated Convex deployment and sets the matching
-HMAC secret on the preview web Worker. Preserve old credential keyring entries
-while preview data still uses them. Existing Clerk and Convex preview secrets
-remain required.
-
-Preview jobs share `.github/actions/setup/action.yml` for tools and installation.
-Full-e2e retries use a fresh session prefix, with distinct anonymous and signed-in
-lane suffixes. Authenticated browser snapshots are not uploaded; public HTTP
-contract evidence remains available on failure.
-
-## Optional Resend email activation (#320)
-
-The Resend component deploys with Convex and stays dormant without
-`RESEND_API_KEY`. No email credential is required by CI or deployment workflows.
-Keep preview deployments unset unless deliberately testing email.
-
-Owner setup: verify the sender domain in Resend; configure Convex `EMAIL_FROM`,
-`APP_ORIGIN`, and existing `CLERK_SECRET_KEY`; then privately set
-`RESEND_API_KEY`. Optional: subscribe Resend `email.*` events to
-`https://<deployment>.convex.site/resend-webhook` and set
-`RESEND_WEBHOOK_SECRET`. These are Convex runtime settings, not web/gateway
-bindings or required GitHub environment secrets. [Detailed activation and
-verification](dev-environment.md#email-via-resend-320).
-
-Test a fresh low-balance, lifecycle, transfer, and listing-status notification
-before enabling production. Verify both inbox creation and component delivery
-status; API-key absence was intentional during implementation, so real provider
-acceptance remains an owner check. Skipped history is never replayed on activation.
-Unsetting the key prevents new email enqueues but does not cancel already queued
-component messages; cancel those separately or revoke the Resend key.
+`VITEST_MAX_WORKERS=2 pnpm ci:pr` validates root contracts/schema, real anonymous-backend races, the locally running Worker with production migration declarations, shared/web/gateway tests, and production builds. Schema and race scripts create guarded scratch projects under `.tmp/`, discard inherited Convex destinations, and refuse non-loopback anonymous targets. These commands do not deploy shared development or production.

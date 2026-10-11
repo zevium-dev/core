@@ -1,3 +1,5 @@
+> Updated 2026-10-11: root `convex/` is canonical. Never use the old shared local env to validate this cutover. `pnpm schema:check` and `pnpm test:races` create guarded anonymous `.tmp/` backends. `pnpm ci:control-plane` replaces `ci:next`. Provider activation remains owner-only: [runbook](convex-activation.md). Existing provider credentials and example historical setup below are not permission to configure or deploy providers.
+
 # Dev environment
 
 > Updated: 2026-10-10 (seed runner, local Convex CSP, discovery origins; #384, #387, #392)
@@ -28,14 +30,20 @@ pnpm build && pnpm test && pnpm typecheck   # must be green after every change s
 
 Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 
+## Cutover guard
+
+`pnpm dev` explicitly runs `pnpm predev` before starting any process (independent of pnpm lifecycle-hook settings). The guard reads process env, then root `.env.local`, then `.env`, matching Convex precedence. It allows `anonymous:` / `local:` selectors or loopback self-hosted backends; a hosted `dev:` target must return a nonempty `NEXT_DEPLOYMENT_ID` via read-only `convex env get`. Missing marker, failed lookup, unknown/production target or inherited deploy credentials fail closed with the [activation runbook](convex-activation.md). A value in a local env file is not proof of a remote marker. Never set the marker solely to bypass the guard. Raw `pnpm exec convex dev` bypasses package scripts and remains owner-only for hosted activation.
+
+Use `TMPDIR="$PWD/.tmp" VITEST_MAX_WORKERS=2 pnpm ci:pr` after `mkdir -p .tmp`. Anonymous schema/race checks stay isolated; never validate against legacy shared dev.
+
 ## Worktrees
 
-- **T3 worktrees**: root `t3.json` runs setup asynchronously. Ignored `.env*` and `.dev.vars*` files are copied from `T3CODE_PROJECT_ROOT` without replacing existing worktree files. Linux requests reflinks through Node; macOS uses native `cp -c` for APFS, publishing the cloned file exclusively. Unsupported filesystems fall back to independent copies. `pnpm-workspace.yaml` enables pnpm 11.8's global virtual store and `clone-or-copy` for every install and subsequent command, sharing registry dependency graphs while workspace packages remain checkout-local. CI runs env-copy tests and workspace types on Linux; there is no separate macOS job. CI and production continue using frozen installs.
+- **T3 worktrees**: root `t3.json` runs setup asynchronously. Ignored `.env*` and `.dev.vars*` files are copied from `T3CODE_PROJECT_ROOT` without replacing existing worktree files. Files containing nonlocal `CONVEX_DEPLOYMENT`, deploy credentials or self-hosted selectors are skipped with a warning by default. After reviewing the target, explicit `T3_COPY_REMOTE_CONVEX_ENV=1` permits copying them with a warning; it does not bypass `pnpm dev` protection. Linux requests reflinks through Node; macOS uses native `cp -c` for APFS, publishing the cloned file exclusively. Unsupported filesystems fall back to independent copies. `pnpm-workspace.yaml` enables pnpm 11.8's global virtual store and `clone-or-copy` for every install and subsequent command, sharing registry dependency graphs while workspace packages remain checkout-local. CI runs env-copy tests and workspace types on Linux; there is no separate macOS job. CI and production continue using frozen installs.
 - Worktree setup runs with trusted mise tools (`mise.toml`) — see [findings/worktree-setup.md](../findings/worktree-setup.md).
 
 ## Env files and secrets
 
-- Convex: root `.env.local` (`CONVEX_DEPLOYMENT`, `CONVEX_URL`); push schema with `mise exec -- pnpm exec convex dev --once`.
+- Convex: root `.env.local` (`CONVEX_DEPLOYMENT`, `CONVEX_URL`); ordinary development uses guarded `pnpm dev`; direct hosted schema pushes require the activation runbook.
 - Clerk (web): `apps/web/.env.local` (`VITE_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`); org slugs enabled.
 - **Local web secrets**: `REGISTRY_KEY_PROJECTION_HMAC_SECRET` belongs in `apps/web/.dev.vars`. Match it to the Convex development deployment. Include Clerk bindings in this file too: Wrangler uses `.dev.vars` instead of dotenv files when it exists. Keep public Vite configuration in `.env.local`. Root, web, and gateway `.dev.vars` paths are gitignored.
 - Gateway: `mise exec -- pnpm exec wrangler dev --port 8787` in `apps/gateway`; env in `apps/gateway/.dev.vars` (gitignored): `CLERK_SECRET_KEY`, `CONVEX_URL`, `GATEWAY_INTERNAL_SECRET=dev-internal-secret-1`.
@@ -51,7 +59,7 @@ Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 - Seed procedure: after `mise exec -- pnpm install --frozen-lockfile`, provide `CLERK_SECRET_KEY` for the Clerk test instance through the process environment or `apps/web/.env.local`, then run `mise exec -- pnpm seed`. The command uses the installed `tsx` runner and idempotently ensures the test user, `test-org`, and its admin membership. Existing users' passwords are not reset; use the password-reset procedure below if needed. This only seeds Clerk; it does not fund wallets or publish APIs.
 - `mise exec -- pnpm seed --check` loads the seed imports without reading credentials or contacting Clerk. CI runs this smoke check to catch runner/module-resolution and deleted-export regressions.
 - Seed sign-in: `test+clerk_test@zevium.dev` / `zevium-test-password`, OTP `424242`.
-- Test org wallet is funded on BOTH planes (Convex `grantCredits` + gateway `/internal/grant`, refId `e2e:manual:grant:1`).
+- Legacy manual dual-plane funding is retired. Local tests seed canonical source-backed grants through scratch-only harnesses; production has no `/internal/grant` endpoint. The wallet DO bootstraps from signed Convex snapshots.
 
 ## Clerk quirks
 

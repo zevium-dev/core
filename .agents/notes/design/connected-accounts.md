@@ -26,23 +26,23 @@ ONE flow: POST /connections -> provider consent -> /connections/callback -> code
 metered call -> pick connection -> refresh if due -> Bearer token -> provider API host only
 ```
 
-| Step | What happens                                                                                                                        | Where                                         |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| 1    | Registry entry per provider: authorize/token URLs, scopes, `client_id` param name, scope separator, extra params, PKCE, API hosts   | `packages/shared/src/oauth-providers.ts`      |
-| 2    | Client credentials from env `OAUTH_<CLIENT>_CLIENT_ID` / `_SECRET`, read at use time                                                | `convex/lib/oauthProviderClients.ts`          |
-| 3    | Listing spec names the provider: `x-zevium-oauth-provider` on an `oauth2` authorization-code scheme                                 | `packages/shared/src/connections.ts`          |
-| 4    | Start: pick scheme, check publisher allow-list and client config, random state + PKCE, consent URL from the registry                | `convex/connections.ts`, `connectionsHttp.ts` |
-| 5    | Callback: single-use state, code exchange at the registry token URL; Instagram swaps to its 60-day token                            | `convex/connectionsNode.ts`                   |
-| 6    | Call: connection chosen before any charge; token refreshed under a lease; injected only if the upstream host is a provider API host | `apps/gateway/src/admit.ts`, `forward.ts`     |
-| 7    | Long-lived tokens renewed by an hourly cron before they lapse unused                                                                | `convex/crons.ts` → `scheduleRenewals`        |
-| 8    | Disconnect: Zevium stops using the grant at once and asks the provider to revoke it, best effort                                    | `connections.revoke` → `revokeAtProvider`     |
+| Step | What happens                                                                                                                        | Where                                                                                         |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1    | Registry entry per provider: authorize/token URLs, scopes, `client_id` param name, scope separator, extra params, PKCE, API hosts   | `packages/shared/src/oauth-providers.ts`                                                      |
+| 2    | Client credentials from env `OAUTH_<CLIENT>_CLIENT_ID` / `_SECRET`, read at use time                                                | `convex/lib/oauthProviderClients.ts`                                                          |
+| 3    | Listing spec names the provider: `x-zevium-oauth-provider` on an `oauth2` authorization-code scheme                                 | `packages/shared/src/connections.ts`                                                          |
+| 4    | Start: pick scheme, check `houseOperated` and client config, random state + PKCE, consent URL from the registry                     | `convex/connections.ts`, `connectionsHttp.ts`                                                 |
+| 5    | Callback: single-use state, code exchange at the registry token URL; Instagram swaps to its 60-day token                            | `convex/connectionsNode.ts`                                                                   |
+| 6    | Call: connection chosen before any charge; token refreshed under a lease; injected only if the upstream host is a provider API host | `apps/gateway/src/next/pipeline.ts`, `connections.ts` (`resolveCallConnection`), `forward.ts` |
+| 7    | Long-lived tokens renewed by an hourly cron before they lapse unused                                                                | `convex/crons.ts` → `scheduleRenewals`                                                        |
+| 8    | Disconnect: Zevium stops using the grant at once and asks the provider to revoke it, best effort                                    | `connections.revoke` → `revokeAtProvider`                                                     |
 
 ## Roles
 
 | Piece                   | Owns                                                                                                 |
 | ----------------------- | ---------------------------------------------------------------------------------------------------- |
 | Provider registry       | Endpoints, scopes, quirks, API hosts. Reviewed code; a spec cannot change any of it                  |
-| Deployment env (Convex) | Zevium's client ID + secret per provider app; `OAUTH_PROVIDER_PUBLISHERS` allow-list                 |
+| Deployment env (Convex) | Zevium's client ID + secret per provider app                                                         |
 | Listing spec            | Which provider and scopes each operation needs                                                       |
 | Gateway `/connections`  | API-key management (start, list, get, revoke); provider callback                                     |
 | Gateway metered call    | Picks the connection, checks the upstream host, adds `Authorization: Bearer <consumer token>`        |
@@ -135,13 +135,13 @@ Adding a provider = one registry entry, two env vars, the provider's app registr
 
 - `ConnectionView`: `id` (`conn_` + 26 base32), `api`, `scheme`, `provider`, `label`, `status` (`pending`, `expired`, `active`, `reauthorize`, `failed`, `revoked`), `scopes`, `createdAt`, `connectedAt`, `error`.
 - `label` (≤ 64 printable chars) maps connections to the app's own end users. Many connections per org and API.
-- Same gates as calls: wallet sessions rejected, disabled keys and archived orgs blocked through the wallet DO, private APIs 404 for other orgs, deprecated `entitled_only` APIs 403, sunset 410.
-- Start errors: `publisher_not_allowed` 403 (listing's publisher not on `OAUTH_PROVIDER_PUBLISHERS`), `provider_not_configured` 503 (Zevium client env missing), `no_oauth_scheme`/`scheme_required`/`scheme_not_found` 400, `too_many_pending` 429 (50 open links per org).
+- Same evidence as calls: signed key and route snapshots. Disabled, expired or lapsed-grace keys 403; archived orgs and unknown keys 401; private APIs 404 for other orgs; deprecated `entitled_only` APIs 403; sunset or retired 410. Management routes are not rate limited (the per-key limiter lives in wallet admission); writes are bounded by the 50-open-link cap.
+- Start errors: `publisher_not_allowed` 403 (project not `houseOperated`), `provider_not_configured` 503 (Zevium client env missing), `no_oauth_scheme`/`scheme_required`/`scheme_not_found` 400, `too_many_pending` 429 (50 open links per org).
 - `returnUrl`: https, or http on localhost/127.0.0.1.
 
 ## Metered calls
 
-`admit()` resolves the connection after route matching and **before** any free tier or reservation, so every failure below costs 0.
+The pipeline (`execute` → `resolveCallConnection`) resolves the connection after route matching and **before** wallet admission (free tier or reservation), so every failure below costs 0.
 
 | Outcome                               | Response                                                                      |
 | ------------------------------------- | ----------------------------------------------------------------------------- |
@@ -155,12 +155,11 @@ Adding a provider = one registry entry, two env vars, the provider's app registr
 
 - The consumer token overrides a publisher `authorization` header; other publisher headers still apply.
 - `x-zevium-connection` is stripped like every `x-zevium-*` header; CORS allows and exposes it.
-- The `next` control-plane pipeline (`CONTROL_PLANE_MODE=next`) has no connections yet: operations that require one return 503 `connections_unavailable` before admission, cost 0.
 - MCP `call_api` builds the same request, so it uses the single active connection automatically; it can't pick one of several yet.
 
 ## Storage and security
 
-- Table `oauthConnections` (consumer org, project, scheme, provider, status, encrypted verifier/access/refresh tokens, expiry, token revision, refresh lease, `renewAt`). No client table: client credentials live only in env.
+- Table `oauthConnections` (`convex/schema/connections.ts`, the 37th application table; consumer org, project, scheme, provider, status, encrypted verifier/access/refresh tokens, expiry, token revision, refresh lease, `renewAt`). No client table: client credentials live only in env.
 - Encryption: existing AES-GCM keyring (`UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`), binding `oauth-connection` (`connId:access|refresh|verifier`), so ciphertexts can't be swapped between rows or fields.
 - `state`: 32 random bytes; only its SHA-256 is stored; claimed and cleared in one mutation (single use); 10-minute expiry. PKCE S256 for providers that support it; verifier encrypted.
 - Randomness and encryption for new links happen in the httpAction, not in a mutation.
@@ -171,29 +170,28 @@ Adding a provider = one registry entry, two env vars, the provider's app registr
 - Revoke: row revoked and tokens dropped in one mutation, which schedules `revokeAtProvider` (Google: refresh token at `/revoke`; TikTok: access token plus client auth; Instagram has no endpoint). Failures are ignored.
 - Gateway cache: per isolate, 60 s, never past token expiry minus 60 s; failures never cached. Revoke takes effect within 60 s.
 - Cleanup cron `cleanup-oauth-connections` (hourly): deletes links abandoned for 1 h, and failed or revoked rows after 30 days.
-- **Publisher allow-list:** every token is issued to Zevium's provider apps, so only listings from handles in `OAUTH_PROVIDER_PUBLISHERS` (Zevium's house publisher) can start connections. Unset = none.
+- **House listings only:** every token is issued to Zevium's provider apps, so only projects with `houseOperated: true` (Zevium-operated listings; new projects default to false) can start connections.
 
 **Link phishing (known, not mitigated):** `authorizationUrl` is a bearer capability. Anyone who completes it connects _their_ account into the org that created it. Apps must show it only to the account owner.
 
 ## Activation
 
 1. Register Zevium's app with each provider. Redirect URI: `https://gateway.zevium.dev/connections/callback` (per environment gateway origin).
-2. Set Convex env: `OAUTH_GOOGLE_CLIENT_ID/SECRET`, `OAUTH_TIKTOK_CLIENT_ID/SECRET` (TikTok client key), `OAUTH_INSTAGRAM_CLIENT_ID/SECRET`, `OAUTH_PROVIDER_PUBLISHERS=<house publisher handle>`. Existing `GATEWAY_INTERNAL_SECRET` and `UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS` are reused.
+2. Set Convex env: `OAUTH_GOOGLE_CLIENT_ID/SECRET`, `OAUTH_TIKTOK_CLIENT_ID/SECRET` (TikTok client key), `OAUTH_INSTAGRAM_CLIENT_ID/SECRET`. Existing `GATEWAY_INTERNAL_SECRET` and `UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS` are reused.
 3. Deploy Convex (table, routes, crons) before the Worker.
-4. Publish house listings with provider schemes (spec example above).
+4. Publish house listings (`houseOperated`) with provider schemes (spec example above).
 5. Pass provider review before real users (#445): see [research](../research/connected-accounts-providers.md#approval-and-quota). Until then YouTube uploads and TikTok posts are private-only and quota is tiny.
 
 ## Tests
 
 - `packages/shared/src/connections.test.ts`: provider binding, foreign endpoints/scopes rejected, plain OAuth schemes ignored, upstream host rule, required/optional detection, scope union, authorize URL for Google and TikTok, token parsing (JSON, form, Instagram `data`, Graph 190, errors, non-bearer).
-- `convex/connections.test.ts`: allow-list and client config errors, PKCE link from the registry, single-use exchange with Zevium's client secret, denied/expired, selection, refresh (non-rotating), rejected vs transient refresh, revoke + provider revocation, cleanup, Instagram swap + renewal cron + GET refresh.
-- `apps/gateway/test/connections.test.ts`: token injection over publisher auth, upstream host lock, `connection_required` with no charge, ambiguous + header selection, header not forwarded, optional ops, fail closed, management auth/validation/private APIs, list/get/revoke, callback redirect and pages, token cache.
+- `tests/connections.test.ts`: `houseOperated` gate and client config errors, PKCE link from the registry, single-use exchange with Zevium's client secret, denied/expired, selection, refresh (non-rotating), rejected vs transient refresh, revoke + provider revocation, cleanup, Instagram swap + renewal cron + GET refresh.
+- `apps/gateway/test/connections.test.ts`: connection resolution (host lock, required/optional, ambiguous + header selection, fail closed), Bearer injection over publisher auth and header stripping in `forward`, management auth (missing/invalid/disabled/unavailable), validation, private APIs, list/get/revoke, callback redirect and pages, worker routing, token cache.
 
 ## Not done
 
 - Media hosting: Instagram publishes only from a public media URL; large YouTube uploads need resumable sessions beyond Worker body limits (#444).
 - Bring-your-own provider client per org (own quota and review) (#446).
 - App confirm step against link phishing.
-- Connections on the `next` control plane (#448); `packages/control-plane-next/contracts/completion.json` marks the 16 functions retired-pending-port.
 - MCP `call_api` choosing among several connections.
 - Per-auth-event fee (per-call only for now). `lastUsedAt` on connections.

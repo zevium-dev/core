@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import { formatNumber, formatPublisherCredits } from "#/lib/format";
 import {
@@ -67,7 +68,6 @@ import {
   type AnalyticsRange,
 } from "#/lib/analytics-view";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
@@ -407,7 +407,7 @@ function ProjectOverview({
   project,
   onEdit,
 }: {
-  project: Doc<"projects">;
+  project: ProjectView;
   onEdit: () => void;
 }) {
   const isLive =

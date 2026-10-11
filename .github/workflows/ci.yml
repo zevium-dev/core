@@ -24,15 +24,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
-      - name: Initialize local Convex for code generation
-        env:
-          CONVEX_AGENT_MODE: anonymous
-          CLERK_JWT_ISSUER_DOMAIN: https://clerk.invalid
-        run: |
-          pnpm exec convex init
-          pnpm exec convex env set CLERK_JWT_ISSUER_DOMAIN https://clerk.invalid
       - name: Run uncached PR quality gate
         env:
+          VITEST_MAX_WORKERS: "2"
           TURBO_FORCE: "true"
           CI: "true"
           CONVEX_AGENT_MODE: anonymous

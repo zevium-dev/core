@@ -1,15 +1,12 @@
-import { v } from "convex/values";
-
+import { v, ConvexError } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
-import { encryptCredential } from "./lib/credentialCrypto";
 import {
-  requireIdentity,
+  requireActiveOrg,
   requireOrgAdmin,
+  requireProjectAdmin,
   requireProjectMember,
 } from "./lib/auth";
-import { enqueuePublishedProjectProjection } from "./registrySync";
-
+import { credentialBinding, encryptSecret } from "./lib/credentialCrypto";
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
 const BLOCKED_HEADERS = new Set([
   "connection",
@@ -25,117 +22,109 @@ const BLOCKED_HEADERS = new Set([
 
 function normalizeName(input: string): string {
   const name = input.trim().toLowerCase();
-  if (name.length === 0) throw new Error("Header name is required");
-  if (name.length > 128) throw new Error("Header name is too long");
-  if (!HEADER_NAME.test(name)) throw new Error("Header name is invalid");
+  if (name.length === 0) throw new ConvexError("Header name is required");
+  if (name.length > 128) throw new ConvexError("Header name is too long");
+  if (!HEADER_NAME.test(name)) throw new ConvexError("Header name is invalid");
   if (
     BLOCKED_HEADERS.has(name) ||
     name.startsWith("cf-") ||
     name.startsWith("x-zevium-")
   ) {
-    throw new Error("This header cannot be configured");
+    throw new ConvexError("This header cannot be configured");
   }
   return name;
 }
 
 function validateSecret(secret: string): string {
-  if (secret.length === 0) throw new Error("Secret value is required");
-  if (secret.length > 4096) throw new Error("Secret value is too long");
+  if (secret.length === 0) throw new ConvexError("Secret value is required");
+  if (secret.length > 4096) throw new ConvexError("Secret value is too long");
   if (secret.includes("\r") || secret.includes("\n")) {
-    throw new Error("Secret value cannot contain newlines");
+    throw new ConvexError("Secret value cannot contain newlines");
   }
   return secret;
 }
 
-export type UpstreamCredentialMetadata = {
-  id: Id<"upstreamCredentials">;
-  name: string;
-  updatedAt: number;
-};
-
 export const listForProject = query({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<UpstreamCredentialMetadata[]> => {
+  handler: async (ctx, args) => {
     await requireProjectMember(ctx, args.projectId);
     const rows = await ctx.db
       .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .withIndex("by_project_name", (q) => q.eq("projectId", args.projectId))
       .collect();
-    return rows
-      .map((row) => ({
-        id: row._id,
-        name: row.name,
-        updatedAt: row.updatedAt,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return rows.map((r) => ({
+      id: r._id,
+      name: r.name,
+      updatedAt: r.updatedAt,
+    }));
   },
 });
-
 export const upsert = mutation({
-  args: {
-    projectId: v.id("projects"),
-    name: v.string(),
-    secret: v.string(),
-  },
-  handler: async (ctx, args): Promise<UpstreamCredentialMetadata> => {
-    const { claims } = await requireProjectMember(ctx, args.projectId);
-    requireOrgAdmin(claims);
-    const name = normalizeName(args.name);
-    const secret = validateSecret(args.secret);
-    const encrypted = await encryptCredential(secret, args.projectId, name);
+  args: { projectId: v.id("projects"), name: v.string(), secret: v.string() },
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    const name = normalizeName(args.name),
+      secret = validateSecret(args.secret);
     const existing = await ctx.db
       .query("upstreamCredentials")
       .withIndex("by_project_name", (q) =>
-        q.eq("projectId", args.projectId).eq("name", name),
+        q.eq("projectId", project._id).eq("name", name),
       )
       .unique();
-    const updatedAt = Date.now();
-    const revision = (existing?.revision ?? 0) + 1;
-
-    let id: Id<"upstreamCredentials">;
-    if (existing === null) {
-      id = await ctx.db.insert("upstreamCredentials", {
-        projectId: args.projectId,
-        name,
-        ...encrypted,
-        revision,
-        updatedAt,
-      });
-    } else {
-      id = existing._id;
-      await ctx.db.patch(existing._id, {
-        ...encrypted,
-        secret: undefined,
-        revision,
-        updatedAt,
-      });
-    }
-    await enqueuePublishedProjectProjection(ctx, args.projectId);
-    return { id, name, updatedAt };
+    if (
+      !existing &&
+      (
+        await ctx.db
+          .query("upstreamCredentials")
+          .withIndex("by_project_name", (q) => q.eq("projectId", project._id))
+          .take(33)
+      ).length >= 32
+    )
+      throw new ConvexError("At most 32 upstream credentials");
+    const revision = Math.max(project.revision, existing?.revision ?? 0) + 1;
+    const fields = {
+      projectId: project._id,
+      name,
+      revision,
+      updatedAt: Date.now(),
+      envelope: await encryptSecret(
+        secret,
+        credentialBinding(project._id, name, revision),
+      ),
+    };
+    let id = existing?._id;
+    if (id) await ctx.db.patch(id, fields);
+    else id = await ctx.db.insert("upstreamCredentials", fields);
+    await ctx.db.patch(project._id, {
+      revision: project.revision + 1,
+      ...(project.draft
+        ? { draft: { ...project.draft, readiness: undefined } }
+        : {}),
+    });
+    return { id, name, updatedAt: fields.updatedAt };
   },
 });
-
 export const remove = mutation({
   args: { credentialId: v.id("upstreamCredentials") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ deleted: Id<"upstreamCredentials"> }> => {
-    // Role and active-org checks happen before touching caller-controlled id.
-    // Missing and cross-org rows intentionally collapse to one error.
-    const claims = await requireIdentity(ctx);
+  handler: async (ctx, args) => {
+    const { org, claims } = await requireActiveOrg(ctx);
     requireOrgAdmin(claims);
-    if (!claims.orgId) throw new Error("Upstream credential unavailable");
-    const credential = await ctx.db.get(args.credentialId);
-    if (credential === null) throw new Error("Upstream credential unavailable");
-    const project = await ctx.db.get(credential.projectId);
-    const org =
-      project === null ? null : await ctx.db.get(project.organizationId);
-    if (org === null || org.clerkOrgId !== claims.orgId) {
-      throw new Error("Upstream credential unavailable");
-    }
-    await ctx.db.delete(credential._id);
-    await enqueuePublishedProjectProjection(ctx, credential.projectId);
-    return { deleted: credential._id };
+    const row = await ctx.db.get(args.credentialId);
+    const project = row && (await ctx.db.get(row.projectId));
+    if (
+      !row ||
+      !project ||
+      project.organizationId !== org._id ||
+      project.retirement?.state === "retired"
+    )
+      throw new ConvexError("Upstream credential unavailable");
+    await ctx.db.delete(row._id);
+    await ctx.db.patch(project._id, {
+      revision: project.revision + 1,
+      ...(project.draft
+        ? { draft: { ...project.draft, readiness: undefined } }
+        : {}),
+    });
+    return { deleted: row._id };
   },
 });

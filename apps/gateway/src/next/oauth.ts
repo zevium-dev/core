@@ -128,7 +128,7 @@ export class EdgeOAuthDO extends DurableObject<NextEnv> {
         !config ||
         !this.env.CLERK_SECRET_KEY ||
         !this.env.GATEWAY_INTERNAL_SECRET ||
-        !this.env.NEXT_CONVEX_SITE_URL
+        !this.env.CONVEX_SITE_URL
       )
         return;
       let expiresAt = Date.now() + 30_000;
@@ -137,7 +137,7 @@ export class EdgeOAuthDO extends DurableObject<NextEnv> {
       const verifier = new ClerkMcpOAuthVerifier({
         ...config,
         secretKey: this.env.CLERK_SECRET_KEY,
-        siteUrl: this.env.NEXT_CONVEX_SITE_URL,
+        siteUrl: this.env.CONVEX_SITE_URL,
         internalSecret: this.env.GATEWAY_INTERNAL_SECRET,
         fetchImpl: async (input, init) => {
           signal.throwIfAborted();

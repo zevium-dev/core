@@ -217,7 +217,7 @@ it("cold-fills once, renews unchanged sources, logs rejected finals and prunes o
   await runInDurableObject(stub, async (_wallet, ctx) => {
     const wallet = new NextWalletDO(ctx, {
       ...(env as unknown as NextEnv),
-      NEXT_CONVEX_SITE_URL: "https://next.invalid",
+      CONVEX_SITE_URL: "https://next.invalid",
       NEXT_SNAPSHOT_KEYS: JSON.stringify(ring),
     });
     const original = JSON.parse(

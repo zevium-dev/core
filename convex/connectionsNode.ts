@@ -17,6 +17,7 @@ import {
 } from "./lib/credentialCrypto";
 import { providerClient } from "./lib/oauthProviderClients";
 import { requestPinnedHttpsForBody } from "./lib/webhookTransport";
+import { envelope } from "./schema/common";
 
 export type AuthorizationOutcome = {
   status: "active" | "denied" | "failed" | "expired" | "invalid";
@@ -312,15 +313,7 @@ export const revokeAtProvider = internalAction({
     connectionId: v.string(),
     provider: v.string(),
     field: v.union(v.literal("access"), v.literal("refresh")),
-    token: v.object({
-      ciphertext: v.string(),
-      iv: v.string(),
-      keyVersion: v.string(),
-      sealedCiphertext: v.string(),
-      sealedIv: v.string(),
-      sealedKeyVersion: v.string(),
-      sealedVersion: v.literal("v2"),
-    }),
+    token: envelope,
   },
   handler: async (_ctx, args): Promise<boolean> => {
     const provider = getOAuthProvider(args.provider);

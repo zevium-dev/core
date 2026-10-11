@@ -1,4 +1,3 @@
-import { NEXT_CONTROL_PLANE } from "#/lib/control-plane";
 import { publicSemanticSearch } from "#/lib/catalogue-search.functions";
 import { QualityBadges } from "#/components/quality-badges";
 import { ListBoundary } from "#/components/list-boundary";
@@ -6,7 +5,7 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import { Link } from "@tanstack/react-router";
-import { useAction, usePaginatedQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -122,7 +121,6 @@ export function CatalogueBrowser({
       }),
   );
 
-  const runSemanticAction = useAction(api.search.searchCatalogue);
   const semanticQueryText = routeSearch.semantic
     ? (routeSearch.q ?? "").trim()
     : "";
@@ -133,8 +131,6 @@ export function CatalogueBrowser({
       items: SearchListing[];
       degraded: boolean;
     }> => {
-      if (!NEXT_CONTROL_PLANE)
-        return runSemanticAction({ query: semanticQueryText, limit: 20 });
       const result = await publicSemanticSearch({
         data: { query: semanticQueryText },
       });

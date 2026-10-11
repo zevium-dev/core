@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 
@@ -5,7 +6,6 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { formatRelativeTime } from "#/lib/relative-time";
 import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
@@ -13,7 +13,7 @@ export function WebhookDeliveries({
   project,
   hasEndpoint,
 }: {
-  project: Doc<"projects">;
+  project: ProjectView;
   hasEndpoint: boolean;
 }) {
   const deliveriesQuery = useQuery(

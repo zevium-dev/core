@@ -448,7 +448,7 @@ export async function probePublicHttps(
 
 export const runScheduledProbe = internalAction({
   args: {
-    targetId: v.id("qualityProbeTargets"),
+    targetId: v.id("projects"),
     executionId: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
