@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { CREDITS_PER_USD } from "./accounting";
+import { grantSignupCredit } from "./lib/signupCredit";
 import {
   internalMutation,
   mutation,
@@ -81,46 +81,6 @@ async function ensureWallet(
     updatedAt: Date.now(),
   });
   return walletId;
-}
-
-/** Creator comes only from Clerk's server-side organization payload, never a member JWT. */
-async function grantSignupCredit(
-  ctx: MutationCtx,
-  organizationId: Id<"organizations">,
-  creatorClerkUserId: string | undefined,
-): Promise<void> {
-  if (!creatorClerkUserId?.trim()) return;
-  const organization = await ctx.db.get(organizationId);
-  if (organization === null || organization.archivedAt !== undefined) return;
-  const priorOrgGrant = await ctx.db
-    .query("signupCreditGrants")
-    .withIndex("by_clerk_org", (q) =>
-      q.eq("clerkOrgId", organization.clerkOrgId),
-    )
-    .unique();
-  if (priorOrgGrant !== null) return;
-  const priorCreatorGrant = await ctx.db
-    .query("signupCreditGrants")
-    .withIndex("by_creator", (q) =>
-      q.eq("creatorClerkUserId", creatorClerkUserId),
-    )
-    .unique();
-  if (priorCreatorGrant !== null) return;
-
-  // The indexed creator claim and the ledger/funding write share one transaction.
-  // Retain the claim independently of user mirrors, including after deletion.
-  await ctx.runMutation(internal.wallets.applyAdminAdjustment, {
-    organizationId,
-    amount: CREDITS_PER_USD,
-    refId: `promo:signup:${organization.clerkOrgId}`,
-    promotion: true,
-  });
-  await ctx.db.insert("signupCreditGrants", {
-    clerkOrgId: organization.clerkOrgId,
-    creatorClerkUserId,
-    organizationId,
-    grantedAt: Date.now(),
-  });
 }
 
 export type PublicOrganization = {
@@ -255,7 +215,6 @@ export const upsertFromClerk = internalMutation({
         imageUrl: args.imageUrl,
       });
       await ensureWallet(ctx, organizationId);
-      await grantSignupCredit(ctx, organizationId, args.creatorClerkUserId);
       await ctx.scheduler.runAfter(
         0,
         internal.catalogue.syncOrganizationCataloguePage,
@@ -283,7 +242,6 @@ export const upsertFromClerk = internalMutation({
       imageUrl: args.imageUrl,
     });
     await ensureWallet(ctx, existing._id);
-    await grantSignupCredit(ctx, existing._id, args.creatorClerkUserId);
     await ctx.scheduler.runAfter(
       0,
       internal.catalogue.syncOrganizationCataloguePage,
@@ -398,11 +356,13 @@ export const applyOrganizationWebhook = internalMutation({
       .query("organizationTombstones")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-    // A newer update may arrive without creator data before the creation event.
+    // A delayed creation event still claims credit after a newer profile update.
+    // Updates and generic mirror writes cannot nominate a grant recipient.
     if (
       tombstone === null &&
       existing !== null &&
-      existing.archivedAt === undefined
+      existing.archivedAt === undefined &&
+      args.eventType === "organization.created"
     ) {
       await grantSignupCredit(ctx, existing._id, args.creatorClerkUserId);
     }
@@ -438,7 +398,9 @@ export const applyOrganizationWebhook = internalMutation({
         unreadNotificationCount: 0,
       });
       await ensureWallet(ctx, organizationId);
-      await grantSignupCredit(ctx, organizationId, args.creatorClerkUserId);
+      if (args.eventType === "organization.created") {
+        await grantSignupCredit(ctx, organizationId, args.creatorClerkUserId);
+      }
       await ctx.scheduler.runAfter(
         0,
         internal.catalogue.syncOrganizationCataloguePage,

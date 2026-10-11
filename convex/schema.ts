@@ -44,6 +44,12 @@ export default defineSchema({
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
 
+  /** Permanent delete-before-create guard, independent of user mirrors. */
+  userTombstones: defineTable({
+    clerkUserId: v.string(),
+    deletedAt: v.number(),
+  }).index("by_clerk_user", ["clerkUserId"]),
+
   /** Permanent anti-farming claims; independent of deletable user mirrors. */
   signupCreditGrants: defineTable({
     clerkOrgId: v.string(),

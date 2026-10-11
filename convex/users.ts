@@ -34,6 +34,16 @@ export const upsertFromClerk = internalMutation({
 export const deleteFromClerk = internalMutation({
   args: { clerkUserId: v.string() },
   handler: async (ctx, args): Promise<void> => {
+    const tombstone = await ctx.db
+      .query("userTombstones")
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+    if (tombstone === null) {
+      await ctx.db.insert("userTombstones", {
+        clerkUserId: args.clerkUserId,
+        deletedAt: Date.now(),
+      });
+    }
     const existing = await ctx.db
       .query("users")
       .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))

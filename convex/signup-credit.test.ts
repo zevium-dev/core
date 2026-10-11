@@ -17,6 +17,26 @@ const event = {
   slug: "signup",
 };
 
+async function signedEvent(
+  t: ReturnType<typeof convexTest>,
+  type: string,
+  data: unknown,
+  id: string,
+) {
+  vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", secret);
+  const body = JSON.stringify({ type, data });
+  const timestamp = new Date();
+  return await t.fetch("/clerk-webhook", {
+    method: "POST",
+    body,
+    headers: {
+      "svix-id": id,
+      "svix-timestamp": String(Math.floor(timestamp.getTime() / 1000)),
+      "svix-signature": new Webhook(secret).sign(id, timestamp, body),
+    },
+  });
+}
+
 async function state(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => ({
     wallets: await ctx.db.query("wallets").collect(),
@@ -40,6 +60,7 @@ describe("signup promotional credit", () => {
         name: event.name,
         slug: event.slug,
         created_by: event.creatorClerkUserId,
+        created_at: 100,
       },
     });
     const timestamp = new Date();
@@ -113,6 +134,11 @@ describe("signup promotional credit", () => {
     await t.mutation(internal.users.deleteFromClerk, {
       clerkUserId: event.creatorClerkUserId,
     });
+    await t.mutation(internal.users.upsertFromClerk, {
+      clerkUserId: event.creatorClerkUserId,
+      name: "Recreated mirror",
+      email: "creator@example.com",
+    });
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
       svixId: "msg_second",
@@ -182,5 +208,218 @@ describe("signup promotional credit", () => {
     });
     expect((await state(t)).entries).toHaveLength(0);
     expect((await state(t)).claims).toHaveLength(0);
+  });
+  it("lets the first processed creation win when a later org arrives first", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_later",
+      clerkOrgId: "org_later",
+      slug: "later",
+      eventTimestamp: 200,
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims[0]?.clerkOrgId).toBe("org_later");
+  });
+
+  it("joining an org never spends the joining user's claim", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      creatorClerkUserId: "user_other",
+    });
+    await signedEvent(
+      t,
+      "user.created",
+      {
+        id: event.creatorClerkUserId,
+        organization_memberships: [{ organization: { id: event.clerkOrgId } }],
+      },
+      "msg_user_joined",
+    );
+    await t
+      .withIdentity({
+        subject: event.creatorClerkUserId,
+        org_id: event.clerkOrgId,
+        org_slug: event.slug,
+      })
+      .mutation(api.organizations.ensureOrganization, {
+        clerkOrgId: event.clerkOrgId,
+      });
+    await signedEvent(
+      t,
+      "organizationMembership.created",
+      {
+        organization: { id: event.clerkOrgId },
+        public_user_data: { user_id: event.creatorClerkUserId },
+      },
+      "msg_membership",
+    );
+    expect(
+      (await state(t)).claims.map((claim) => claim.creatorClerkUserId),
+    ).toEqual(["user_other"]);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_own_org",
+      clerkOrgId: "org_own",
+      slug: "own",
+    });
+    expect((await state(t)).claims).toHaveLength(2);
+  });
+
+  it("requires organization.created, not an update or generic trusted mirror", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: event.clerkOrgId,
+      name: event.name,
+      slug: event.slug,
+      creatorClerkUserId: event.creatorClerkUserId,
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      eventType: "organization.updated",
+      svixId: "msg_update_only",
+    });
+    expect((await state(t)).entries).toHaveLength(0);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    expect((await state(t)).entries).toHaveLength(1);
+  });
+
+  it("preserves the user claim after org deletion and recreation", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_delete",
+      eventType: "organization.deleted",
+      eventTimestamp: 200,
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_recreate_same",
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_recreate_new",
+      clerkOrgId: "org_recreated",
+      slug: "recreated",
+    });
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims).toHaveLength(1);
+  });
+
+  it("denies late grants after delete-before-create user or org events", async () => {
+    for (const deleted of ["user", "organization"]) {
+      const t = convexTest(schema, modules);
+      if (deleted === "user") {
+        await t.mutation(internal.users.deleteFromClerk, {
+          clerkUserId: event.creatorClerkUserId,
+        });
+      } else {
+        await t.mutation(internal.organizations.applyOrganizationWebhook, {
+          ...event,
+          svixId: "msg_delete_before",
+          eventType: "organization.deleted",
+        });
+      }
+      await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+      expect((await state(t)).entries).toHaveLength(0);
+    }
+  });
+
+  it("retains legacy per-user grant claims under the stricter policy", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_legacy",
+        name: "Legacy",
+        slug: "legacy",
+      });
+      await ctx.db.insert("signupCreditGrants", {
+        organizationId,
+        clerkOrgId: "org_legacy",
+        creatorClerkUserId: event.creatorClerkUserId,
+        grantedAt: 1,
+      });
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    expect((await state(t)).entries).toHaveLength(0);
+    expect((await state(t)).claims).toHaveLength(1);
+  });
+
+  it("cannot fund an anonymous wallet even with a signed creation event", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: event.clerkOrgId,
+        name: "Anonymous",
+        slug: event.slug,
+        walletKind: "anonymous",
+      });
+    });
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    expect((await state(t)).entries).toHaveLength(0);
+  });
+  it("serializes concurrent creation deliveries into one ledger append", async () => {
+    const t = convexTest(schema, modules);
+    await Promise.all([
+      t.mutation(internal.organizations.applyOrganizationWebhook, event),
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        ...event,
+        svixId: "msg_concurrent_replay",
+      }),
+    ]);
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims).toHaveLength(1);
+    expect(result.wallets[0]).toMatchObject({ balance: 10_000, sequence: 1 });
+  });
+
+  it("serializes competing organizations into one per-user claim", async () => {
+    const t = convexTest(schema, modules);
+    await Promise.all([
+      t.mutation(internal.organizations.applyOrganizationWebhook, event),
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        ...event,
+        svixId: "msg_competing",
+        clerkOrgId: "org_competing",
+        slug: "competing",
+      }),
+    ]);
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims).toHaveLength(1);
+    expect(
+      result.wallets.reduce((sum, wallet) => sum + wallet.balance, 0),
+    ).toBe(10_000);
+  });
+
+  it("user snapshots and client metadata cannot nominate a recipient", async () => {
+    const t = convexTest(schema, modules);
+    for (const type of ["user.created", "user.updated"]) {
+      await signedEvent(
+        t,
+        type,
+        {
+          id: event.creatorClerkUserId,
+          organization_memberships: [
+            {
+              organization: {
+                id: event.clerkOrgId,
+                created_by: event.creatorClerkUserId,
+              },
+            },
+          ],
+          unsafe_metadata: { personalOrganization: event.clerkOrgId },
+        },
+        `msg_${type}`,
+      );
+    }
+    expect((await state(t)).claims).toHaveLength(0);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
+    expect((await state(t)).entries).toHaveLength(1);
   });
 });
