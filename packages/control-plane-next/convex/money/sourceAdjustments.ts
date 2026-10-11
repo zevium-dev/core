@@ -1,3 +1,4 @@
+import { recordBreakage } from "./financialRollups";
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
@@ -201,7 +202,7 @@ export async function restoreSource(
     expiredCredits: add(source.expiredCredits, expired ? amount : 0),
     state: expired ? "expired" : "available",
   });
-  if (expired)
+  if (expired) {
     await appendWalletEntry(
       ctx,
       {
@@ -215,6 +216,8 @@ export async function restoreSource(
       },
       lot.sourceKind === "promo" ? -amount : 0,
     );
+    await recordBreakage(ctx, `expiry:${refId}`, amount);
+  }
   return { ...result, wallet: await getWallet(ctx, entry.walletId) };
 }
 export async function adminEntries(

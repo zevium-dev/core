@@ -5,6 +5,7 @@ export const readTables = {
   connectedPayouts: defineTable({
     accountId: v.string(),
     providerPayoutId: v.string(),
+    revision: v.optional(v.number()),
     amountCents: v.number(),
     currency: v.string(),
     status: v.union(
@@ -268,6 +269,9 @@ export const readTables = {
         kind: v.union(
           v.literal("transfer"),
           v.literal("transfer_orphan"),
+          v.literal("payment"),
+          v.literal("release"),
+          v.literal("publisher_hold"),
           v.literal("settlement_exception"),
           v.literal("account_create"),
           v.literal("foreign_stripe_event"),
@@ -282,6 +286,7 @@ export const readTables = {
         reason: v.string(),
         organizationId: v.optional(v.id("organizations")),
         transferId: v.optional(v.id("publisherTransfers")),
+        paymentId: v.optional(v.id("payments")),
         operationId: v.optional(v.string()),
         candidateCount: v.number(),
         providerCursor: v.optional(v.string()),
@@ -299,6 +304,8 @@ export const readTables = {
     ),
   )
     .index("by_status_updated", ["rowKind", "status", "updatedAt"])
+    .index("by_org_hold", ["rowKind", "organizationId", "kind", "status"])
+    .index("by_payment", ["rowKind", "paymentId"])
     .index("by_transfer", ["rowKind", "transferId"])
     .index("by_operation", ["rowKind", "operationId"])
     .index("by_case_evidence", ["caseId", "rowKind", "value"]),

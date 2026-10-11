@@ -14,12 +14,13 @@
     "test:races": "node scripts/races.mjs"
   },
   "dependencies": {
+    "@clerk/backend": "^3.22.0",
     "@convex-dev/rate-limiter": "^0.4.2",
     "@zevium/shared": "workspace:*",
     "convex": "^1.46.0",
-    "zod": "^4.6.5",
+    "stripe": "22.3.1",
     "svix": "^1.96.1",
-    "@clerk/backend": "^3.22.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "26.6.4",

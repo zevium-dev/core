@@ -118,7 +118,9 @@ export function checkpoint(wallet: Doc<"wallets">) {
     gateState: wallet.gateState,
     gateRevision: wallet.gateRevision,
     settledThroughEdgeSequence: wallet.settledThroughEdgeSequence,
-    ...(wallet.gateState === "closing" && wallet.close
+    ...((wallet.gateState === "closing" ||
+      wallet.gateState === "maintenance") &&
+    wallet.close
       ? { closeId: wallet.close.id }
       : {}),
   };

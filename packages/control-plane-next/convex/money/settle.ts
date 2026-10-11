@@ -68,6 +68,7 @@ export async function settleOne(
   if (
     wallet.epoch !== event.epoch ||
     wallet.gateState === "closed" ||
+    wallet.gateState === "maintenance" ||
     (wallet.close?.ackAt !== undefined && wallet.gateState === "closing")
   )
     return reject(event.settleRefId, "Stale wallet epoch");

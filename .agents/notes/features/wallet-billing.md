@@ -1,7 +1,7 @@
 # Wallet & billing
 
 > Status: partial (P0 #5 + P1 #8 built; signup credit uses first signed org creation; P1 #12 spend controls planned; #360 SQLite wallet storage and #421 immediate empty-wallet credit recovery built; #109 anonymous lots built behind configuration; #334 admission-proof settlement built; real-money journey unproven) · Updated: 2026-10-11
-> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement, terminal exception/drain recovery, idempotent admin operations and promo self-consumption protection implemented; PR 4/5 and cutover remain pending.
+> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement, terminal exception/drain recovery, idempotent admin operations and promo self-consumption protection implemented; isolated PR 4 verified Stripe projection, source reconciliation, fees/refunds and closed-wallet maintenance implemented; PR 5 pairing and cutover remain pending.
 > Code: `packages/control-plane-next/convex/{wallets,usage}.ts`, `packages/control-plane-next/convex/money/`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/machinePayments.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`, `apps/gateway/src/wallet-storage.ts`, `packages/shared/src/pricing-policy.ts`, `convex/users.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -58,6 +58,12 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Insufficient balance on `/gateway` returns `402` with machine-readable create-key / top-up / docs actions — see [gateway](gateway.md) and [machine-payments](machine-payments.md)
 
 ## Tech
+
+### Isolated rebuild PR 4 — 2026-10-11
+
+`packages/control-plane-next/convex/{billing,stripeEvents,connect,payouts}.ts` now implements sandbox-only Checkout and verified provider projection. Raw signed receipts, canonical account/mode/customer/price/amount checks, and payment/lot/source/journal insertion prevent duplicate grants. Quoted/charged/actual fees stay separate; variance is actual minus charged. The fee switch defaults off under #318. Full refunds include the fee line; cumulative partial refunds conserve every principal/fee cent. Fee refunds mint/reverse no extra credits.
+
+`money/adjustments.ts` restores exact journals and reapplies capped source exposures in bounded, generation-fenced pages after drain. Busy close slots queue refunds; closed wallets use maintenance without another DO ACK. Dispute lifecycle alone never moves money. Source indexes preserve refund attribution after dust merges, promotions remain nonrefundable, and consumer balances never become debt. Expired restoration records platform breakage rollups atomically. [PR 4 scope, interpretations, validation and PR 5 handoff](../architecture/convex-rebuild.md#pr-4-implementation-and-handoff--2026-10-11). Current production behavior below is unchanged.
 
 ### Isolated rebuild PR 3 — 2026-10-11
 

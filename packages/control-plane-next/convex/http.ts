@@ -1,3 +1,4 @@
+import { stripeWebhook } from "./stripeEvents";
 import { recordUsageBatch } from "./wallets";
 import { ingestUsage } from "../contracts/settlement";
 import {
@@ -167,4 +168,10 @@ router.route({
     }
   }),
 });
+for (const [path, destination] of [
+  ["/stripe-webhook", "platform"],
+  ["/stripe-connect-webhook", "connect"],
+  ["/stripe-connect-v2-webhook", "v2"],
+] as const)
+  router.route({ path, method: "POST", handler: stripeWebhook(destination) });
 export default router;

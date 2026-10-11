@@ -32,6 +32,11 @@ cpSync(
   new URL("../tests/fixtures.ts", import.meta.url),
   new URL("tests/fixtures.ts", scratch),
 );
+// Test workers are driven explicitly; production cron jobs must not race fixture cleanup.
+writeFileSync(
+  new URL("convex/crons.ts", scratch),
+  'import { cronJobs } from "convex/server"; export default cronJobs();\n',
+);
 const harness = readFileSync(
   new URL("../tests/claimsHarness.ts", import.meta.url),
   "utf8",
@@ -58,6 +63,20 @@ const moneyHarness = readFileSync(
   .replaceAll('"../convex/', '"./')
   .replace('"./moneyFixtures"', '"../tests/moneyFixtures"');
 writeFileSync(new URL("convex/moneyRaces.ts", scratch), moneyHarness);
+for (const name of ["financeFixtures.ts", "measureDb.ts"])
+  cpSync(
+    new URL(`../tests/${name}`, import.meta.url),
+    new URL(`tests/${name}`, scratch),
+  );
+const financeHarness = readFileSync(
+  new URL("../tests/financeRacesHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replace('"./financeFixtures"', '"../tests/financeFixtures"')
+  .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
+  .replace('"./measureDb"', '"../tests/measureDb"');
+writeFileSync(new URL("convex/financeRaces.ts", scratch), financeHarness);
 for (const name of ["convex.json", "tsconfig.json", "package.json"]) {
   cpSync(new URL(name, base), new URL(name, scratch));
 }
@@ -103,8 +122,37 @@ run([
   "NEXT_ADMISSION_SECRET",
   "test-only-secret-never-use-in-production",
 ]);
-run(["dev", "--once", "--typecheck", "enable", "--run", "testClaims:races"]);
+run([
+  "env",
+  "set",
+  "NEXT_STRIPE_SECRET_KEY",
+  ["sk", "test", "fixture"].join("_"),
+]);
+run(["env", "set", "NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_fixture"]);
+run(["dev", "--once", "--typecheck", "enable"]);
+run(["run", "financeRaces:reset"]);
+run(["run", "testClaims:races"]);
 
 run(["run", "domainClaims:races"]);
 
 run(["run", "moneyRaces:races"]);
+
+run(["run", "financeRaces:races"]);
+
+// Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
+function result(args) {
+  const child = spawnSync("pnpm", ["exec", "convex", "run", ...args], {
+    cwd: fileURLToPath(scratch),
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  assert.equal(child.status, 0, `Convex ${args[0]} failed`);
+  return JSON.parse(child.stdout);
+}
+let progress = result(["financeRaces:largeStart"]);
+for (let batch = 0; !progress.done && batch < 8; batch++) {
+  progress = result(["financeRaces:largeBatch", JSON.stringify(progress)]);
+  console.log("PR4 10001-bucket local reconciliation", progress);
+}
+assert.equal(progress.done, true, "Large reconciliation failed to finish");
