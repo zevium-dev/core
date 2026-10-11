@@ -5,3 +5,7 @@
 /apps/web/dist/
 
 /.tmp/
+
+**/.tmp/
+/packages/control-plane-next/.convex/
+/packages/control-plane-next/.turbo/

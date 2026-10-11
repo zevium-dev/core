@@ -1,0 +1,42 @@
+{
+  "application": [
+    "organizations",
+    "users",
+    "orgTombstones",
+    "projects",
+    "routeTombstones",
+    "specVersions",
+    "upstreamCredentials",
+    "apiKeys",
+    "wallets",
+    "walletEntries",
+    "fundingLots",
+    "fundingLotSources",
+    "checkoutIntents",
+    "payments",
+    "paymentAdjustments",
+    "webhookReceipts",
+    "usageEvents",
+    "usageRollups",
+    "publisherEarnings",
+    "publisherBalances",
+    "publisherLedgerEntries",
+    "publisherTransfers",
+    "connectedPayouts",
+    "specEmbeddings",
+    "catalogueIndex",
+    "qualityEvents",
+    "reviews",
+    "reviewEvents",
+    "webhookDeliveries",
+    "notifications",
+    "specImportLeases",
+    "notificationPreferences",
+    "notificationEmailDeliveries",
+    "financeReconciliationCases"
+  ],
+  "components": {
+    "rateLimiter": ["rateLimits", "pendingUpdates"],
+    "rateLimiter/batchWorker": ["workers", "workerState"]
+  }
+}

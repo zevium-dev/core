@@ -1,0 +1,150 @@
+{
+  "status": "Foundation fixtures only; complete live function parity is a PR 6 gate, never inferred from matching source signatures.",
+  "retained": {
+    "wallets:getMyWallet": {
+      "balance": 10000,
+      "sequence": 1,
+      "entries": [
+        {
+          "id": "entry_fixture",
+          "kind": "promo",
+          "amount": 10000,
+          "sequence": 1,
+          "createdAt": 1792000000000
+        }
+      ]
+    },
+    "reviews:getAggregate": {
+      "count": 1,
+      "averageRating": 5,
+      "distribution": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 1
+      }
+    },
+    "specs:getPublishedForGateway": {
+      "spec": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Echo\",\"version\":\"1.0.0\"},\"paths\":{}}",
+      "version": "1.0.0",
+      "specVersionId": "version_fixture",
+      "visibility": "public"
+    },
+    "webhooks:getEndpoint": {
+      "url": "https://publisher.invalid/events",
+      "active": true,
+      "secretVersion": 1,
+      "createdAt": 1792000000000
+    },
+    "search:searchCatalogue": {
+      "items": [],
+      "degraded": true
+    },
+    "catalogue:listPublicPaginated": {
+      "page": [],
+      "items": [],
+      "isDone": true,
+      "continueCursor": "",
+      "nextCursor": null,
+      "total": 0,
+      "facets": {
+        "tags": [],
+        "freeTierCount": 0
+      }
+    },
+    "catalogue:publicFacets": [],
+    "notifications:unreadForOrg": {
+      "unreadCount": 0,
+      "unreadCountCapped": false
+    },
+    "quality:getPublisherQuality": {
+      "version": null,
+      "quality": null,
+      "status": "active",
+      "suspensionReason": null,
+      "suspendedAt": null,
+      "recoveryPasses": 0,
+      "recoveryRequired": 3,
+      "probeIntervalMs": 300000,
+      "historyLimit": 24,
+      "probes": []
+    }
+  },
+  "http": {
+    "POST /ingest-usage": {
+      "results": [
+        {
+          "refId": "settle:reservation_1",
+          "status": "applied"
+        },
+        {
+          "refId": "settle:reservation_2",
+          "status": "already_applied"
+        },
+        {
+          "refId": "settle:reservation_3",
+          "status": "rejected",
+          "reason": "invalid_evidence",
+          "retryable": false
+        }
+      ],
+      "wallet": {
+        "clerkOrgId": "org_consumer",
+        "balance": 9900,
+        "sequence": 2
+      }
+    },
+    "GET /wallet-grants": {
+      "wallet": {
+        "clerkOrgId": "org_consumer",
+        "balance": 10000,
+        "sequence": 1
+      },
+      "keySettings": [],
+      "archived": false
+    },
+    "GET /gateway-spec": null,
+    "POST /gateway-search": {
+      "items": [],
+      "degraded": true
+    },
+    "POST /mcp-identity": {
+      "status": 401,
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    "POST /clerk-webhook": {
+      "status": 200,
+      "body": ""
+    },
+    "POST /stripe-webhook": {
+      "status": 200,
+      "body": ""
+    },
+    "POST /stripe-connect-webhook": {
+      "status": 200,
+      "body": ""
+    },
+    "POST /stripe-connect-v2-webhook": {
+      "status": 200,
+      "body": ""
+    },
+    "POST /resend-webhook": {
+      "status": 200,
+      "body": ""
+    }
+  },
+  "retired": [
+    "POST /machine-fund",
+    "POST /release-probe-accounting",
+    "specImports:acquireLease",
+    "quality:setSubscription",
+    "quality:listSubscriptions",
+    "quality:subscriberCount",
+    "token_usage",
+    "walletSessions",
+    "capabilityProviders"
+  ]
+}

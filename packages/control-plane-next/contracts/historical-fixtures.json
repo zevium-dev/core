@@ -1,0 +1,488 @@
+{
+  "admin:isAdminQuery": {
+    "argsContract": "`{}`",
+    "returnContract": "boolean",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:listOrgs": {
+    "argsContract": "`{paginationOpts:paginationOptsValidator}`",
+    "returnContract": "Page<{handle,name,slug,balance}>",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:listProjects": {
+    "argsContract": "`{paginationOpts:paginationOptsValidator, status?:\"draft\"|\"published\", visibility?:\"private\"|\"public\"}`",
+    "returnContract": "Page<{handle, organizationHandle, organizationName, name, slug, status, visibility}>",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:listPublisherTransfers": {
+    "argsContract": "`{status?:\"created\"|\"pending\"|\"succeeded\"|\"failed\"|\"reversed\", paginationOpts:paginationOptsValidator}`",
+    "returnContract": "Page<transfer + publisher name + dispatch/reconciliation status>",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:platformStats": {
+    "argsContract": "`{}`",
+    "returnContract": "{orgs, projects:{draft,published}, projectsTotal, usageThisMonth, usageCapped, usageCap}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:recentUsage": {
+    "argsContract": "`{}`",
+    "returnContract": "recent usage rows with org/project/key IDs, endpoint, cost, status, latency, at",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:retryPublisherTransfer": {
+    "argsContract": "`{transferId:Id<\"publisherTransfers\">}`",
+    "returnContract": "{transferId}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "admin:setProjectVisibility": {
+    "argsContract": "`{organizationHandle:string, projectSlug:string, visibility:\"private\"|\"public\"}`",
+    "returnContract": "updated Project",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "analytics:orgOverview": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "{balance, cycleStart, dayStart, callsToday, creditsToday, callsCycle, creditsCycle, projectedCycleSpend, truncated, scanCap, recent[]}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "analytics:projectAnalytics": {
+    "argsContract": "`{orgSlug:string, projectSlug:string, rangeDays?:number}`",
+    "returnContract": "null or {projectId, projectSlug, rangeDays, rangeStart, calls, netCredits, credits, successRate, p50,p95,p99, errors4xx,errors5xx, endpoints[], callsByDay, truncated, scanCap}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "billing:createCheckout": {
+    "argsContract": "`{packId:\"pack_10\"|\"pack_50\"|\"pack_100\"}`",
+    "returnContract": "{url, checkoutIntentId}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "billing:cycleBreakdown": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "{access, scope, cycleStart, cycleEnd, asOf, totalCalls, totalCredits, ownCalls, ownCredits, projectedCredits, byKey[],byProject[],byEndpoint[],byMember[], breakdownTruncated, scanTruncated, scanCap}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "billing:getBillingState": {
+    "argsContract": "`{checkoutSessionId?:string, checkoutIntentId?:string}`",
+    "returnContract": "{access, wallet:{balance}, packs[], checkout, payments[{id,status,amount,currency,credits,refundedCredits,createdAt,failureReason?}]}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "catalogue:getPublicDetail": {
+    "argsContract": "`{publisherHandle:string, projectSlug:string}`",
+    "returnContract": "null or {project:{_id,name,slug,description?,tags,status,visibility}, org:{name,publisherHandle,imageUrl?}, latestVersion:{version,spec,publishedAt,deprecatedAt?,sunsetAt?,deprecationMessage?}|null, quality}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "catalogue:listPublic": {
+    "argsContract": "`{search?:string, tag?:string, cursor?:string, sort?:\"newest\"|\"name\"|\"cheapest\", hasFreeTier?:boolean, maxCost?:number}`",
+    "returnContract": "{items:PublicListing[], nextCursor:string|null, total, facets:{tags[{name,count}], freeTierCount}}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "earnings:forOrg": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "{byProject, month:{calls,grossCredits,netCredits}, allTime:{calls,grossCredits,netCredits}}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:beginRotation": {
+    "argsContract": "`{operationId:string, oldKeyId:string}`",
+    "returnContract": "RotationOperation|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:completeRotation": {
+    "argsContract": "`{projection:verifiedKeyRotationProjectionValidator, signature:string, keyName?:string}`",
+    "returnContract": "RotationOperation|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:failRotation": {
+    "argsContract": "`{operationId:string, message:string}`",
+    "returnContract": "RotationOperation|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:getForOrg": {
+    "argsContract": "`{}`",
+    "returnContract": "KeySettingView[]",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:listKeys": {
+    "argsContract": "`{}`",
+    "returnContract": "(KeySettingView + {id,name,masked,lastUsedAt:null,revoked:false,current})[]",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:registerVerified": {
+    "argsContract": "`{projection:verifiedKeyProjectionValidator, signature:string, keyName?:string}`",
+    "returnContract": "KeySettingView",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:revokePrevious": {
+    "argsContract": "`{keyId:string}`",
+    "returnContract": "KeySettingView",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:setCap": {
+    "argsContract": "`{keyId:string, monthlyCapCredits:number|null}`",
+    "returnContract": "KeySettingView",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "keySettings:setDisabled": {
+    "argsContract": "`{keyId:string, disabled:boolean}`",
+    "returnContract": "KeySettingView",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "notifications:listForOrg": {
+    "argsContract": "`{orgSlug:string, paginationOpts:paginationOptsValidator}`",
+    "returnContract": "Page<{_id,kind,title,body,refId,publisherHandle?,projectSlug?,readAt?,createdAt}> + {unreadCount,unreadCountCapped}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "notifications:markAllRead": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "{updated,complete} (remaining pages self-schedule)",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "notifications:markRead": {
+    "argsContract": "`{notificationId:Id<\"notifications\">}`",
+    "returnContract": "{ok:true}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "organizations:activeCapabilities": {
+    "argsContract": "`{}`",
+    "returnContract": "OrgAccess: role + capability booleans",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "organizations:checkPublicHandleAvailability": {
+    "argsContract": "`{handle:string}`",
+    "returnContract": "{available:boolean}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "organizations:ensureOrganization": {
+    "argsContract": "`{clerkOrgId:string}`",
+    "returnContract": "Organization",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "organizations:listMine": {
+    "argsContract": "`{}`",
+    "returnContract": "[] or [{name,publisherHandle?,imageUrl?,publicHandleLocked}] (active org only)",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "organizations:setPublicHandle": {
+    "argsContract": "`{handle:string}`",
+    "returnContract": "Organization",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "payouts:getPayoutState": {
+    "argsContract": "`{}`",
+    "returnContract": "{profile:{status,disabledReason?,requirements[]}, earnings:{totals,minimumPayoutCredits,canTransfer,rows[]}, transfers[], payouts[]}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "payouts:initiatePublisherTransfer": {
+    "argsContract": "`{}`",
+    "returnContract": "{transferId}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "payouts:refreshOnboarding": {
+    "argsContract": "`{}`",
+    "returnContract": "{url}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "payouts:startOnboarding": {
+    "argsContract": "`{country?:string}`",
+    "returnContract": "{url}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:cancelRetirement": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "Project",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:create": {
+    "argsContract": "`{orgSlug:string, name:string, slug:string, description?:string}`",
+    "returnContract": "Project",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:get": {
+    "argsContract": "`{orgSlug:string, projectSlug:string}`",
+    "returnContract": "Project|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:list": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "Project[]",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:remove": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{archived:projectId, retiredAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:scheduleRetirement": {
+    "argsContract": "`{projectId:Id<\"projects\">, sunsetAt:number, message:string}`",
+    "returnContract": "Project",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "projects:update": {
+    "argsContract": "`{projectId:Id<\"projects\">, patch:{name?:string, description?:string|null, visibility?:\"private\"|\"public\", tags?:string[]}}`",
+    "returnContract": "Project",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "publishReadiness:getCurrent": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{readiness:readiness row|null, current, reason}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "publishReadinessAction:testConnection": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{status:ready|reachable_unhealthy|blocked_target|timeout|unreachable|missing_health_check, statusCode?,latencyMs?,message}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:getAggregate": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{count,averageRating:number|null,distribution:{1,2,3,4,5}}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:getViewerState": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{signedIn,canReview,isPublisher,reason,review:Review|null}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:listModerationQueue": {
+    "argsContract": "`{mode:\"active\"|\"hidden\"|\"reported\"|\"history\", cursor?:string, limit?:number}`",
+    "returnContract": "{page:moderation rows[],nextCursor:string|null}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:listPublicPaginated": {
+    "argsContract": "`{projectId:Id<\"projects\">, paginationOpts:paginationOptsValidator}`",
+    "returnContract": "Page<PublicReview>",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:moderate": {
+    "argsContract": "`{reviewId:Id<\"reviews\">, action:\"hidden\"|\"restored\", reason:string, expectedModerationGeneration:number, expectedContentRevision:number}`",
+    "returnContract": "Review",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:report": {
+    "argsContract": "`{reviewId:Id<\"reviews\">, reason:string}`",
+    "returnContract": "{reported:boolean}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:respondAsPublisher": {
+    "argsContract": "`{reviewId:Id<\"reviews\">, body:string}`",
+    "returnContract": "publisher response row",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:upsert": {
+    "argsContract": "`{projectId:Id<\"projects\">, rating:number, body?:string}`",
+    "returnContract": "Review",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "reviews:withdraw": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "Review",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "search:searchCatalogue": {
+    "argsContract": "`{query:string, limit?:number}`",
+    "returnContract": "{items:(PublicListing + score)[],degraded:boolean}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specImportLimits:acquire": {
+    "argsContract": "`{leaseId:string}`",
+    "returnContract": "{leaseId,expiresAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specImportLimits:release": {
+    "argsContract": "`{leaseId:string}`",
+    "returnContract": "{released:boolean}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specImportLimits:renew": {
+    "argsContract": "`{leaseId:string}`",
+    "returnContract": "{leaseId,expiresAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specImports:acquireLease": {
+    "argsContract": "`{}`",
+    "returnContract": "{remaining,resetsAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:deprecateVersion": {
+    "argsContract": "`{versionId:Id<\"specVersions\">, sunsetAt?:number, message?:string}`",
+    "returnContract": "SpecVersion",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:getDraft": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "null or {draft,draftHash,lastSavedAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:getPublishedForGateway": {
+    "argsContract": "`{publisherHandle:string, projectSlug:string}`",
+    "returnContract": "null or {spec,version,specVersionId,visibility,deprecatedAt?,sunsetAt?,deprecationMessage?,retiredAt?}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:getVersion": {
+    "argsContract": "`{versionId:Id<\"specVersions\">}`",
+    "returnContract": "null or {version,spec,publishedAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:listVersions": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{_id,version,publishedAt,deprecatedAt?,sunsetAt?,deprecationMessage?}[]",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:publish": {
+    "argsContract": "`{projectId:Id<\"projects\">, version:string}`",
+    "returnContract": "{ok:false,issues[]} or {ok:true,issues[],version:SpecVersion,project:Project}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:saveDraft": {
+    "argsContract": "`{projectId:Id<\"projects\">, spec:string}`",
+    "returnContract": "{ok,issues[],draft,draftHash?,lastSavedAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "specs:undeprecateVersion": {
+    "argsContract": "`{versionId:Id<\"specVersions\">}`",
+    "returnContract": "SpecVersion",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "upstreamCredentials:listForProject": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{id,name,updatedAt}[] (no secret)",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "upstreamCredentials:remove": {
+    "argsContract": "`{credentialId:Id<\"upstreamCredentials\">}`",
+    "returnContract": "{deleted:credentialId}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "upstreamCredentials:upsert": {
+    "argsContract": "`{projectId:Id<\"projects\">, name:string, secret:string}`",
+    "returnContract": "{id,name,updatedAt}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "usage:getForOrgById": {
+    "argsContract": "`{orgSlug:string, eventId:string}`",
+    "returnContract": "UsageListItem|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "usage:listForOrg": {
+    "argsContract": "`{orgSlug:string, paginationOpts:paginationOptsValidator, projectRef?:string, keyId?:string, memberId?:string, endpoint?:string, method?:string, since?:number, until?:number}`",
+    "returnContract": "Page<UsageListItem> + {access}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "users:ensureUser": {
+    "argsContract": "`{}`",
+    "returnContract": "User mirror",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "wallets:getMyWallet": {
+    "argsContract": "`{orgSlug:string}`",
+    "returnContract": "{balance,sequence,entries:[{id,kind,amount,sequence,createdAt}]}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "wallets:recordUsage": {
+    "argsContract": "`{events:usageEventArg[]}`",
+    "returnContract": "{results:SettlementOutcome[],wallet:{clerkOrgId,balance,sequence}} (historical gateway admin fallback; retired, do not restore)",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "webhooks:getEndpoint": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "WebhookEndpointMetadata|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "webhooks:listDeliveries": {
+    "argsContract": "`{projectId:Id<\"projects\">, paginationOpts:paginationOptsValidator}`",
+    "returnContract": "Page<{id,event,status,attempts,lastError?,createdAt,secretVersion}>",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "webhooks:revealSecret": {
+    "argsContract": "`{projectId:Id<\"projects\">}`",
+    "returnContract": "{secret}|null",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "webhooks:rotateSecret": {
+    "argsContract": "`{projectId:Id<\"projects\">, graceSeconds?:number}`",
+    "returnContract": "{secret,secretVersion,previousValidUntil}",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  },
+  "webhooks:upsertEndpoint": {
+    "argsContract": "`{projectId:Id<\"projects\">, url:string, active?:boolean}`",
+    "returnContract": "WebhookEndpointMetadata",
+    "source": "historical plan fixture; refreshed inventory args and source override stale details",
+    "parity": "pending implementation layer"
+  }
+}

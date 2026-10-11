@@ -1,0 +1,29 @@
+{
+  "name": "@zevium/control-plane-next",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./contracts": "./contracts/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --allowOnly=false",
+    "contracts:refresh": "tsx scripts/inventory.ts --write",
+    "contracts:check": "tsx scripts/inventory.ts",
+    "schema:check": "node scripts/validate-local.mjs",
+    "test:races": "node scripts/races.mjs"
+  },
+  "dependencies": {
+    "@convex-dev/rate-limiter": "^0.4.2",
+    "@zevium/shared": "workspace:*",
+    "convex": "^1.46.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "convex-test": "^0.0.60",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.11"
+  }
+}

@@ -26,6 +26,10 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 
 ## Tech
 
+### Isolated rebuild foundation — 2026-10-11
+
+PR #436 now preserves `notificationPreferences` and permanent `notificationEmailDeliveries` as separate tables in `packages/control-plane-next/convex/schema/read.ts`. Notifications retain email revision/offset and `queued` fanout state. The table budget is 34 application tables; PR 6 owns worker/component integration, with current live behavior unchanged. [Rebuild schema and handoff](../architecture/convex-rebuild.md#pr-1-implementation-and-handoff--2026-10-11).
+
 **Round-two dogfood — 2026-10-10:** publisher `spec.published` and `project.visibility_changed` deliveries both succeeded in one attempt, confirming #393. **P2 #416:** organization creation left `BellWithOrg` in a persistent `Not authenticated` error boundary after the dashboard recovered; fixed by the readiness gate below. [Original evidence](../findings/dogfood-2026-10-10-round-2.md).
 
 - **Realtime bell (#363)**: `usePaginatedQuery(listForOrg)` keeps every loaded page reactive, including mark-read/all-read changes. `unreadForOrg` subscribes to the whole-org count independently of loaded rows; both queries share the same bounded legacy count fallback. Switching organizations remounts bell UI and resets pagination. No cached older pages or optimistic local read timestamps.
@@ -70,6 +74,8 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 - Webhook signing secrets stored as encrypted envelopes — see [upstream-credentials](upstream-credentials.md) "Publisher secrets".
 
 ## Decisions
+
+- 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 
 - 2026-07-11 — Scope: full FLOW.md parity including webhooks and notifications.
 - Wave 8 — notifications + webhooks backend (86 tests, b77388f); bell + webhooks card UI browser-verified.

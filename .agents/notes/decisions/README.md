@@ -63,3 +63,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-10 | [Codebase reset: rebuild Convex, prune rest](2026-10-10-codebase-reset.md)                           | accepted direction                     |
 | 2026-10-10 | [Capability taxonomy and normalized web search](2026-10-10-capability-taxonomy.md)                   | proposed (awaiting user)               |
 | 2026-10-11 | [Signup credit: first organization created](2026-10-11-signup-credit-first-created-org.md)           | accepted; #434                         |
+| 2026-10-11 | [Convex rebuild: preserve durable facts](2026-10-11-convex-rebuild-durable-facts.md)                 | accepted; isolated schema built        |

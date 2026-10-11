@@ -8,7 +8,7 @@
   "scripts": {
     "build": "turbo build",
     "build:ci": "node scripts/quality/build-ci.mjs",
-    "ci:pr": "pnpm format:check && pnpm lint && pnpm quality:static && pnpm typecheck && pnpm test && pnpm build:ci && pnpm routes:check && pnpm diff:check",
+    "ci:pr": "pnpm format:check && pnpm lint && pnpm quality:static && pnpm typecheck && pnpm test && pnpm ci:next && pnpm build:ci && pnpm routes:check && pnpm diff:check",
     "build:production": "node scripts/build.mjs",
     "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "diff:check": "git diff --check",
@@ -26,7 +26,10 @@
     "test:convex": "vitest run --allowOnly=false --maxWorkers=2 --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
     "test:seed": "node --test scripts/seed.test.mjs",
-    "test:worktree-setup": "node --test scripts/copy-worktree-env.test.mjs"
+    "test:worktree-setup": "node --test scripts/copy-worktree-env.test.mjs",
+    "ci:next": "pnpm --filter @zevium/control-plane-next contracts:check && pnpm --filter @zevium/control-plane-next schema:check && pnpm --filter @zevium/control-plane-next test:races && git diff --exit-code -- packages/control-plane-next/convex/_generated",
+    "typecheck:next": "pnpm --filter @zevium/control-plane-next typecheck",
+    "test:next": "pnpm --filter @zevium/control-plane-next test"
   },
   "devDependencies": {
     "@clerk/backend": "^3.22.0",
