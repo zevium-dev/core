@@ -384,3 +384,12 @@ it("bounds raw value rendering and preserves special header names", () => {
   expect(Object.hasOwn(result.headers, "__proto__")).toBe(true);
   expect(result.headers.__proto__).toBe("value");
 });
+
+it("scans unresolved path placeholders in linear time", () => {
+  const template = `/${"{".repeat(50_000)}x}`;
+  const started = performance.now();
+  expect(serializeRequestParameters(template, [], {}).errors).toEqual([
+    { path: "path:x", message: expect.any(String) },
+  ]);
+  expect(performance.now() - started).toBeLessThan(1_000);
+});

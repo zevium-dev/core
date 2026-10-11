@@ -697,7 +697,7 @@ export function serializeRequestParameters(
       }
     }
   }
-  for (const match of path.matchAll(/\{([^}/]+)\}/g))
+  for (const match of path.matchAll(/\{([^{}/]+)\}/g))
     errors.push({
       path: `path:${match[1]}`,
       message: "Path parameter is required or missing from the published spec.",
