@@ -27,6 +27,7 @@ const GATEWAY = resolveGatewayOrigin(
   import.meta.env.VITE_GATEWAY_URL as string | undefined,
 );
 const DISCOVERY_URL = discoveryEndpointUrl(GATEWAY);
+const LISTING_DOCS_URL = `${new URL("/docs/", GATEWAY).href}{publisherHandle}/{projectSlug}`;
 
 function DocsAgentsPage() {
   return (
@@ -52,6 +53,16 @@ function DocsAgentsPage() {
         Crawl it directly:
       </p>
       <DocsCodeBlock lang="bash" code={`curl "${DISCOVERY_URL}"`} />
+
+      <h2>Listing reference in Markdown</h2>
+      <p>
+        Every public API has a generated Markdown reference built from its
+        published spec: operations, inputs, prices, free tier, and any
+        operations that cannot be called through generated tools. The same
+        converter produces the tool definitions returned by{" "}
+        <code>get_api_docs</code>.
+      </p>
+      <DocsCodeBlock lang="bash" code={`curl "${LISTING_DOCS_URL}"`} />
 
       <h2>Tools</h2>
       <p>Search for an API first, read its reference, then call an endpoint:</p>

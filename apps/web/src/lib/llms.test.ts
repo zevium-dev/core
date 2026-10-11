@@ -30,6 +30,9 @@ for (const [file, parser] of [
     gatewayRoutes.add(`/${prefix}/{publisherHandle}/{projectSlug}/{path}`);
   }
 }
+if (gatewayIndex.includes('parts[0] === "docs" && parts.length === 3')) {
+  gatewayRoutes.add("/docs/{publisherHandle}/{projectSlug}");
+}
 const routeTree = source("../routeTree.gen.ts");
 const webRoutes = new Set(
   Array.from(
@@ -89,6 +92,9 @@ describe("llms.txt", () => {
     const text = await response.text();
     expect(text).toContain("https://preview.example.test/app/settings/keys");
     expect(text).toContain("https://edge.example.test/mcp");
+    expect(text).toContain(
+      "https://edge.example.test/docs/{publisherHandle}/{projectSlug}",
+    );
     expect(text).toContain("Bearer ak_YOUR_API_KEY");
     expect(text).toContain(
       "402: missing_api_key, invalid_api_key, or insufficient_credits",

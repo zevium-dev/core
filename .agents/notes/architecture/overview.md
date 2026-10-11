@@ -50,7 +50,8 @@ pnpm workspace + **Turborepo**:
 apps/web/        # TanStack Start app (all screens)
 apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
 convex/          # Convex schema + functions (control plane)
-packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
+packages/shared/ # spec parsing, pricing, deterministic MCP/CLI/docs conversion
+packages/cli/    # private zevium CLI; generated commands execute via gateway MCP
 .agents/notes/    # agent memory: product, features, architecture, decisions, research
 ```
 

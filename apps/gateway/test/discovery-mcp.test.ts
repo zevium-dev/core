@@ -664,6 +664,23 @@ describe("MCP /mcp", () => {
     expect(parsed.publisherData.endpoints.length).toBe(2);
   });
 
+  it("shares generated contracts between MCP and public listing Markdown", async () => {
+    await installAgentFixtures({ clerkOrgId: "org_generated_contract" });
+    const rpc = await mcpCall("tools/call", {
+      name: "get_api_docs",
+      arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
+    });
+    const docs = JSON.parse(toolText(rpc));
+    expect(docs.publisherData.generated.generatorVersion).toBe(1);
+    expect(docs.publisherData.generated.operations).toHaveLength(2);
+    expect(
+      docs.publisherData.generated.operations[0].tool.description,
+    ).toContain("Cost: 3 credits");
+    const response = await workerFetch(`/docs/${ORG_SLUG}/${PROJECT_SLUG}`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(docs.publisherData.generated.markdown);
+  });
+
   it("get_api_docs never exposes a private spec", async () => {
     const fixtures = await installAgentFixtures({
       clerkOrgId: "org_mcp_private_spec",
@@ -904,6 +921,93 @@ describe("MCP published call reference", () => {
       expect(compact).not.toContain(prompt);
     }
   });
+  it("bounds the escaped MCP reference even when inherited parameters repeat", async () => {
+    await publish({
+      openapi: "3.1.0",
+      paths: {
+        "/large": {
+          parameters: [
+            {
+              name: "q",
+              in: "query",
+              description: "\\".repeat(40_000),
+              schema: { type: "string" },
+            },
+          ],
+          ...Object.fromEntries(
+            [
+              "get",
+              "post",
+              "put",
+              "patch",
+              "delete",
+              "options",
+              "head",
+              "trace",
+            ].map((method) => [method, { "x-zevium-cost": 1 }]),
+          ),
+        },
+      },
+    });
+    const rpc = await mcpCall("tools/call", {
+      name: "get_api_docs",
+      arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
+    });
+    expect(toolText(rpc)).toBe(
+      "API reference exceeds 1 MiB limit; ask the publisher to reduce the spec",
+    );
+    expect(
+      new TextEncoder().encode(JSON.stringify(rpc)).byteLength,
+    ).toBeLessThan(1024 * 1024);
+  });
+
+  it("drops only the generated contract when it would push get_api_docs past 1 MiB", async () => {
+    await publish({
+      openapi: "3.1.0",
+      paths: {
+        "/large": {
+          get: {
+            "x-zevium-cost": 1,
+            parameters: [
+              {
+                name: "q",
+                in: "query",
+                description: "\\".repeat(23_000),
+                schema: { type: "string" },
+              },
+            ],
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: { type: "string" },
+                    example: "\\".repeat(150_000),
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const rpc = await mcpCall("tools/call", {
+      name: "get_api_docs",
+      arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
+    });
+    const docs = JSON.parse(toolText(rpc));
+    expect(docs.publisherData.endpoints).toHaveLength(1);
+    expect(docs.publisherData.generated).toEqual({
+      error: "generation_unavailable",
+      reason: "response_size_limit",
+    });
+    expect(
+      new TextEncoder().encode(JSON.stringify(rpc)).byteLength,
+    ).toBeLessThan(1024 * 1024);
+    const markdown = await workerFetch(`/docs/${ORG_SLUG}/${PROJECT_SLUG}`);
+    expect(markdown.status).toBe(200);
+  });
+
   it("retains reachable local refs, handles recursion/escaped names, and excludes secrets/extensions", async () => {
     const secret = "upstream-private-token";
     await publish({

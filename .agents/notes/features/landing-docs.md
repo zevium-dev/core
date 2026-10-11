@@ -1,7 +1,7 @@
 # Landing & docs
 
-> Status: partial (web `/llms.txt` #322 and shared client installs #326 built); generated docs/CLI pipeline #428 pending · Updated: 2026-10-11
-> Code: `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`
+> Status: partial (web `/llms.txt` #322 and shared client installs #326 built); generated docs/CLI pipeline #428 built · Updated: 2026-10-11
+> Code: `packages/shared/src/spec-generation/`, `packages/cli/`, `apps/gateway/src/generated-contract.ts`, `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`
 > Related: [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [mock-sandbox](mock-sandbox.md), [gateway](gateway.md), [accounts-orgs](accounts-orgs.md), [webhooks-notifications](webhooks-notifications.md), [design system](../design/design-system.md), [roadmap](../product/roadmap.md)
 
 Public front door and integration help. Landing page pitches the agent-first marketplace and teases live catalogue listings; `/docs` is an in-app guide section (quickstart, consuming, publishing, agents). Integrate covers copy-paste snippets for leaving the app; generated SDKs are P2.
@@ -31,7 +31,11 @@ Public front door and integration help. Landing page pitches the agent-first mar
 
 ### Accepted changes — implementation pending (2026-10-11)
 
-P0 #428 adds the shared spec conversion pipeline and generated CLI/docs; #110 owns listing-scoped MCP, #350 SDKs stays P2. Current docs/snippet code remains as described below; no generated CLI is claimed by this decision PR.
+### Generated listing docs and CLI (#428)
+
+Gateway `/docs/:publisher/:project` serves per-listing Markdown derived from the immutable published contract. Web `/llms.txt` and `/docs/agents` ("Listing reference in Markdown") link to it; `/llms.txt` also explains the generated model returned by `get_api_docs`. Markdown includes version, operation identity, prices/free tier, command flags, input/response schemas and unsupported-operation diagnostics. Publisher content is marked untrusted; Markdown prose escapes markup and JSON uses fenced blocks.
+
+Private workspace CLI: `pnpm --filter @zevium/cli zevium <publisher> <project>` reads docs; append a generated command name and flags to execute through authenticated/metered MCP `call_api`. Setup and limitations: `packages/cli/README.md`. No npm package was published. Shared converter/cache/bounds and #110 follow-up are owned by [agent surface](agent-surface.md#shared-published-contract-conversion-428). #350 SDK scope remains P2.
 
 ### Current implementation
 
