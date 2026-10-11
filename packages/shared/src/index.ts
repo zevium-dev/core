@@ -103,3 +103,18 @@ export {
 } from "./key-projection.js";
 
 export { synthesize } from "./mock.js";
+
+export {
+  generateSpecContract,
+  GenerationError,
+  GENERATOR_VERSION,
+  MAX_GENERATED_BYTES,
+  type GeneratedContract,
+  type GeneratedOperation,
+  type GeneratedFlag,
+  type JsonSchema,
+} from "./spec-generation/index.js";
+export {
+  generatedCallArguments,
+  generatedToolArguments,
+} from "./spec-generation/cli.js";

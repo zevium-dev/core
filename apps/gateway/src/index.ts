@@ -1,3 +1,4 @@
+import { handleListingDocs } from "./generated-contract";
 import { nextDeps } from "./next/pipeline";
 import { wakeWallet, readWalletFailure } from "./next/wake";
 import type { NextEnv } from "./next/snapshots";
@@ -214,6 +215,15 @@ async function dispatchRequest(
   if (parts[0] === "discovery" && parts.length === 1) {
     const deps = buildDeps(env);
     return await handleDiscoveryRequest(request, discoveryDeps(deps, request));
+  }
+
+  if (parts[0] === "docs" && parts.length === 3) {
+    return handleListingDocs(
+      request,
+      buildDeps(env).publicSpecSource,
+      parts[1]!,
+      parts[2]!,
+    );
   }
 
   const oauth = oauthConfig(env.MCP_OAUTH_ISSUER, env.MCP_OAUTH_RESOURCE);
