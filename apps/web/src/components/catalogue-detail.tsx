@@ -70,7 +70,6 @@ import { Textarea } from "#/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import type { ApiDetailSearch } from "#/lib/catalogue-detail-search";
-import { tokenPricingLabel } from "@zevium/shared";
 import { creditsLabel } from "#/lib/credits-label";
 import { resolveGatewayOrigin, tryItBaseUrl } from "#/lib/landing";
 import {
@@ -166,7 +165,6 @@ function parameterInputId(endpointId: string, parameter: ApiParameter): string {
 
 function liveCostLabel(endpoint: EndpointRow | null): string {
   if (endpoint === null) return "cost unavailable";
-  if (endpoint.tokenPricing) return tokenPricingLabel(endpoint.tokenPricing);
   if (endpoint.freeTier !== undefined) {
     return `up to ${creditsLabel(endpoint.cost)}`;
   }
@@ -221,8 +219,6 @@ function ApiDetailBody({
 
   const priceRange = useMemo(() => {
     if (endpoints.length === 0) return null;
-    if (endpoints.some((ep) => ep.tokenPricing))
-      return "Token pricing · see endpoint rates";
     let min = endpoints[0]!.cost;
     let max = endpoints[0]!.cost;
     for (const ep of endpoints) {

@@ -2,7 +2,7 @@ import { ConvexHttpClient } from "convex/browser";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { unstable_dev, unstable_readConfig } from "wrangler";
@@ -79,6 +79,11 @@ const server = createServer(async (req, res) => {
     return;
   }
   calls++;
+  if (req.url.includes("oversized")) {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("x".repeat(1_048_577));
+    return;
+  }
   if (req.url.includes("slow")) {
     entered?.();
     await new Promise((resolve) => {
@@ -141,13 +146,13 @@ async function start() {
     config: `${scratch}/worker.json`,
     local: true,
     ip: "127.0.0.1",
-    port: 0,
+    port: process.env.CUTOVER_BROWSER === "1" ? 8787 : 0,
     persist: { path: persistPath },
     logLevel: "error",
     vars: {
-      CONTROL_PLANE_MODE: "next",
+      APP_ORIGIN: "http://localhost:3000",
       NEXT_DEPLOYMENT_ID: "next-fixture",
-      NEXT_CONVEX_SITE_URL: site,
+      CONVEX_SITE_URL: site,
       NEXT_SNAPSHOT_KEYS: ring,
       NEXT_ADMISSION_KEYS: ring,
       NEXT_TRANSPORT_KEYS: ring,
@@ -181,6 +186,18 @@ const call = (f) =>
   });
 const flush = (f) =>
   post("/test/wallet", { orgId: f.orgId, action: "refresh" });
+async function waitDrain(f) {
+  // Alarms can overlap explicit refresh RPCs; only the durable ACK proves drain.
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await flush(f);
+    const state = await convex("inspect", { walletId: f.walletId });
+    if (state.wallet.close?.ackAt) return state;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert.fail(
+    "Durable drain acknowledgement did not arrive within the bounded wait",
+  );
+}
 try {
   assert.ok(ready, "Persistent anonymous backend did not start");
   await start();
@@ -280,6 +297,62 @@ try {
   assert.equal((await mcp(invalid)).status, 401);
   assert.equal(oauthReads, negativeReads, "Invalid opaque token is cached");
   await flush(oauth);
+  // Public mock never contacts upstream; direct HTTP streams large responses,
+  // while MCP refuses its bounded buffer and restores the source reservation.
+  const safe = await convex("seed", { run: `edge-buffer-${run}` });
+  const beforeMock = calls;
+  const mock = await fetch(
+    `http://127.0.0.1:${worker.port}/mock/${safe.handle}/echo/echo`,
+    { method: "POST" },
+  );
+  assert.equal(mock.status, 200, await mock.clone().text());
+  assert.equal(calls, beforeMock);
+  const large = await fetch(
+    `http://127.0.0.1:${worker.port}/gateway/${safe.handle}/echo/echo?oversized`,
+    { method: "POST", headers: { authorization: `Bearer ${safe.secret}` } },
+  );
+  assert.equal(large.status, 200);
+  assert.equal((await large.text()).length, 1_048_577);
+  await flush(safe);
+  assert.equal(
+    (await convex("inspect", { walletId: safe.walletId })).wallet.balance,
+    95,
+  );
+  const oversized = await fetch(`http://127.0.0.1:${worker.port}/mcp`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${safe.secret}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "call_api",
+        arguments: {
+          org: safe.handle,
+          project: "echo",
+          method: "POST",
+          path: "/echo?oversized",
+        },
+      },
+    }),
+  });
+  assert.equal((await oversized.json()).result.isError, true);
+  await flush(safe);
+  assert.equal(
+    (await convex("inspect", { walletId: safe.walletId })).wallet.balance,
+    95,
+  );
+  const empty = await convex("seed", {
+    run: `edge-empty-${run}`,
+    amounts: [1],
+  });
+  await convex("deplete", { walletId: empty.walletId });
+  const beforeEmpty = calls;
+  assert.equal((await call(empty)).status, 402);
+  assert.equal(calls, beforeEmpty);
   // Freeze while a real upstream request is in flight. No ACK before its final.
   console.log("normal conservation passed");
   const slow = await convex("seed", { run: `edge-slow-${run}` });
@@ -298,7 +371,7 @@ try {
   assert.equal((await call(slow)).status, 503);
   release();
   assert.equal((await pending).status, 200);
-  await flush(slow);
+  await waitDrain(slow);
   state = await convex("inspect", { walletId: slow.walletId });
   assert.equal(state.wallet.balance, 95);
   assert.equal(state.wallet.close.edgeFinalSequence, 1);
@@ -358,8 +431,7 @@ try {
   assert.equal(state.usage[0].billingOutcome, "exception");
   assert.equal(state.wallet.balance, 100);
   await convex("close", { walletId: crash.walletId, id: "close-restart" });
-  await flush(crash);
-  state = await convex("inspect", { walletId: crash.walletId });
+  state = await waitDrain(crash);
   assert.ok(state.wallet.close.ackAt);
   const depleted = await convex("seed", { run: `edge-depleted-${run}` });
   const depletedWait = waitForUpstream();
@@ -377,7 +449,7 @@ try {
   assert.equal(state.wallet.balance, 0);
   assert.equal(state.usage[0].billingOutcome, "exception");
   await convex("close", { walletId: depleted.walletId, id: "depleted-close" });
-  await flush(depleted);
+  await waitDrain(depleted);
   assert.ok(
     (await convex("inspect", { walletId: depleted.walletId })).wallet.close
       .ackAt,
@@ -398,7 +470,7 @@ try {
   );
   await convex("close", { walletId: replay.walletId, id: "lost-drain" });
   await post("/test/fault", { path: "/wallet-drain", count: 1 });
-  await flush(replay);
+  await waitDrain(replay);
   const firstAck = (await convex("inspect", { walletId: replay.walletId }))
     .wallet.close.ackFingerprint;
   assert.ok(firstAck);
@@ -429,7 +501,7 @@ try {
   await flush(queued);
   release();
   assert.equal((await queuedCall).status, 200);
-  await flush(queued);
+  await waitDrain(queued);
   await convex("finish", { walletId: queued.walletId, id: "busy-close" });
   let done = false;
   for (let page = 0; page < 30; page++) {
@@ -457,7 +529,7 @@ try {
     paid: true,
   });
   await convex("archive", { walletId: closed.walletId });
-  await flush(closed);
+  await waitDrain(closed);
   await convex("finish", {
     walletId: closed.walletId,
     id: `archive:${closed.walletId}`,
@@ -484,6 +556,29 @@ try {
   console.log(
     "PR5 real Worker + anonymous Convex acceptance passed: cold key/wallet/OAuth, production migrations, conservation, in-flight drain, stale/revoked key, exception, restart/drain.",
   );
+  // Optional local browser lane. Same guarded anonymous backend and real Worker;
+  // credentials remain in ignored files, never in CI artifacts or console output.
+  if (process.env.CUTOVER_BROWSER === "1") {
+    const fixture = await convex("seed", {
+      run: `browser-${run}`,
+      house: true,
+    });
+    writeFileSync(
+      `${scratch}/browser-runtime.json`,
+      JSON.stringify({
+        clientUrl,
+        site,
+        gateway: `http://127.0.0.1:${worker.port}`,
+        fixture,
+      }),
+      { mode: 0o600 },
+    );
+    console.log("Browser lane ready; guarded runtime file written in scratch.");
+    const deadline = Date.now() + 30 * 60_000;
+    while (!existsSync(`${scratch}/browser-done`) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
 } finally {
   release?.();
   await worker?.stop();

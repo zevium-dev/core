@@ -11,17 +11,18 @@
   // the production route above. Override --host too when changing --port.
   "dev": { "host": "localhost:8787" },
   "vars": {
-    // Explicit opt-in only; secrets alone never enable the anonymous rail.
-    "X402_ENABLED": "false",
     // Override with the paired web origin for preview deployments.
     "APP_ORIGIN": "https://zevium.dev",
-    // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
-    // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage
+    // CLERK_SECRET_KEY — optional Clerk OAuth verification secret
+    // GATEWAY_INTERNAL_SECRET — paired snapshot/settlement HTTP authentication
+    // NEXT_DEPLOYMENT_ID + NEXT_SNAPSHOT_KEYS/NEXT_ADMISSION_KEYS/NEXT_TRANSPORT_KEYS
+    // must match Convex; set keys as secrets, never commit values.
     // MCP_OAUTH_ISSUER + MCP_OAUTH_RESOURCE — optional OAuth activation; configure
-    // in Worker settings after Clerk DCR/PKCE/scopes setup. Deploy keeps vars.
+    // in Worker settings after Clerk DCR/PKCE/scopes setup. Every deploy must use
+    // --keep-vars (or supply both explicitly); default deploy removes dashboard vars.
     // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
-    "CONVEX_URL": "https://polite-ermine-809.convex.cloud",
-    "CONVEX_SITE_URL": "https://polite-ermine-809.convex.site",
+    "CONVEX_URL": "",
+    "CONVEX_SITE_URL": "",
     // Deployment workflow overrides this with exact develop SHA.
     "ZEVIUM_RELEASE": "0000000000000000000000000000000000000000",
   },
@@ -32,10 +33,6 @@
       { "name": "EDGE_OAUTH", "class_name": "EdgeOAuthDO" },
       { "name": "EDGE_SNAPSHOTS", "class_name": "EdgeSnapshotDO" },
       { "name": "NEXT_WALLET", "class_name": "NextWalletDO" },
-      {
-        "name": "WALLET",
-        "class_name": "WalletSqliteDO",
-      },
     ],
   },
   "migrations": [
@@ -56,6 +53,10 @@
     {
       "tag": "v5-next-edge",
       "new_sqlite_classes": ["EdgeSnapshotDO", "NextWalletDO", "EdgeOAuthDO"],
+    },
+    {
+      "tag": "v6-control-plane-cutover",
+      "deleted_classes": ["WalletSqliteDO"],
     },
   ],
 }

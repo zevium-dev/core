@@ -1,254 +1,174 @@
-import { extractHealthCheckTarget, parseSpec } from "@zevium/shared";
-import { v } from "convex/values";
-import { internalMutation, internalQuery, query } from "./_generated/server";
-import { requireProjectMember } from "./lib/auth";
-import { isOrganizationActive } from "./lib/publicRoutes";
-
-export const READINESS_TTL_MS = 15 * 60 * 1000;
-
-export type ReadinessValidity =
-  | { current: true; reason: null }
-  | {
-      current: false;
-      reason:
-        | "missing"
-        | "draft_missing"
-        | "status_not_ok"
-        | "expired"
-        | "draft_changed"
-        | "credentials_changed";
-    };
-
-export async function draftFingerprint(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
-
-/** Stable hash over complete credential membership, identity, and revision. */
+import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
+import { components } from "./_generated/api";
+import { ConvexError, v } from "convex/values";
+const limiter = new RateLimiter(components.rateLimiter, {
+  tests: { kind: "token bucket", rate: 5, period: MINUTE, capacity: 5 },
+});
+import { getProjectDraft } from "./lib/drafts";
+import {
+  extractHealthCheckTarget,
+  parseSpec,
+  sha256Hex,
+  canonicalJson,
+} from "@zevium/shared";
+import {
+  query,
+  internalMutation,
+  internalQuery,
+  type QueryCtx,
+} from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
+import { isActive } from "./lib/identity";
+export const READINESS_TTL_MS = 15 * 60_000;
 export async function credentialSetFingerprint(
-  rows: readonly {
-    _id: unknown;
-    name: string;
-    revision?: number;
-    updatedAt: number;
-  }[],
-): Promise<string> {
-  const canonical = rows
-    .map((row) => ({
-      id: String(row._id),
-      name: row.name,
-      revision: row.revision ?? row.updatedAt,
-      updatedAt: row.updatedAt,
-    }))
-    .sort((left, right) =>
-      left.id === right.id
-        ? left.name.localeCompare(right.name)
-        : left.id.localeCompare(right.id),
-    );
-  return await draftFingerprint(JSON.stringify(canonical));
-}
-
-/** Shared by readiness recording, its UI query, and the publication gate. */
-export function credentialRevision(
-  rows: readonly { revision?: number; updatedAt: number }[],
-): number {
-  return rows.reduce(
-    (latest, row) => Math.max(latest, row.revision ?? row.updatedAt),
-    0,
+  ctx: Pick<QueryCtx, "db">,
+  projectId: Doc<"projects">["_id"],
+) {
+  const rows = await ctx.db
+    .query("upstreamCredentials")
+    .withIndex("by_project_name", (q) => q.eq("projectId", projectId))
+    .collect();
+  return sha256Hex(
+    canonicalJson(
+      rows.map((r) => ({
+        id: r._id,
+        name: r.name,
+        revision: r.revision,
+        updatedAt: r.updatedAt,
+      })),
+    ),
   );
 }
-
-/**
- * A publish test is valid only for this exact saved draft and credential set.
- * Keep this pure so the UI query and authoritative publish gate cannot drift.
- */
 export async function readinessValidity(
-  readiness: {
-    status: string;
-    draftHash: string;
-    credentialRevision?: number;
-    credentialFingerprint?: string;
-    testedAt: number;
-  } | null,
-  draft: string | null,
-  credentialRevision: number,
-  credentialFingerprint: string,
-  nowMs: number = Date.now(),
-): Promise<ReadinessValidity> {
-  if (readiness === null) return { current: false, reason: "missing" };
-  if (draft === null) return { current: false, reason: "draft_missing" };
-  if (readiness.status !== "ok") {
-    return { current: false, reason: "status_not_ok" };
-  }
-  if (nowMs - readiness.testedAt > READINESS_TTL_MS) {
-    return { current: false, reason: "expired" };
-  }
-  if (readiness.draftHash !== (await draftFingerprint(draft))) {
-    return { current: false, reason: "draft_changed" };
-  }
+  ctx: Pick<QueryCtx, "db">,
+  project: Doc<"projects">,
+) {
+  const draft = project.draft,
+    proof = draft?.readiness;
+  if (!draft) return { current: false, reason: "draft_missing" as const };
+  if (!proof) return { current: false, reason: "missing" as const };
   if (
-    readiness.credentialRevision !== credentialRevision ||
-    readiness.credentialFingerprint !== credentialFingerprint
-  ) {
-    return { current: false, reason: "credentials_changed" };
-  }
+    proof.testedAt > Date.now() ||
+    Date.now() - proof.testedAt > READINESS_TTL_MS
+  )
+    return { current: false, reason: "expired" as const };
+  if (proof.draftHash !== draft.hash)
+    return { current: false, reason: "draft_changed" as const };
+  if (
+    proof.credentialFingerprint !==
+    (await credentialSetFingerprint(ctx, project._id))
+  )
+    return { current: false, reason: "credentials_changed" as const };
   return { current: true, reason: null };
 }
-
 export const getTarget = internalQuery({
   args: { projectId: v.id("projects"), clerkOrgId: v.string() },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    url: string | null;
-    method: "GET" | "HEAD" | null;
-    draftHash: string | null;
-  }> => {
-    const project = await ctx.db.get(args.projectId);
-    if (project === null) throw new Error("Project not found");
-    const organization = await ctx.db.get(project.organizationId);
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId),
+      org = project && (await ctx.db.get(project.organizationId));
     if (
-      organization === null ||
-      organization.clerkOrgId !== args.clerkOrgId ||
-      !(await isOrganizationActive(ctx, organization))
+      !project ||
+      project.retirement?.state === "retired" ||
+      !org ||
+      org.clerkOrgId !== args.clerkOrgId ||
+      !(await isActive(ctx, org))
     )
-      throw new Error("Not a member of this organization");
-    const draft = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    let url: string | null = null;
-    let method: "GET" | "HEAD" | null = null;
-    if (draft?.draft.trim()) {
-      try {
-        const target = extractHealthCheckTarget(parseSpec(draft.draft));
-        if (target !== null) {
-          url = target.url;
-          method = target.method;
-        }
-      } catch {
-        // The editor separately reports spec parsing errors.
-      }
-    }
+      throw new Error("Project not found");
+    const draft = await getProjectDraft(ctx, project._id);
+    const target = draft?.text
+      ? extractHealthCheckTarget(parseSpec(draft.text))
+      : null;
     return {
-      url,
-      method,
-      draftHash: draft ? await draftFingerprint(draft.draft) : null,
+      url: target?.url ?? null,
+      method: target?.method ?? null,
+      draftHash: project.draft?.hash ?? null,
+      credentialFingerprint: await credentialSetFingerprint(ctx, project._id),
     };
   },
 });
-
 export const recordPassingTest = internalMutation({
   args: {
     projectId: v.id("projects"),
     draftHash: v.string(),
-
+    credentialFingerprint: v.string(),
     healthCheckUrl: v.string(),
     healthCheckMethod: v.union(v.literal("GET"), v.literal("HEAD")),
   },
   handler: async (ctx, args) => {
-    const draft = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const credentials = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .collect();
-    const currentCredentialRevision = credentialRevision(credentials);
-    const currentCredentialFingerprint =
-      await credentialSetFingerprint(credentials);
+    const project = await ctx.db.get(args.projectId),
+      org = project && (await ctx.db.get(project.organizationId));
     if (
-      draft === null ||
-      args.draftHash !== (await draftFingerprint(draft.draft))
-    ) {
+      !project?.draft ||
+      project.retirement?.state === "retired" ||
+      !org ||
+      !(await isActive(ctx, org)) ||
+      project.draft.hash !== args.draftHash ||
+      args.credentialFingerprint !==
+        (await credentialSetFingerprint(ctx, project._id))
+    )
       return false;
-    }
-    const existing = await ctx.db
-      .query("publishReadiness")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const value = {
-      draftHash: args.draftHash,
-      healthCheckUrl: args.healthCheckUrl,
-      healthCheckMethod: args.healthCheckMethod,
-      credentialRevision: currentCredentialRevision,
-      credentialFingerprint: currentCredentialFingerprint,
-      status: "ok" as const,
-      testedAt: Date.now(),
-    };
-    if (existing) await ctx.db.patch(existing._id, value);
-    else
-      await ctx.db.insert("publishReadiness", {
-        projectId: args.projectId,
-        ...value,
-      });
+    const draft = await getProjectDraft(ctx, project._id);
+    if (!draft || draft.hash !== args.draftHash) return false;
+    const target = extractHealthCheckTarget(parseSpec(draft.text));
+    if (
+      !target ||
+      target.url !== args.healthCheckUrl ||
+      target.method !== args.healthCheckMethod
+    )
+      return false;
+    await ctx.db.patch(project._id, {
+      draft: {
+        ...project.draft,
+        readiness: {
+          draftHash: args.draftHash,
+          credentialFingerprint: args.credentialFingerprint,
+          url: target.url,
+          method: target.method,
+          testedAt: Date.now(),
+        },
+      },
+    });
     return true;
   },
 });
-
-/**
- * Remove a prior pass after a failed retry, but only when tested draft is still
- * current. A delayed action for an older draft cannot erase newer readiness.
- */
 export const clearPassingTest = internalMutation({
-  args: {
-    projectId: v.id("projects"),
-    draftHash: v.string(),
-  },
-  handler: async (ctx, args): Promise<boolean> => {
-    const draft = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (
-      draft === null ||
-      args.draftHash !== (await draftFingerprint(draft.draft))
-    ) {
-      return false;
-    }
-    const existing = await ctx.db
-      .query("publishReadiness")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (existing !== null) await ctx.db.delete(existing._id);
+  args: { projectId: v.id("projects"), draftHash: v.string() },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project?.draft || project.draft.hash !== args.draftHash) return false;
+    await ctx.db.patch(project._id, {
+      draft: { ...project.draft, readiness: undefined },
+    });
     return true;
   },
 });
-
 export const getCurrent = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    await requireProjectMember(ctx, args.projectId);
-    const readiness = await ctx.db
-      .query("publishReadiness")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const draft = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const credentials = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .collect();
-    const currentCredentialRevision = credentialRevision(credentials);
-    const credentialFingerprint = await credentialSetFingerprint(credentials);
-    const validity = await readinessValidity(
-      readiness,
-      draft?.draft ?? null,
-      currentCredentialRevision,
-      credentialFingerprint,
-    );
+    const { project } = await requireProjectMember(ctx, args.projectId),
+      proof = project.draft?.readiness;
     return {
-      readiness,
-      ...validity,
+      readiness: proof
+        ? {
+            draftHash: proof.draftHash,
+            healthCheckUrl: proof.url,
+            healthCheckMethod: proof.method,
+            testedAt: proof.testedAt,
+            status: "ok",
+          }
+        : null,
+      ...(await readinessValidity(ctx, project)),
     };
+  },
+});
+
+export const authorizeTest = internalMutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { org } = await requireProjectAdmin(ctx, args.projectId);
+    if (!(await limiter.limit(ctx, "tests", { key: org._id })).ok)
+      throw new ConvexError("Connection test limit reached. Try again later.");
+    return { clerkOrgId: org.clerkOrgId };
   },
 });

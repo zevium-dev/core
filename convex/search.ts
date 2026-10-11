@@ -1,18 +1,5 @@
-/**
- * Catalogue semantic search.
- *
- * Embeddings: Gemini gemini-embedding-001 pinned to 768 dims (matches the
- * pre-existing `specEmbeddings` by_embedding vectorIndex). Schema is owned
- * by schema.ts — `specEmbeddings` (by_project index + by_embedding) exists already.
- * One embedding row per project, built from the latest published spec on publish.
- *
- * Security invariant: vector search returns specEmbeddings ids only. The
- * `fetchSearchListings` query re-checks every project is PUBLIC + PUBLISHED
- * before shaping a card — never leak private or draft projects, even if a
- * stale embedding lingers after a visibility/status flip.
- */
-import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
-import { extractPricing, parseSpec } from "@zevium/shared";
+import { listing } from "./lib/catalogue";
+import { extractPricing, parseSpec, sha256Hex } from "@zevium/shared";
 import { v } from "convex/values";
 import {
   action,
@@ -24,15 +11,7 @@ import {
 import { components, internal } from "./_generated/api";
 import { MINUTE, RateLimiter } from "@convex-dev/rate-limiter";
 import type { Doc } from "./_generated/dataModel";
-import { summarizePublishedPricing, type PublicListing } from "./catalogue";
-import { getActiveOrgById } from "./lib/auth";
-import { qualitySnapshotContract } from "./lib/qualityContract";
-import {
-  getActivePublicRouteBinding,
-  isOrganizationActive,
-  isProjectRetired,
-} from "./lib/publicRoutes";
-
+import { type PublicListing } from "./catalogue";
 /** Max results returned by a semantic search (VectorSearchQuery.limit caps at 256). */
 const SEARCH_LIMIT_MAX = 20;
 const SEARCH_LIMIT_DEFAULT = 10;
@@ -81,6 +60,7 @@ const searchRateLimiter = new RateLimiter(components.rateLimiter, {
     rate: 120,
     period: MINUTE,
     capacity: 120,
+    shards: 16,
   },
 });
 
@@ -99,7 +79,11 @@ type GatewayCaller = { orgId: string; keyId: string };
 
 /** Atomically rate-limit and claim cache misses, including concurrent searches. */
 export const prepareQueryEmbedding = internalMutation({
-  args: { query: v.string(), gatewayCaller: v.optional(gatewayCaller) },
+  args: {
+    query: v.string(),
+    gatewayCaller: v.optional(gatewayCaller),
+    trustedAnonymousKey: v.optional(v.string()),
+  },
   handler: async (ctx, args): Promise<QueryEmbeddingAdmission> => {
     const identity = await ctx.auth.getUserIdentity();
     // Convex actions have no trusted client IP/session for anonymous callers.
@@ -119,37 +103,47 @@ export const prepareQueryEmbedding = internalMutation({
     } else {
       const caller =
         identity === null
-          ? await searchRateLimiter.limit(ctx, "anonymousSearch")
+          ? args.trustedAnonymousKey
+            ? await searchRateLimiter.limit(ctx, "anonymousSearch", {
+                key: args.trustedAnonymousKey,
+              })
+            : { ok: false }
           : await searchRateLimiter.limit(ctx, "signedInSearch", {
               key: identity.tokenIdentifier,
             });
       if (!caller.ok) return { status: "limited" };
     }
-    const budget = await searchRateLimiter.limit(ctx, "searchBudget");
-    if (!budget.ok) return { status: "limited" };
 
-    const cacheKey = `gemini-embedding-001:768:RETRIEVAL_QUERY:${args.query}`;
+    const cacheKey = await sha256Hex(
+      args.query.trim().toLowerCase().replace(/\s+/g, " "),
+    );
     const existing = await ctx.db
       .query("searchQueryEmbeddings")
-      .withIndex("by_cache_key", (q) => q.eq("cacheKey", cacheKey))
+      .withIndex("by_query", (q) =>
+        q.eq("model", "gemini-embedding-001").eq("queryHash", cacheKey),
+      )
       .unique();
-    if (existing !== null && existing.expiresAt > Date.now()) {
-      return existing.embedding === undefined
+    if (existing && existing.expiresAt > Date.now()) {
+      return existing.embedding.length === 0
         ? { status: "pending" }
         : { status: "cached", embedding: existing.embedding };
     }
+    const budget = await searchRateLimiter.limit(ctx, "searchBudget");
+    if (!budget.ok) return { status: "limited" };
     const leaseToken = crypto.randomUUID();
     const expiresAt = Date.now() + QUERY_EMBED_LEASE_MS;
     let id;
     if (existing === null) {
       id = await ctx.db.insert("searchQueryEmbeddings", {
-        cacheKey,
+        model: "gemini-embedding-001",
+        queryHash: cacheKey,
+        embedding: [],
         leaseToken,
         expiresAt,
       });
     } else {
       id = existing._id;
-      await ctx.db.patch(id, { embedding: undefined, leaseToken, expiresAt });
+      await ctx.db.patch(id, { embedding: [], leaseToken, expiresAt });
     }
     await ctx.scheduler.runAt(expiresAt, internal.search.expireQueryEmbedding, {
       id,
@@ -166,7 +160,7 @@ export const finishQueryEmbedding = internalMutation({
   },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id);
-    if (row === null || row.leaseToken !== args.leaseToken) return;
+    if (!row || row.leaseToken !== args.leaseToken) return;
     if (args.embedding === undefined) {
       await ctx.db.delete(row._id);
       return;
@@ -183,8 +177,7 @@ export const expireQueryEmbedding = internalMutation({
   args: { id: v.id("searchQueryEmbeddings") },
   handler: async (ctx, args) => {
     const row = await ctx.db.get(args.id);
-    if (row !== null && row.expiresAt <= Date.now())
-      await ctx.db.delete(row._id);
+    if (row && row.expiresAt <= Date.now()) await ctx.db.delete(row._id);
   },
 });
 
@@ -295,145 +288,92 @@ export async function embedText(
 // Embedding pipeline
 // ---------------------------------------------------------------------------
 
-/** Load a project + its latest published spec body for embedding. */
 export const getProjectForEmbed = internalQuery({
   args: { projectId: v.id("projects") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    name: string;
-    description: string | undefined;
-    tags: string[];
-    specJson: string | null;
-  } | null> => {
+  handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
-    if (project === null || (await isProjectRetired(ctx, project))) return null;
-    const organization = await ctx.db.get(project.organizationId);
-    if (
-      organization === null ||
-      !(await isOrganizationActive(ctx, organization))
-    ) {
+    if (!project?.latestVersionId || !(await listing(ctx, project)))
       return null;
-    }
-
-    const latest = await ctx.db
-      .query("specVersions")
-      .withIndex("by_project_published", (q) =>
-        q.eq("projectId", args.projectId),
-      )
-      .order("desc")
-      .first();
-
-    if (latest === null || !isPublishedSurfaceAllowed(organization, latest)) {
-      return null;
-    }
-
-    return {
-      name: project.name,
-      description: project.description,
-      tags: project.tags,
-      specJson: latest.spec,
-    };
+    const version = await ctx.db.get(project.latestVersionId);
+    return version
+      ? {
+          name: project.name,
+          description: project.description,
+          tags: project.tags,
+          specJson: version.spec,
+          specVersionId: version._id,
+          revision: project.revision,
+        }
+      : null;
   },
 });
-
-/** Upsert the single specEmbeddings row for a project (one per project). */
 export const upsertEmbedding = internalMutation({
   args: {
     projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    revision: v.number(),
     text: v.string(),
-    embedding: v.array(v.float64()),
+    embedding: v.array(v.number()),
   },
-  handler: async (ctx, args): Promise<void> => {
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (
+      !project ||
+      project.revision !== args.revision ||
+      project.latestVersionId !== args.specVersionId ||
+      !(await listing(ctx, project))
+    )
+      return;
+    if (
+      args.embedding.length !== 768 ||
+      args.embedding.some((n) => !Number.isFinite(n))
+    )
+      throw new Error("Invalid embedding");
     const existing = await ctx.db
       .query("specEmbeddings")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-
-    const updatedAt = Date.now();
-    if (existing === null) {
-      await ctx.db.insert("specEmbeddings", {
-        projectId: args.projectId,
-        text: args.text,
-        embedding: args.embedding,
-        updatedAt,
-      });
-    } else {
-      await ctx.db.patch(existing._id, {
-        text: args.text,
-        embedding: args.embedding,
-        updatedAt,
-      });
-    }
+    const value = {
+      kind: "listing" as const,
+      model: "gemini-embedding-001",
+      dimensions: 768 as const,
+      contentHash: await sha256Hex(args.text),
+      projectId: args.projectId,
+      specVersionId: args.specVersionId,
+      text: args.text,
+      embedding: args.embedding,
+      updatedAt: Date.now(),
+    };
+    if (existing) await ctx.db.replace(existing._id, value);
+    else await ctx.db.insert("specEmbeddings", value);
   },
 });
-
-/**
- * Build + persist a project's embedding from its latest published spec.
- * Scheduled on publish (specs.publish) and by embedAllPublished backfill.
- * A Gemini failure throws here so Convex retries the scheduled function.
- */
 export const embedProject = internalAction({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), attempt: v.optional(v.number()) },
   handler: async (ctx, args): Promise<void> => {
+    if (!process.env.GEMINI_API_KEY) return;
     const data = await ctx.runQuery(internal.search.getProjectForEmbed, {
       projectId: args.projectId,
     });
-    if (data === null) return;
-
-    const text = buildEmbedText(data, data.specJson);
-    const embedding = await embedText(text, {
-      taskType: "RETRIEVAL_DOCUMENT",
-    });
-    await ctx.runMutation(internal.search.upsertEmbedding, {
-      projectId: args.projectId,
-      text,
-      embedding,
-    });
-  },
-});
-
-/** All published+public project ids — for backfill. */
-export const listPublishedPublicProjects = internalQuery({
-  args: { cursor: v.union(v.string(), v.null()) },
-  handler: async (ctx, args) => {
-    const rows = await ctx.db
-      .query("projects")
-      .withIndex("by_visibility_status", (q) =>
-        q.eq("visibility", "public").eq("status", "published"),
-      )
-      .paginate({ cursor: args.cursor, numItems: 100, maximumRowsRead: 101 });
-    return {
-      ids: rows.page.map((row) => row._id),
-      continueCursor: rows.continueCursor,
-      isDone: rows.isDone,
-    };
-  },
-});
-
-/**
- * Backfill embeddings for every published+public project.
- * Run once via `npx convex run search:embedAllPublished`.
- */
-export const embedAllPublished = internalAction({
-  args: { cursor: v.optional(v.union(v.string(), v.null())) },
-  handler: async (ctx, args): Promise<{ scheduled: number }> => {
-    const page = await ctx.runQuery(
-      internal.search.listPublishedPublicProjects,
-      { cursor: args.cursor ?? null },
-    );
-    for (const projectId of page.ids) {
-      await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-        projectId,
+    if (!data) return;
+    try {
+      const text = buildEmbedText(data, data.specJson),
+        embedding = await embedText(text);
+      await ctx.runMutation(internal.search.upsertEmbedding, {
+        projectId: args.projectId,
+        specVersionId: data.specVersionId,
+        revision: data.revision,
+        text,
+        embedding,
       });
+    } catch {
+      if ((args.attempt ?? 0) < 4)
+        await ctx.scheduler.runAfter(
+          60000 * 2 ** (args.attempt ?? 0),
+          internal.search.embedProject,
+          { projectId: args.projectId, attempt: (args.attempt ?? 0) + 1 },
+        );
     }
-    if (!page.isDone) {
-      await ctx.scheduler.runAfter(0, internal.search.embedAllPublished, {
-        cursor: page.continueCursor,
-      });
-    }
-    return { scheduled: page.ids.length };
   },
 });
 
@@ -472,55 +412,12 @@ export const fetchSearchListings = internalQuery({
 
     for (let i = 0; i < args.ids.length; i++) {
       const embeddingRow = await ctx.db.get(args.ids[i]);
-      if (embeddingRow === null) continue;
-
+      if (embeddingRow?.kind !== "listing") continue;
       const project = await ctx.db.get(embeddingRow.projectId);
-      if (project === null) continue;
-      if (project.visibility !== "public") continue;
-      if (project.status !== "published") continue;
-      if (project.deprecationStartedAt !== undefined) continue;
-
-      const org = await getActiveOrgById(ctx, project.organizationId);
-      if (org === null) continue;
-      if ((await getActivePublicRouteBinding(ctx, org, project)) === null) {
+      if (!project || project.latestVersionId !== embeddingRow.specVersionId)
         continue;
-      }
-      if (org.publicHandle === undefined || org.publicHandle === "") continue;
-
-      const latest = await ctx.db
-        .query("specVersions")
-        .withIndex("by_project_published", (q) =>
-          q.eq("projectId", project._id),
-        )
-        .order("desc")
-        .first();
-
-      if (!isPublishedSurfaceAllowed(org, latest)) {
-        continue;
-      }
-
-      const pricing =
-        latest === null ? null : summarizePublishedPricing(latest.spec);
-      const listing = await ctx.db
-        .query("catalogueListings")
-        .withIndex("by_project", (q) => q.eq("projectId", project._id))
-        .unique();
-
-      out.push({
-        name: project.name,
-        slug: project.slug,
-        description: project.description,
-        tags: project.tags,
-        orgName: org.name,
-        publisherHandle: org.publicHandle,
-        publishedAt: latest?.publishedAt ?? null,
-        pricing,
-        quality:
-          listing?.quality && listing.quality.specVersionId === latest?._id
-            ? qualitySnapshotContract(listing.quality)
-            : null,
-        score: args.scores[i] ?? 0,
-      });
+      const item = await listing(ctx, project);
+      if (item) out.push({ ...item, score: args.scores[i] ?? 0 });
     }
 
     return out.sort(compareSearchListings);
@@ -576,6 +473,7 @@ export const searchCatalogueForGateway = internalAction({
     query: v.string(),
     limit: v.optional(v.number()),
     gatewayCaller: v.optional(gatewayCaller),
+    trustedAnonymousKey: v.optional(v.string()),
   },
   handler: (ctx, args): Promise<SearchCatalogueResult> =>
     searchCatalogueForCaller(ctx, args),
@@ -583,7 +481,12 @@ export const searchCatalogueForGateway = internalAction({
 
 async function searchCatalogueForCaller(
   ctx: ActionCtx,
-  args: { query: string; limit?: number; gatewayCaller?: GatewayCaller },
+  args: {
+    query: string;
+    limit?: number;
+    gatewayCaller?: GatewayCaller;
+    trustedAnonymousKey?: string;
+  },
 ): Promise<SearchCatalogueResult> {
   const trimmed = args.query.trim().slice(0, 200);
   if (trimmed.length === 0) {
@@ -597,7 +500,11 @@ async function searchCatalogueForCaller(
 
   const admission = await ctx.runMutation(
     internal.search.prepareQueryEmbedding,
-    { query: trimmed, gatewayCaller: args.gatewayCaller },
+    {
+      query: trimmed,
+      gatewayCaller: args.gatewayCaller,
+      trustedAnonymousKey: args.trustedAnonymousKey,
+    },
   );
   if (admission.status === "limited" || admission.status === "pending") {
     return { items: [], degraded: true };
@@ -626,6 +533,7 @@ async function searchCatalogueForCaller(
 
   const results = await ctx.vectorSearch("specEmbeddings", "by_embedding", {
     vector: queryEmbedding,
+    filter: (q) => q.eq("kind", "listing"),
     limit: SEARCH_LIMIT_MAX,
   });
 

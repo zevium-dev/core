@@ -8,9 +8,6 @@ import worker, { __setTestPipelineDeps, type Env } from "../src/index";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
-import type { WalletDO } from "../src/wallet";
-
-type WalletStub = DurableObjectStub<WalletDO>;
 
 const ORG_SLUG = "acme";
 const PROJECT_SLUG = "demo";
@@ -79,11 +76,6 @@ const SPEC = JSON.stringify({
   },
 });
 
-function walletStub(clerkOrgId: string): WalletStub {
-  const id = env.WALLET.idFromName(clerkOrgId);
-  return env.WALLET.get(id);
-}
-
 async function installFixtures(opts: {
   clerkOrgId: string;
   credits?: number;
@@ -120,12 +112,6 @@ async function installFixtures(opts: {
     now: opts.now === undefined ? undefined : () => opts.now!,
   });
 
-  if (opts.credits && opts.credits > 0) {
-    await walletStub(opts.clerkOrgId).grant(
-      `grant_${crypto.randomUUID()}`,
-      opts.credits,
-    );
-  }
   return { specs };
 }
 
@@ -156,8 +142,6 @@ describe("mock gateway route", () => {
     const clerkOrgId = "org_mock_happy";
     await installFixtures({ clerkOrgId, credits: 100 });
 
-    const before = await walletStub(clerkOrgId).getState();
-
     const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/42`);
 
     expect(res.status).toBe(200);
@@ -166,11 +150,6 @@ describe("mock gateway route", () => {
     expect(res.headers.get("content-type")).toBe("application/json");
     const body: unknown = await res.json();
     expect(body).toEqual({ id: "string", active: true });
-
-    const after = await walletStub(clerkOrgId).getState();
-    expect(after.balance).toBe(before.balance);
-    expect(after.inFlightTotal).toBe(0);
-    expect(after.pendingSettlements).toHaveLength(0);
   });
 
   it("prefers the schema example over synthesis", async () => {
@@ -226,9 +205,6 @@ describe("mock gateway route", () => {
 
     const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
     expect(res.status).toBe(200);
-
-    const state = await walletStub(clerkOrgId).getState();
-    expect(state.balance).toBe(0);
   });
 
   it("keyless request serves mock (public try-before-buy surface)", async () => {
@@ -255,9 +231,6 @@ describe("mock gateway route", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("x-zevium-mock")).toBe("1");
-
-    const state = await walletStub("org_mock_badkey").getState();
-    expect(state.balance).toBe(10);
   });
 
   it("maps legacy invalid pricing to a controlled error", async () => {
@@ -360,7 +333,6 @@ it.each([undefined, 0, 7])(
         },
       }),
     });
-    const before = await walletStub(clerkOrgId).getState();
     const response = await mockFetch(
       `/mock/${ORG_SLUG}/${PROJECT_SLUG}/priced`,
       { headers: { authorization: "" } },
@@ -373,6 +345,5 @@ it.each([undefined, 0, 7])(
       expect(response.headers.get("x-zevium-cost")).toBe("0");
       expect(await response.json()).toEqual({ ok: true });
     }
-    expect(await walletStub(clerkOrgId).getState()).toEqual(before);
   },
 );

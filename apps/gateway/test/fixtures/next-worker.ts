@@ -1,8 +1,7 @@
 // Local acceptance entrypoint only; never referenced by deployment configuration.
-import worker, { WalletSqliteDO, type Env } from "../../src/index";
+import worker, { type Env } from "../../src/index";
 import { EdgeSnapshotDO as SnapshotBase } from "../../src/next/snapshots";
 import { NextWalletDO as WalletBase } from "../../src/next/wallet";
-export { WalletSqliteDO };
 export { EdgeOAuthDO } from "../../src/next/oauth";
 export class EdgeSnapshotDO extends SnapshotBase {
   async refresh() {

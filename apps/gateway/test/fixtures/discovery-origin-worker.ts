@@ -1,3 +1,4 @@
+import { nextDeps } from "../../src/next/pipeline";
 import worker, { __setTestPipelineDeps } from "../../src/index";
 import { FixtureCatalogueSource } from "../../src/catalogue-source";
 import { FixtureKeyVerifier } from "../../src/key-verifier";
@@ -22,6 +23,15 @@ specs.set("test-publisher", "test-api", {
   }),
 });
 __setTestPipelineDeps({
+  nextExecute: (request, env, ctx, route, prepare, key) =>
+    nextDeps({ APP_ORIGIN: env.APP_ORIGIN }).nextExecute!(
+      request,
+      env,
+      ctx,
+      route,
+      prepare,
+      key,
+    ),
   keyVerifier: new FixtureKeyVerifier(),
   specSource: specs,
   publicSpecSource: specs,

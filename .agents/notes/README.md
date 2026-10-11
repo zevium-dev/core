@@ -25,7 +25,9 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 | [sessions/](sessions/)                                        | Dated logs of substantial user ↔ agent discussions: asked, found, decided, proposed                       |
 | [findings/](findings/)                                        | Lessons and review findings. `values.md` = standing lessons                                               |
 | [history/](history/)                                          | Read-only archive: build plan and wave prompts from the greenfield build. Do not update                   |
-| [x402 re-enable runbook](architecture/x402-enable-runbook.md) | Disabled rail activation, secrets, facilitator/network constraints, settlement and smoke tests            |
+| [x402 re-enable runbook](architecture/x402-enable-runbook.md) | Historical disabled-rail design; no current runtime activation path                                       |
+
+[Convex cutover activation runbook](architecture/convex-activation.md) — ordered owner-only provider setup, data reset, DO migration, browser gates and rollback.
 
 ## Current owner decisions
 

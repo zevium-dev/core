@@ -20,9 +20,8 @@ export interface NextEnv {
   CLERK_SECRET_KEY?: string;
   MCP_OAUTH_ISSUER?: string;
   MCP_OAUTH_RESOURCE?: string;
-  CONTROL_PLANE_MODE?: string;
   NEXT_DEPLOYMENT_ID?: string;
-  NEXT_CONVEX_SITE_URL?: string;
+  CONVEX_SITE_URL?: string;
   NEXT_SNAPSHOT_KEYS?: string;
   NEXT_TRANSPORT_KEYS?: string;
   NEXT_ADMISSION_KEYS?: string;
@@ -41,7 +40,7 @@ export async function pull(
   const nonce = crypto.randomUUID(),
     url = new URL(
       kind === "wallet" ? "/wallet-grants" : "/edge-snapshot",
-      env.NEXT_CONVEX_SITE_URL,
+      env.CONVEX_SITE_URL,
     );
   for (const [name, value] of Object.entries({
     kind,

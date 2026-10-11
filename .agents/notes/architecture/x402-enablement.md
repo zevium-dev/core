@@ -1,6 +1,8 @@
+> HISTORICAL ONLY (2026-10-11): PR 7 deletes the legacy x402 runtime and schema. These setup steps cannot activate current code. Revival requires re-implementing funding, sessions, admission, settlement and recovery against the new Convex/edge plane, plus review and owner approval. Every source-path/provider-flow description below refers to last legacy release `3d51eb9a`, not current code. See [cutover activation](convex-activation.md).
+
 # x402 future enablement runbook
 
-> Updated: 2026-10-11 · Status: runbook only; x402 disabled by owner decision, enforcement #424 pending; activation P2 #109
+> Updated: 2026-10-11 · Status: historical runbook; x402 removed by rebuild; future implementation/activation P2 #109
 > Policy: [x402 disabled](../decisions/2026-10-11-x402-disabled.md) · Feature/code map: [machine payments](../features/machine-payments.md)
 
 No deployment, secret, payment or feature flag changed in the decision PR. This runbook records how to prepare a future activation; it is not an activation instruction for the current launch.

@@ -1,321 +1,63 @@
-import { v } from "convex/values";
+import { retirementNotice } from "./lifecycleNotices";
+import { fireWebhookEvent } from "./webhooks";
+import { syncCatalogue, adjustStat } from "./lib/catalogue";
+import { paginationOptsValidator } from "convex/server";
+import { v, ConvexError } from "convex/values";
+import { isValidSlug, sha256Hex } from "@zevium/shared";
 import {
-  internalMutation,
   mutation,
   query,
+  internalMutation,
   type MutationCtx,
 } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
-
+import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
-  getActiveOrgById,
+  requireActiveOrg,
   requireOrgAdmin,
-  requireOrgMemberBySlug,
   requireProjectMember,
+  requireProjectAdmin,
 } from "./lib/auth";
-import {
-  upsertNotification,
-  upsertProjectRetirementConsumerNotice,
-} from "./lib/notifications";
-import { fireWebhookEvent } from "./webhooks";
-import { isOrganizationPublicSurfaceAllowed } from "./lib/publicSurface";
-import { isValidSlug } from "./lib/validate";
-import { syncCatalogueListing } from "./catalogue";
-import { isProjectRetired, retirePublicRoute } from "./lib/publicRoutes";
-import {
-  enqueueCatalogueSnapshot,
-  enqueuePublishedProjectProjection,
-  enqueueRouteArchive,
-} from "./registrySync";
-
-export const MIN_DEPRECATION_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
-const RETIREMENT_BATCH_SIZE = 100;
-const RETIREMENT_REPAIR_BATCH_SIZE = 25;
-const NOTICE_USAGE_PAGE_SIZE = 100;
-const CLEANUP_PAGE_SIZE = 50;
-
-async function cleanupProjectRuntime(
-  ctx: MutationCtx,
-  projectId: Id<"projects">,
-): Promise<void> {
-  const draft = await ctx.db
-    .query("specs")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (draft !== null) await ctx.db.delete(draft._id);
-
-  const readiness = await ctx.db
-    .query("publishReadiness")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (readiness !== null) await ctx.db.delete(readiness._id);
-
-  const embedding = await ctx.db
-    .query("specEmbeddings")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (embedding !== null) await ctx.db.delete(embedding._id);
-
-  const webhook = await ctx.db
-    .query("webhookEndpoints")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (webhook !== null) await ctx.db.patch(webhook._id, { active: false });
-
-  const target = await ctx.db
-    .query("qualityProbeTargets")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (target !== null) {
-    await ctx.db.patch(target._id, {
-      enabled: false,
-      leaseId: undefined,
-      leaseExpiresAt: undefined,
-      updatedAt: Date.now(),
-    });
-  }
-
-  const project = await ctx.db.get(projectId);
-  const deleteEvidence = project?.status === "draft";
-  if (deleteEvidence) {
-    if (target !== null) await ctx.db.delete(target._id);
-    const snapshot = await ctx.db
-      .query("qualitySnapshots")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .unique();
-    if (snapshot !== null) await ctx.db.delete(snapshot._id);
-    const subscriptionAggregate = await ctx.db
-      .query("listingSubscriptionAggregates")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .unique();
-    if (subscriptionAggregate !== null)
-      await ctx.db.delete(subscriptionAggregate._id);
-    const reviewAggregate = await ctx.db
-      .query("reviewAggregates")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .unique();
-    if (reviewAggregate !== null) await ctx.db.delete(reviewAggregate._id);
-  }
-
-  const existingJob = await ctx.db
-    .query("projectCleanupJobs")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .unique();
-  if (existingJob === null) {
-    await ctx.db.insert("projectCleanupJobs", {
-      projectId,
-      phase: deleteEvidence ? "quality_results" : "credentials",
-      batchesCompleted: 0,
-      updatedAt: Date.now(),
-    });
-  }
-  await ctx.scheduler.runAfter(0, internal.projects.runProjectCleanupPage, {
-    projectId,
-  });
+import { projectDto } from "./lib/dto";
+export const MIN_DEPRECATION_NOTICE_MS = 7 * 86_400_000;
+function bounded(value: string, max: number, label: string) {
+  const text = value.trim();
+  if (!text || text.length > max)
+    throw new ConvexError(`${label} must be 1–${max} characters`);
+  return text;
 }
-
-/** Drain every destructive phase in bounded head pages; retries are idempotent. */
-export const runProjectCleanupPage = internalMutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<{ phase: string; deleted: number }> => {
-    const job = await ctx.db
-      .query("projectCleanupJobs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (job === null || job.phase === "finished") {
-      return { phase: "finished", deleted: 0 };
-    }
-    let deleted = 0;
-    let nextPhase: Doc<"projectCleanupJobs">["phase"] = job.phase;
-    if (job.phase === "quality_results") {
-      const rows = await ctx.db
-        .query("qualityProbeResults")
-        .withIndex("by_project_checked", (q) =>
-          q.eq("projectId", args.projectId),
-        )
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "quality_samples";
-    } else if (job.phase === "quality_samples") {
-      const rows = await ctx.db
-        .query("gatewayQualitySamples")
-        .withIndex("by_project_at", (q) => q.eq("projectId", args.projectId))
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "incidents";
-    } else if (job.phase === "incidents") {
-      const rows = await ctx.db
-        .query("qualityIncidents")
-        .withIndex("by_project_opened", (q) =>
-          q.eq("projectId", args.projectId),
-        )
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "subscriptions";
-    } else if (job.phase === "subscriptions") {
-      const rows = await ctx.db
-        .query("listingSubscriptions")
-        .withIndex("by_project_active", (q) =>
-          q.eq("projectId", args.projectId),
-        )
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "reviews";
-    } else if (job.phase === "reviews") {
-      const review = await ctx.db
-        .query("reviews")
-        .withIndex("by_project_sort", (q) => q.eq("projectId", args.projectId))
-        .first();
-      if (review === null) {
-        nextPhase = "spec_versions";
-      } else {
-        const reports = await ctx.db
-          .query("reviewReports")
-          .withIndex("by_review_status", (q) => q.eq("reviewId", review._id))
-          .take(CLEANUP_PAGE_SIZE);
-        const edits = await ctx.db
-          .query("reviewEdits")
-          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
-          .take(CLEANUP_PAGE_SIZE);
-        const actions = await ctx.db
-          .query("reviewModerationActions")
-          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
-          .take(CLEANUP_PAGE_SIZE);
-        for (const row of reports) await ctx.db.delete(row._id);
-        for (const row of edits) await ctx.db.delete(row._id);
-        for (const row of actions) await ctx.db.delete(row._id);
-        deleted = reports.length + edits.length + actions.length;
-        const response = await ctx.db
-          .query("publisherReviewResponses")
-          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
-          .unique();
-        if (response !== null) {
-          const responseEdits = await ctx.db
-            .query("publisherReviewResponseEdits")
-            .withIndex("by_response", (q) => q.eq("responseId", response._id))
-            .take(CLEANUP_PAGE_SIZE);
-          for (const row of responseEdits) await ctx.db.delete(row._id);
-          deleted += responseEdits.length;
-          if (responseEdits.length < CLEANUP_PAGE_SIZE) {
-            await ctx.db.delete(response._id);
-            deleted += 1;
-          }
-        }
-        const thread = await ctx.db
-          .query("reviewReportThreads")
-          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
-          .unique();
-        if (thread !== null) await ctx.db.delete(thread._id);
-        if (
-          reports.length < CLEANUP_PAGE_SIZE &&
-          edits.length < CLEANUP_PAGE_SIZE &&
-          actions.length < CLEANUP_PAGE_SIZE &&
-          response === null
-        ) {
-          await ctx.db.delete(review._id);
-          deleted += 1;
-        }
-      }
-    } else if (job.phase === "spec_versions") {
-      const rows = await ctx.db
-        .query("specVersions")
-        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "credentials";
-    } else if (job.phase === "credentials") {
-      const rows = await ctx.db
-        .query("upstreamCredentials")
-        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-        .take(CLEANUP_PAGE_SIZE);
-      for (const row of rows) await ctx.db.delete(row._id);
-      deleted = rows.length;
-      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "webhook_deliveries";
-    } else {
-      const endpoint = await ctx.db
-        .query("webhookEndpoints")
-        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-        .unique();
-      if (job.phase === "webhook_deliveries") {
-        if (endpoint === null) {
-          nextPhase = "webhook_endpoint";
-        } else {
-          const rows = await ctx.db
-            .query("webhookDeliveries")
-            .withIndex("by_endpoint", (q) => q.eq("endpointId", endpoint._id))
-            .take(CLEANUP_PAGE_SIZE);
-          for (const row of rows) await ctx.db.delete(row._id);
-          deleted = rows.length;
-          if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "webhook_endpoint";
-        }
-      } else if (job.phase === "webhook_endpoint") {
-        if (endpoint !== null) await ctx.db.delete(endpoint._id);
-        deleted = endpoint === null ? 0 : 1;
-        nextPhase = "finished";
-      }
-    }
-    await ctx.db.patch(job._id, {
-      phase: nextPhase,
-      batchesCompleted: job.batchesCompleted + 1,
-      updatedAt: Date.now(),
-    });
-    if (nextPhase === "finished") {
-      const project = await ctx.db.get(args.projectId);
-      if (project !== null) {
-        await ctx.db.patch(project._id, { deletionState: "cleaned" });
-      }
-    } else {
-      await ctx.scheduler.runAfter(
-        0,
-        internal.projects.runProjectCleanupPage,
-        args,
-      );
-    }
-    return { phase: nextPhase, deleted };
-  },
-});
-
 export const list = query({
-  args: { orgSlug: v.string() },
-  handler: async (ctx, args): Promise<Doc<"projects">[]> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const projects = await ctx.db
+  args: { orgSlug: v.string(), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const { org } = await requireActiveOrg(ctx);
+    const rows = await ctx.db
       .query("projects")
-      .withIndex("by_org", (q) => q.eq("organizationId", org._id))
-      .collect();
-    const active: Doc<"projects">[] = [];
-    for (const project of projects) {
-      if (!(await isProjectRetired(ctx, project))) active.push(project);
-    }
-    return active;
+      .withIndex("by_org_slug", (q) => q.eq("organizationId", org._id))
+      .paginate({
+        ...args.paginationOpts,
+        numItems: Math.max(1, Math.min(50, args.paginationOpts.numItems)),
+      });
+    return {
+      ...rows,
+      page: rows.page
+        .filter((r) => r.retirement?.state !== "retired")
+        .map(projectDto),
+    };
   },
 });
-
 export const get = query({
-  args: {
-    orgSlug: v.string(),
-    projectSlug: v.string(),
-  },
-  handler: async (ctx, args): Promise<Doc<"projects"> | null> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const project = await ctx.db
+  args: { orgSlug: v.string(), projectSlug: v.string() },
+  handler: async (ctx, args) => {
+    const { org } = await requireActiveOrg(ctx);
+    const row = await ctx.db
       .query("projects")
       .withIndex("by_org_slug", (q) =>
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
       .unique();
-    return project !== null && !(await isProjectRetired(ctx, project))
-      ? project
-      : null;
+    return row && row.retirement?.state !== "retired" ? projectDto(row) : null;
   },
 });
-
 export const create = mutation({
   args: {
     orgSlug: v.string(),
@@ -323,675 +65,323 @@ export const create = mutation({
     slug: v.string(),
     description: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+  handler: async (ctx, args) => {
+    const { org, claims } = await requireActiveOrg(ctx);
     requireOrgAdmin(claims);
-
-    const name = args.name.trim();
-    if (name.length === 0) {
-      throw new Error("Name is required");
-    }
-    if (name.length > 120) {
-      throw new Error("Name must be at most 120 characters");
-    }
-
-    const slug = args.slug.trim().toLowerCase();
-    if (!isValidSlug(slug)) {
-      throw new Error(
-        "Slug must be kebab-case (lowercase letters, numbers, hyphens)",
-      );
-    }
-
-    const description =
-      args.description === undefined ? undefined : args.description.trim();
-    if (description !== undefined && description.length > 2000) {
-      throw new Error("Description must be at most 2000 characters");
-    }
-
-    const existing = await ctx.db
-      .query("projects")
-      .withIndex("by_org_slug", (q) =>
-        q.eq("organizationId", org._id).eq("slug", slug),
-      )
-      .unique();
-    if (existing !== null) {
-      throw new Error("Project slug already exists in this organization");
-    }
-    const tombstone = await ctx.db
-      .query("publicRouteTombstones")
-      .withIndex("by_org_slug", (q) =>
-        q.eq("organizationId", org._id).eq("projectSlug", slug),
-      )
-      .unique();
-    if (tombstone !== null) {
-      throw new Error("Project slug is permanently reserved");
-    }
-
-    const projectId = await ctx.db.insert("projects", {
+    const name = bounded(args.name, 120, "Name"),
+      slug = args.slug.trim().toLowerCase();
+    if (!isValidSlug(slug) || slug.length > 120)
+      throw new ConvexError("Slug must be kebab-case");
+    if ((args.description?.length ?? 0) > 2000)
+      throw new ConvexError("Description must be at most 2000 characters");
+    if (
+      await ctx.db
+        .query("projects")
+        .withIndex("by_org_slug", (q) =>
+          q.eq("organizationId", org._id).eq("slug", slug),
+        )
+        .unique()
+    )
+      throw new ConvexError("Project slug already exists in this organization");
+    if (
+      await ctx.db
+        .query("routeTombstones")
+        .withIndex("by_route", (q) =>
+          q.eq("publisherHandle", org.publicHandle).eq("projectSlug", slug),
+        )
+        .unique()
+    )
+      throw new ConvexError("Project slug is permanently reserved");
+    const draft = {
+      hash: await sha256Hex(""),
+      revision: 1,
+      savedAt: Date.now(),
+    };
+    const id = await ctx.db.insert("projects", {
       organizationId: org._id,
       name,
       slug,
-      description: description === "" ? undefined : description,
+      description: args.description?.trim() || undefined,
+      tags: [],
       status: "draft",
       visibility: "private",
-      tags: [],
+      desiredVisibility: "private",
+      qualityStatus: "active",
+      revision: 1,
+      publicationGeneration: 0,
+      houseOperated: false,
+      discoverable: false,
+      searchText: name.toLowerCase(),
+      sortName: name.toLowerCase(),
+      endpointCount: 0,
+      hasFreeTier: false,
+      draft,
+      quality: { snapshot: null, recoveryPasses: 0 },
+      reviewSummary: {
+        count: 0,
+        ratingSum: 0,
+        distribution: { one: 0, two: 0, three: 0, four: 0, five: 0 },
+      },
     });
-
-    // Empty draft so editor always has a row.
-    await ctx.db.insert("specs", {
-      projectId,
-      draft: "",
-      lastSavedAt: Date.now(),
-    });
-
-    const created = await ctx.db.get(projectId);
-    if (created === null) {
-      throw new Error("Failed to load created project");
-    }
-    return created;
+    await adjustStat(ctx, "draft", id, 1);
+    await ctx.db.insert("projectDrafts", { projectId: id, text: "", ...draft });
+    return projectDto((await ctx.db.get(id))!);
   },
 });
-
 export const update = mutation({
   args: {
     projectId: v.id("projects"),
     patch: v.object({
       name: v.optional(v.string()),
       description: v.optional(v.union(v.string(), v.null())),
+      tags: v.optional(v.array(v.string())),
       visibility: v.optional(
         v.union(v.literal("private"), v.literal("public")),
       ),
-      tags: v.optional(v.array(v.string())),
     }),
   },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, project: current } = await requireProjectMember(
-      ctx,
-      args.projectId,
-    );
-    if (current.retiredAt !== undefined) {
-      throw new Error("Project is retired");
-    }
-    if (args.patch.visibility !== undefined) {
+  handler: async (ctx, args) => {
+    const { project, claims } = await requireProjectMember(ctx, args.projectId);
+    if (project.status === "published" || args.patch.visibility !== undefined)
       requireOrgAdmin(claims);
-    }
-
-    let name = current.name;
-    let description = current.description;
-    let visibility = current.visibility;
-    let tags = current.tags;
-
+    const patch: Partial<Doc<"projects">> = {};
     if (args.patch.name !== undefined) {
-      const next = args.patch.name.trim();
-      if (next.length === 0) {
-        throw new Error("Name is required");
-      }
-      if (next.length > 120) {
-        throw new Error("Name must be at most 120 characters");
-      }
-      name = next;
+      patch.name = bounded(args.patch.name, 120, "Name");
+      patch.sortName = patch.name.toLowerCase();
     }
-
     if (args.patch.description !== undefined) {
-      if (args.patch.description === null) {
-        description = undefined;
-      } else {
-        const next = args.patch.description.trim();
-        if (next.length > 2000) {
-          throw new Error("Description must be at most 2000 characters");
-        }
-        description = next === "" ? undefined : next;
-      }
+      if ((args.patch.description?.length ?? 0) > 2000)
+        throw new ConvexError("Description must be at most 2000 characters");
+      patch.description = args.patch.description?.trim() || undefined;
     }
-
+    if (args.patch.tags !== undefined) {
+      patch.tags = [
+        ...new Set(
+          args.patch.tags.map((t) => t.trim().toLowerCase()).filter(Boolean),
+        ),
+      ];
+      if (patch.tags.length > 32 || patch.tags.some((t) => t.length > 80))
+        throw new ConvexError("At most 32 tags of 80 characters");
+    }
     if (args.patch.visibility !== undefined) {
       if (
-        current.status === "published" &&
-        current.visibility === "public" &&
+        project.status === "published" &&
+        project.desiredVisibility === "public" &&
         args.patch.visibility === "private"
-      ) {
-        throw new Error(
+      )
+        throw new ConvexError(
           "Schedule project retirement before removing a published API from discovery",
         );
-      }
-      visibility = args.patch.visibility;
+      patch.desiredVisibility = args.patch.visibility;
+      // Publisher edits cannot lift a quality suspension.
+      patch.visibility =
+        project.qualityStatus === "active" ? args.patch.visibility : "private";
     }
-
-    if (args.patch.tags !== undefined) {
-      const raw = args.patch.tags
-        .map((t) => t.trim().toLowerCase())
-        .filter((t) => t.length > 0);
-      const seen: Record<string, true> = {};
-      const unique: string[] = [];
-      for (const tag of raw) {
-        if (seen[tag]) continue;
-        seen[tag] = true;
-        unique.push(tag);
-      }
-      if (unique.length > 32) {
-        throw new Error("At most 32 tags");
-      }
-      tags = unique;
-    }
-
-    if (visibility === "public") {
-      const org = await getActiveOrgById(ctx, current.organizationId);
-      if (org === null) {
-        throw new Error("Organization is unavailable");
-      }
-      const latest = await ctx.db
-        .query("specVersions")
-        .withIndex("by_project_published", (q) =>
-          q.eq("projectId", args.projectId),
-        )
-        .order("desc")
-        .first();
-      if (latest !== null && !isOrganizationPublicSurfaceAllowed(org)) {
-        throw new Error(
-          "Project cannot be public until the publisher has a public handle",
-        );
-      }
-    }
-
-    // Convex patch removes optional fields when their value is undefined.
-    // Preserve quality state and publication fences owned by other workflows.
-    await ctx.db.patch(args.projectId, {
-      name,
-      description,
-      visibility,
-      tags,
-    });
-
-    const updated = await ctx.db.get(args.projectId);
-    if (updated === null) {
-      throw new Error("Failed to load updated project");
-    }
-
-    await syncCatalogueListing(ctx, updated._id);
-    await enqueuePublishedProjectProjection(ctx, args.projectId);
-    if (updated.visibility !== current.visibility) {
-      await fireWebhookEvent(ctx, updated._id, "project.visibility_changed", {
-        projectId: updated._id,
-        visibility: updated.visibility,
+    const visibility = patch.visibility ?? project.visibility;
+    patch.discoverable =
+      project.status === "published" &&
+      visibility === "public" &&
+      project.qualityStatus === "active" &&
+      !project.retirement;
+    patch.searchText = [
+      patch.name ?? project.name,
+      "description" in patch ? patch.description : project.description,
+      ...(patch.tags ?? project.tags),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    patch.revision = project.revision + 1;
+    await ctx.db.patch(project._id, patch);
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+        projectId: project._id,
+        visibility: after.visibility,
       });
-    }
-    return updated;
+    await retirementNotice(ctx, project, after);
+    return projectDto(after);
   },
 });
-
-export const remove = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ archived: Id<"projects">; retiredAt: number }> => {
-    const { claims, project } = await requireProjectMember(ctx, args.projectId);
-    requireOrgAdmin(claims);
-    if (
-      project.retiredAt !== undefined &&
-      project.deletionState !== undefined
-    ) {
-      throw new Error("Retired project cannot be deleted");
-    }
-
-    if (project.status === "published") {
-      if (project.sunsetAt === undefined) {
-        throw new Error(
-          "Schedule project retirement before removing a published API",
-        );
-      }
-      if (Date.now() < project.sunsetAt) {
-        throw new Error("Published project cannot be deleted before sunset");
-      }
-    }
-
-    const retiredAt = Date.now();
-    await ctx.db.patch(args.projectId, {
-      visibility: "private",
-      desiredVisibility: "private",
-      retirementState: "retired",
-      retirementRevision: (project.retirementRevision ?? 0) + 1,
-      retirementCutoffAt:
-        project.retirementCutoffAt ?? project.sunsetAt ?? retiredAt,
-      sunsetAt: undefined,
-      retiredAt: project.retiredAt ?? retiredAt,
-      deletionState: "tombstoned",
-    });
-    await cleanupProjectRuntime(ctx, args.projectId);
-    await syncCatalogueListing(ctx, args.projectId);
-    if (project.status === "published") {
-      const organization = await getActiveOrgById(ctx, project.organizationId);
-      if (organization !== null) {
-        await retirePublicRoute(ctx, project, organization, retiredAt);
-        const route = await enqueueRouteArchive(
-          ctx,
-          project,
-          organization,
-          retiredAt,
-        );
-        await enqueueCatalogueSnapshot(ctx, args.projectId, route);
-      }
-    }
-    return { archived: args.projectId, retiredAt };
-  },
-});
-
-/** Operator-only retirement for maintenance; publishers must honor sunset. */
+async function retireProject(ctx: MutationCtx, project: Doc<"projects">) {
+  if (project.retirement?.state === "retired") return;
+  const now = Date.now();
+  const routes = await ctx.db
+    .query("routeTombstones")
+    .withIndex("by_project", (q) => q.eq("projectId", project._id))
+    .collect();
+  for (const route of routes)
+    if (route.retiredAt === undefined)
+      await ctx.db.patch(route._id, {
+        retiredAt: now,
+        revision: route.revision + 1,
+      });
+  // Runtime secrets go; immutable versions, finance, quality evidence and reserved routes stay.
+  const credentials = await ctx.db
+    .query("upstreamCredentials")
+    .withIndex("by_project_name", (q) => q.eq("projectId", project._id))
+    .collect();
+  for (const credential of credentials) await ctx.db.delete(credential._id);
+  await ctx.db.patch(project._id, {
+    discoverable: false,
+    visibility: "private",
+    revision: project.revision + 1,
+    webhook: undefined,
+    draft: project.draft
+      ? { ...project.draft, readiness: undefined }
+      : undefined,
+    quality: {
+      ...project.quality,
+      nextProbeAt: undefined,
+      leaseId: undefined,
+      leaseUntil: undefined,
+    },
+    retirement: {
+      state: "retired",
+      revision: (project.retirement?.revision ?? 0) + 1,
+      message: project.retirement?.message ?? "Project archived",
+      startedAt: project.retirement?.startedAt ?? now,
+      sunsetAt: project.retirement?.sunsetAt ?? now,
+      retiredAt: now,
+      cleanupPhase: "complete",
+    },
+  });
+  const after = (await ctx.db.get(project._id))!;
+  await syncCatalogue(ctx, project, after);
+  if (project.status === "published")
+    await retirementNotice(ctx, project, after);
+}
 export const retire = internalMutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
+  handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
-    if (project === null) throw new Error("Project not found");
-    if (project.status !== "published") {
-      throw new Error("Only published projects can be retired");
-    }
-    if (project.retiredAt !== undefined) return project;
-    const now = Date.now();
-    await ctx.db.patch(project._id, {
-      visibility: "private",
-      desiredVisibility: "private",
-      qualityStatus: "suspended",
-      qualitySuspendedAt: now,
-      qualitySuspensionReason: "Publisher permanently retired this listing",
-      retirementState: "retired",
-      retirementCutoffAt: project.retirementCutoffAt ?? now,
-      retiredAt: now,
-      deletionState: "tombstoned",
-      sunsetAt: undefined,
-    });
-    await cleanupProjectRuntime(ctx, project._id);
-    const organization = await getActiveOrgById(ctx, project.organizationId);
-    if (organization !== null) {
-      await retirePublicRoute(ctx, project, organization, now);
-      const route = await enqueueRouteArchive(ctx, project, organization, now);
-      await enqueueCatalogueSnapshot(ctx, project._id, route);
-    }
-    await syncCatalogueListing(ctx, project._id);
-    const retired = await ctx.db.get(project._id);
-    if (retired === null) throw new Error("Project retirement failed");
-    return retired;
+    if (project) await retireProject(ctx, project);
   },
 });
-
+export const remove = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    if (
+      project.status === "published" &&
+      (!project.retirement || project.retirement.sunsetAt > Date.now())
+    )
+      throw new ConvexError(
+        "Schedule project retirement before removing a published API",
+      );
+    await retireProject(ctx, project);
+    return { deleted: project._id, deletionState: "tombstoned" as const };
+  },
+});
 export const scheduleRetirement = mutation({
   args: {
     projectId: v.id("projects"),
     sunsetAt: v.number(),
     message: v.string(),
   },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, org, project } = await requireProjectMember(
-      ctx,
-      args.projectId,
-    );
-    requireOrgAdmin(claims);
-    if (project.status !== "published" || project.visibility !== "public") {
-      throw new Error("Only public published projects can be deprecated");
-    }
-    if (project.retiredAt !== undefined) throw new Error("Project is retired");
-    const now = Date.now();
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    const message = bounded(args.message, 1000, "Message");
     if (
+      project.retirement?.state === "scheduled" &&
+      project.retirement.sunsetAt === args.sunsetAt &&
+      project.retirement.message === message
+    )
+      return projectDto(project);
+    if (
+      project.status !== "published" ||
+      project.desiredVisibility !== "public" ||
       !Number.isSafeInteger(args.sunsetAt) ||
-      !Number.isFinite(new Date(args.sunsetAt).getTime()) ||
-      args.sunsetAt < now + MIN_DEPRECATION_NOTICE_MS
-    ) {
-      throw new Error("Sunset must provide at least 7 days notice");
-    }
-    const message = args.message.trim();
-    if (message.length === 0 || message.length > 1000) {
-      throw new Error("Deprecation message must be 1-1000 characters");
-    }
-    if (
-      project.retirementState === "scheduled" &&
-      project.sunsetAt === args.sunsetAt &&
-      project.deprecationMessage === message
-    ) {
-      return project;
-    }
-    const deprecationStartedAt = project.deprecationStartedAt ?? now;
-    const retirementRevision = (project.retirementRevision ?? 0) + 1;
-    if (!Number.isSafeInteger(retirementRevision)) {
-      throw new Error("Project retirement revision exhausted");
-    }
+      args.sunsetAt < Date.now() + MIN_DEPRECATION_NOTICE_MS
+    )
+      throw new ConvexError("Sunset must allow at least seven days of notice");
+    if (project.retirement && project.retirement.sunsetAt <= Date.now())
+      throw new ConvexError("Project retirement is terminal");
+    const revision = (project.retirement?.revision ?? project.revision) + 1;
     await ctx.db.patch(project._id, {
-      deprecationStartedAt,
-      sunsetAt: args.sunsetAt,
-      deprecationMessage: message,
-      retirementState: "scheduled",
-      retirementRevision,
-    });
-    await upsertNotification(ctx, {
-      clerkOrgId: org.clerkOrgId,
-      kind: "project_retirement",
-      title: "Project retirement scheduled",
-      body: `${project.name} will stop accepting live calls on ${new Date(args.sunsetAt).toISOString()}. ${message}`,
-      refId: `project_retirement:${project._id}:publisher`,
-    });
-    await ctx.scheduler.runAfter(
-      0,
-      internal.projects.notifyRetirementConsumersPage,
-      {
-        projectId: project._id,
-        retirementRevision,
+      revision: project.revision + 1,
+      discoverable: false,
+      retirement: {
+        state: "scheduled",
+        revision,
+        message,
+        startedAt: Date.now(),
         sunsetAt: args.sunsetAt,
-        event: "scheduled",
-        cursor: null,
+        cleanupPhase: "pending",
       },
-    );
-    await fireWebhookEvent(ctx, project._id, "project.deprecated", {
-      projectId: project._id,
-      sunsetAt: args.sunsetAt,
-      message,
     });
-    const updated = await ctx.db.get(project._id);
-    if (updated === null) throw new Error("Project not found");
-    await syncCatalogueListing(ctx, project._id);
-    return updated;
+    await ctx.scheduler.runAt(
+      args.sunsetAt,
+      internal.projects.retireScheduled,
+      { projectId: project._id, revision },
+    );
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+        projectId: project._id,
+        visibility: after.visibility,
+      });
+    await retirementNotice(ctx, project, after);
+    return projectDto(after);
   },
 });
-
 export const cancelRetirement = mutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, org, project } = await requireProjectMember(
-      ctx,
-      args.projectId,
-    );
-    requireOrgAdmin(claims);
-    if (project.retiredAt !== undefined) {
-      throw new Error("Retired projects cannot be restored");
-    }
-    if (project.sunsetAt !== undefined && project.sunsetAt <= Date.now()) {
-      throw new Error("Retirement cannot be canceled after sunset");
-    }
-    if (
-      project.sunsetAt === undefined ||
-      project.deprecationStartedAt === undefined
-    ) {
-      throw new Error("Project has no scheduled retirement");
-    }
-    const retirementRevision = (project.retirementRevision ?? 0) + 1;
-    if (!Number.isSafeInteger(retirementRevision)) {
-      throw new Error("Project retirement revision exhausted");
-    }
-    const canceledSunsetAt = project.sunsetAt;
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectAdmin(ctx, args.projectId);
+    if (!project.retirement) return projectDto(project);
+    if (project.retirement.sunsetAt <= Date.now())
+      throw new ConvexError("Project retirement is terminal");
     await ctx.db.patch(project._id, {
-      deprecationStartedAt: undefined,
-      sunsetAt: undefined,
-      deprecationMessage: undefined,
-      retirementState: undefined,
-      retirementRevision,
+      retirement: undefined,
+      revision: Math.max(project.revision, project.retirement.revision) + 1,
+      discoverable:
+        project.status === "published" &&
+        project.visibility === "public" &&
+        project.qualityStatus === "active",
     });
-    await upsertNotification(ctx, {
-      clerkOrgId: org.clerkOrgId,
-      kind: "project_retirement",
-      title: "Project retirement canceled",
-      body: `${project.name} will remain available.`,
-      refId: `project_retirement:${project._id}:publisher`,
-    });
-    await ctx.scheduler.runAfter(
-      0,
-      internal.projects.notifyRetirementConsumersPage,
-      {
+    const after = (await ctx.db.get(project._id))!;
+    await syncCatalogue(ctx, project, after);
+    if (project.visibility !== after.visibility)
+      await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
         projectId: project._id,
-        retirementRevision,
-        sunsetAt: canceledSunsetAt,
-        event: "canceled",
-        cursor: null,
-      },
-    );
-    await fireWebhookEvent(ctx, project._id, "project.deprecation_canceled", {
-      projectId: project._id,
-      canceledSunsetAt,
-    });
-    const updated = await ctx.db.get(project._id);
-    if (updated === null) throw new Error("Project not found");
-    await syncCatalogueListing(ctx, project._id);
-    return updated;
-  },
-});
-
-/**
- * Notify every consumer org that has called this project. The indexed usage
- * scan is paginated, each org/ref pair is idempotent, and stale reschedule jobs
- * exit before producing side effects.
- */
-export const notifyRetirementConsumersPage = internalMutation({
-  args: {
-    projectId: v.id("projects"),
-    retirementRevision: v.number(),
-    sunsetAt: v.number(),
-    event: v.union(v.literal("scheduled"), v.literal("canceled")),
-    cursor: v.union(v.string(), v.null()),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ scanned: number; notified: number; done: boolean }> => {
-    const project = await ctx.db.get(args.projectId);
-    const current =
-      project !== null &&
-      project.retirementRevision === args.retirementRevision &&
-      project.retiredAt === undefined &&
-      (args.event === "scheduled"
-        ? project.retirementState === "scheduled" &&
-          project.sunsetAt === args.sunsetAt
-        : project.retirementState === undefined &&
-          project.sunsetAt === undefined);
-    if (!current || project === null) {
-      return { scanned: 0, notified: 0, done: true };
-    }
-    const publisher = await getActiveOrgById(ctx, project.organizationId);
-    if (publisher === null) {
-      return { scanned: 0, notified: 0, done: true };
-    }
-
-    const page = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_project_at", (q) => q.eq("projectId", project._id))
-      .order("asc")
-      .paginate({ cursor: args.cursor, numItems: NOTICE_USAGE_PAGE_SIZE });
-    const consumerIds = [
-      ...new Set(page.page.map((event) => event.organizationId)),
-    ];
-    let notified = 0;
-    for (const organizationId of consumerIds) {
-      if (organizationId === project.organizationId) continue;
-      const consumer = await getActiveOrgById(ctx, organizationId);
-      if (consumer === null) continue;
-      await upsertProjectRetirementConsumerNotice(ctx, {
-        consumerClerkOrgId: consumer.clerkOrgId,
-        projectId: project._id,
-        projectName: project.name,
-        projectSlug: project.slug,
-        publisherName: publisher.name,
-        publisherHandle: publisher.publicHandle,
-        sunsetAt: args.sunsetAt,
-        message: project.deprecationMessage,
-        event: args.event,
+        visibility: after.visibility,
       });
-      notified += 1;
-    }
-
-    if (!page.isDone) {
-      await ctx.scheduler.runAfter(
-        0,
-        internal.projects.notifyRetirementConsumersPage,
-        { ...args, cursor: page.continueCursor },
-      );
-    }
-    return { scanned: page.page.length, notified, done: page.isDone };
+    await retirementNotice(ctx, project, after);
+    return projectDto(after);
   },
 });
-
-/**
- * Close the async-settlement race with paginated fanout. A usage event that
- * lands behind an existing cursor gets this independent canonical upsert.
- */
-export const reconcileRetirementConsumerNotice = internalMutation({
-  args: {
-    projectId: v.id("projects"),
-    consumerOrganizationId: v.id("organizations"),
-  },
-  handler: async (ctx, args): Promise<{ notified: boolean }> => {
-    const [project, consumer] = await Promise.all([
-      ctx.db.get(args.projectId),
-      getActiveOrgById(ctx, args.consumerOrganizationId),
-    ]);
+export const retireScheduled = internalMutation({
+  args: { projectId: v.id("projects"), revision: v.number() },
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
     if (
-      project === null ||
-      consumer === null ||
-      project.organizationId === consumer._id ||
-      project.retirementState !== "scheduled" ||
-      project.sunsetAt === undefined ||
-      project.retiredAt !== undefined
-    ) {
-      return { notified: false };
-    }
-    const publisher = await getActiveOrgById(ctx, project.organizationId);
-    if (publisher === null) {
-      return { notified: false };
-    }
-    await upsertProjectRetirementConsumerNotice(ctx, {
-      consumerClerkOrgId: consumer.clerkOrgId,
-      projectId: project._id,
-      projectName: project.name,
-      projectSlug: project.slug,
-      publisherName: publisher.name,
-      publisherHandle: publisher.publicHandle,
-      sunsetAt: project.sunsetAt,
-      message: project.deprecationMessage,
-      event: "scheduled",
-    });
-    return { notified: true };
+      project?.retirement?.state === "scheduled" &&
+      project.retirement.revision === args.revision &&
+      project.retirement.sunsetAt <= Date.now()
+    )
+      await retireProject(ctx, project);
   },
 });
-
-/** Hourly bounded sunset cleanup. Immutable versions and usage history remain. */
 export const retireSunsetProjects = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ retired: number; hasMore: boolean }> => {
-    const now = Date.now();
-    // Optional-first schema permits malformed legacy rows. Repair them on a
-    // separate bounded range so missing sunsetAt values can never pin due work.
-    const malformed = await ctx.db
+  handler: async (ctx) => {
+    const due = await ctx.db
       .query("projects")
-      .withIndex("by_retirement_state_sunset", (q) =>
-        q.eq("retirementState", "scheduled").eq("sunsetAt", undefined),
-      )
-      .take(RETIREMENT_REPAIR_BATCH_SIZE);
-    for (const project of malformed) {
-      await ctx.db.patch(project._id, {
-        deprecationStartedAt: undefined,
-        deprecationMessage: undefined,
-        retirementState: undefined,
-      });
-      await syncCatalogueListing(ctx, project._id);
-    }
-    const candidates = await ctx.db
-      .query("projects")
-      .withIndex("by_retirement_state_sunset", (q) =>
+      .withIndex("by_retire", (q) =>
         q
-          .eq("retirementState", "scheduled")
-          .gt("sunsetAt", 0)
-          .lte("sunsetAt", now),
+          .eq("retirement.state", "scheduled")
+          .lte("retirement.sunsetAt", Date.now()),
       )
-      .take(RETIREMENT_BATCH_SIZE);
-    let retired = 0;
-    for (const project of candidates) {
-      if (project.sunsetAt === undefined) {
-        continue;
-      }
-      if (project.retiredAt !== undefined) {
-        await ctx.db.patch(project._id, {
-          retirementState: "retired",
-          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-          sunsetAt: undefined,
-        });
-        await syncCatalogueListing(ctx, project._id);
-        continue;
-      }
-      if (project.deprecationStartedAt === undefined) {
-        await ctx.db.patch(project._id, {
-          retirementState: undefined,
-          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-          sunsetAt: undefined,
-        });
-        await syncCatalogueListing(ctx, project._id);
-        continue;
-      }
-      await cleanupProjectRuntime(ctx, project._id);
-      await ctx.db.patch(project._id, {
-        visibility: "private",
-        retirementState: "retired",
-        retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-        sunsetAt: undefined,
-        retiredAt: now,
-      });
-      const organization = await getActiveOrgById(ctx, project.organizationId);
-      if (organization !== null) {
-        await retirePublicRoute(ctx, project, organization, now);
-        const route = await enqueueRouteArchive(
-          ctx,
-          project,
-          organization,
-          now,
-        );
-        await enqueueCatalogueSnapshot(ctx, project._id, route);
-      }
-      await syncCatalogueListing(ctx, project._id);
-      retired += 1;
-    }
-    // Transitional drain for rows written before retirementState existed.
-    // Every visited legacy row leaves by_sunset, so even 100+ old tombstones
-    // cannot pin the head of the queue forever.
-    const remaining = RETIREMENT_BATCH_SIZE - candidates.length;
-    const legacyCandidates =
-      remaining > 0
-        ? await ctx.db
-            .query("projects")
-            .withIndex("by_sunset", (q) =>
-              q.gt("sunsetAt", 0).lte("sunsetAt", now),
-            )
-            .take(remaining)
-        : [];
-    for (const project of legacyCandidates) {
-      if (project.retirementState === "scheduled") continue;
-      if (
-        project.retiredAt === undefined &&
-        project.deprecationStartedAt !== undefined
-      ) {
-        await cleanupProjectRuntime(ctx, project._id);
-        await ctx.db.patch(project._id, {
-          visibility: "private",
-          retirementState: "retired",
-          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-          sunsetAt: undefined,
-          retiredAt: now,
-        });
-        await syncCatalogueListing(ctx, project._id);
-        retired += 1;
-      } else {
-        await ctx.db.patch(project._id, {
-          retirementState:
-            project.retiredAt === undefined ? undefined : "retired",
-          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-          sunsetAt: undefined,
-        });
-        await syncCatalogueListing(ctx, project._id);
-      }
-    }
-    const processed = candidates.length + legacyCandidates.length;
-    const hasMore =
-      processed === RETIREMENT_BATCH_SIZE ||
-      malformed.length === RETIREMENT_REPAIR_BATCH_SIZE;
-    if (hasMore) {
+      .take(50);
+    for (const project of due) await retireProject(ctx, project);
+    if (due.length === 50)
       await ctx.scheduler.runAfter(
         0,
         internal.projects.retireSunsetProjects,
         {},
       );
-    }
-    return { retired, hasMore };
   },
 });

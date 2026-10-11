@@ -1,5 +1,6 @@
+import type { ProjectView } from "#/lib/project-view";
 // @vitest-environment jsdom
-import type { Doc, Id } from "#/lib/convex-data-model";
+import type { Id } from "#/lib/convex-data-model";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -51,7 +52,18 @@ beforeEach(() => {
     },
   );
 });
-const project: Doc<"projects"> = {
+const project: ProjectView = {
+  description: undefined,
+  desiredVisibility: "private",
+  qualityStatus: "active",
+  publicationGeneration: 0,
+  houseOperated: false,
+  retirementState: undefined,
+  retirementRevision: undefined,
+  deprecationStartedAt: undefined,
+  deprecationMessage: undefined,
+  sunsetAt: undefined,
+  retiredAt: undefined,
   _id: "project_qa" as Id<"projects">,
   _creationTime: 1,
   organizationId: "org_qa" as Id<"organizations">,

@@ -1,20 +1,9 @@
-import {
-  type MachinePaymentDeps,
-  addPaymentOffer,
-  payForSession,
-  paymentHeader,
-} from "./machine-payments";
-import type { WalletDO } from "./wallet";
 import type { KeyVerifier, VerifiedKey } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
-import { admit } from "./admit";
-import { forward } from "./forward";
-import { finalize } from "./finalize";
 
 export type PipelineEnv = {
   /** Paired web application origin for payment recovery actions. */
   APP_ORIGIN?: string;
-  WALLET: DurableObjectNamespace<WalletDO>;
   ZEVIUM_RELEASE?: string;
   GATEWAY_INTERNAL_SECRET?: string;
 };
@@ -28,7 +17,6 @@ export type PipelineDeps = {
     prepare?: (response: Response) => Promise<Response>,
     authenticatedKey?: VerifiedKey,
   ) => Promise<Response>;
-  machinePayments?: MachinePaymentDeps;
   keyVerifier: KeyVerifier;
   /** Trusted MCP OAuth identity; never populated from request parameters. */
   authenticatedKey?: VerifiedKey;
@@ -78,48 +66,5 @@ export async function handleGatewayRequest(
       prepareResponse,
       deps.authenticatedKey,
     );
-  const started = (deps.now ?? Date.now)();
-  const requestId = deps.idGenerator?.() ?? crypto.randomUUID();
-  let paid:
-    | {
-        token: string;
-        payment: import("./machine-facilitator").VerifiedPayment;
-      }
-    | undefined;
-  const original = request;
-  if (request.headers.has("PAYMENT-SIGNATURE") && deps.machinePayments) {
-    const result = await payForSession(request, env, deps.machinePayments);
-    if (result instanceof Response)
-      return addPaymentOffer(result, request, deps.machinePayments);
-    paid = result;
-    const headers = new Headers(request.headers);
-    headers.set("authorization", `Bearer ${paid.token}`);
-    headers.delete("x-api-key");
-    headers.delete("PAYMENT-SIGNATURE");
-    request = new Request(request, { headers });
-  }
-  const admission = await admit(request, env, deps, route, requestId, started);
-  const response =
-    admission instanceof Response
-      ? admission
-      : await finalize(
-          admission,
-          await forward(request, admission, deps.fetchImpl, prepareResponse),
-          deps.now,
-          _ctx,
-        );
-  if (paid) {
-    response.headers.set("X-Zevium-Wallet-Session", paid.token);
-    response.headers.set(
-      "PAYMENT-RESPONSE",
-      paymentHeader({
-        success: true,
-        transaction: paid.payment.transaction,
-        network: paid.payment.network,
-        payer: paid.payment.payer,
-      }),
-    );
-    response.headers.set("cache-control", "no-store");
-  }
-  return addPaymentOffer(response, original, deps.machinePayments);
+  return Response.json({ error: "gateway_unavailable" }, { status: 503 });
 }

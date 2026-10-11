@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -29,12 +30,11 @@ import {
 import { Input } from "#/components/ui/input";
 import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 const MIN_RETIREMENT_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
 const RETIREMENT_MESSAGE_MAX = 1_000;
 
-export function VisibilityCard({ project }: { project: Doc<"projects"> }) {
+export function VisibilityCard({ project }: { project: ProjectView }) {
   const updateProject = useConvexMutation(api.projects.update);
   const scheduleProjectRetirement = useConvexMutation(
     api.projects.scheduleRetirement,

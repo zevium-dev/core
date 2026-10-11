@@ -4,47 +4,16 @@ import type { NextEnv } from "./next/snapshots";
 export { EdgeOAuthDO } from "./next/oauth";
 export { EdgeSnapshotDO } from "./next/snapshots";
 export { NextWalletDO } from "./next/wallet";
-import { isX402Enabled } from "./x402-config";
-import { isWalletSession, verifyWalletSession } from "./wallet-session";
+import type { CatalogueSearchSource } from "./catalogue-search";
 import {
-  InternalHttpCatalogueSearch,
-  type CatalogueSearchSource,
-} from "./catalogue-search";
-import {
-  StripeX402Facilitator,
-  PaymentRejected,
-  PaymentUnavailable,
-} from "./machine-facilitator";
-import { convexMachineFunder } from "./machine-payments";
-import { WalletSqliteDO, type WalletDO } from "./wallet";
-import {
-  ClerkMcpOAuthVerifier,
   oauthConfig,
   oauthChallenge,
   protectedResourceMetadata,
   type McpOAuthVerifier,
 } from "./mcp-oauth";
-import {
-  ClerkKeyVerifier,
-  FixtureKeyVerifier,
-  extractApiKey,
-} from "./key-verifier";
-import {
-  CachedSpecSource,
-  ConvexPublicSpecSource,
-  FailClosedPublicSpecSource,
-  FailClosedSpecSource,
-  FixtureSpecSource,
-  InternalHttpSpecSource,
-  type PublicSpecSource,
-} from "./spec-source";
-import {
-  CachedCatalogueSource,
-  ConvexCatalogueSource,
-  FailClosedCatalogueSource,
-  FixtureCatalogueSource,
-  type CatalogueSource,
-} from "./catalogue-source";
+import { extractApiKey } from "./key-verifier";
+import type { PublicSpecSource } from "./spec-source";
+import type { CatalogueSource } from "./catalogue-source";
 import {
   handleGatewayRequest,
   parseGatewayPath,
@@ -57,20 +26,9 @@ import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
 import { applyGatewaySecurityHeaders } from "./security-headers";
 
-export { WalletSqliteDO };
-export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
-
 export interface Env extends NextEnv {
-  /** Only the literal "true" enables the retained anonymous payment rail. */
-  X402_ENABLED?: string;
-  X402_DEPOSIT_ADDRESS?: string;
-  X402_FACILITATOR_URL?: string;
-  X402_FACILITATOR_TOKEN?: string;
-  X402_STRIPE_SECRET_KEY?: string;
-  WALLET_SESSION_SECRET?: string;
   /** Paired web application origin for payment recovery actions. */
   APP_ORIGIN?: string;
-  WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
   /** Enable OAuth with the Clerk Frontend API origin and canonical /mcp URL. */
   MCP_OAUTH_ISSUER?: string;
@@ -78,7 +36,7 @@ export interface Env extends NextEnv {
   CONVEX_URL?: string;
   /** Convex .convex.site origin for httpActions (ingest-usage). */
   CONVEX_SITE_URL?: string;
-  /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
+  /** Shared secret for paired snapshot, wake and settlement HTTP. */
   GATEWAY_INTERNAL_SECRET?: string;
   /** Immutable git SHA stamped into every release candidate. */
   ZEVIUM_RELEASE?: string;
@@ -152,153 +110,13 @@ function validGatewayDeploymentProof(
   );
 }
 
-// Module-scoped prod deps, lazily built on first request and reused across
-// requests in the same isolate. CachedSpecSource / CachedCatalogueSource /
-// ClerkKeyVerifier all carry TTL/in-memory caches; rebuilding per request
-// defeats them. Keyed on an env fingerprint so config changes (deploy, env
-// swap, tests) invalidate the cache instead of serving stale clients.
-let cachedProdDeps: { fingerprint: string; deps: WorkerDeps } | null = null;
-/** Test-only: clear the module-scoped prod dep cache (e.g. between env swaps). */
-export function __resetProdDepsCache(): void {
-  cachedProdDeps = null;
-}
-
 function buildDeps(env: Env): WorkerDeps {
-  if (env.CONTROL_PLANE_MODE === "next") return nextDeps(env);
-  // Module-scoped test harness wins when installed (vitest-pool-workers).
-  if (testDeps) {
-    return isX402Enabled(env)
-      ? testDeps
-      : { ...testDeps, machinePayments: undefined };
-  }
-
-  // NUL-joined to avoid ambiguity when one field is empty.
-  const fingerprint = [
-    env.X402_ENABLED ?? "",
-    env.X402_DEPOSIT_ADDRESS ?? "",
-    env.X402_FACILITATOR_URL ?? "",
-    env.X402_FACILITATOR_TOKEN ?? "",
-    env.X402_STRIPE_SECRET_KEY ?? "",
-    env.WALLET_SESSION_SECRET ?? "",
-    env.CLERK_SECRET_KEY ?? "",
-    env.MCP_OAUTH_ISSUER ?? "",
-    env.MCP_OAUTH_RESOURCE ?? "",
-    env.CONVEX_URL ?? "",
-    env.CONVEX_SITE_URL ?? "",
-    env.GATEWAY_INTERNAL_SECRET ?? "",
-  ].join("\u0000");
-  if (cachedProdDeps && cachedProdDeps.fingerprint === fingerprint) {
-    return cachedProdDeps.deps;
-  }
-
-  const testMode = env.GATEWAY_TEST_MODE === "1";
-  const keyVerifier = env.CLERK_SECRET_KEY
-    ? new ClerkKeyVerifier({ secretKey: env.CLERK_SECRET_KEY })
-    : testMode
-      ? new FixtureKeyVerifier()
-      : { verify: async () => null };
-
-  const siteUrl =
-    env.CONVEX_SITE_URL ??
-    env.CONVEX_URL?.replace(".convex.cloud", ".convex.site");
-  const innerSpec =
-    siteUrl && env.GATEWAY_INTERNAL_SECRET
-      ? new InternalHttpSpecSource({
-          siteUrl,
-          internalSecret: env.GATEWAY_INTERNAL_SECRET,
-        })
-      : env.CONVEX_URL
-        ? new FailClosedSpecSource()
-        : testMode
-          ? new FixtureSpecSource()
-          : new FailClosedSpecSource();
-  const innerPublicSpec = env.CONVEX_URL
-    ? new ConvexPublicSpecSource({ convexUrl: env.CONVEX_URL })
-    : testMode
-      ? new FixtureSpecSource()
-      : new FailClosedPublicSpecSource();
-
-  const innerCatalogue = env.CONVEX_URL
-    ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
-    : testMode
-      ? new FixtureCatalogueSource()
-      : new FailClosedCatalogueSource();
-
-  const machinePayments =
-    isX402Enabled(env) &&
-    env.X402_DEPOSIT_ADDRESS &&
-    env.X402_FACILITATOR_URL &&
-    env.X402_FACILITATOR_TOKEN &&
-    env.X402_STRIPE_SECRET_KEY &&
-    env.WALLET_SESSION_SECRET &&
-    env.WALLET_SESSION_SECRET.length >= 32 &&
-    siteUrl &&
-    env.GATEWAY_INTERNAL_SECRET
-      ? {
-          facilitator: {
-            requirements: new StripeX402Facilitator({
-              depositAddress: env.X402_DEPOSIT_ADDRESS,
-              facilitatorUrl: env.X402_FACILITATOR_URL,
-              facilitatorToken: env.X402_FACILITATOR_TOKEN,
-              stripeKey: env.X402_STRIPE_SECRET_KEY,
-            }).requirements,
-            settle: async (payload: unknown) => {
-              const digest = await crypto.subtle.digest(
-                "SHA-256",
-                new TextEncoder().encode(JSON.stringify(payload)),
-              );
-              const proofId = [...new Uint8Array(digest)]
-                .map((b) => b.toString(16).padStart(2, "0"))
-                .join("");
-              const result = await env.WALLET.get(
-                env.WALLET.idFromName(`x402-proof:${proofId}`),
-              ).settleMachineProof(payload);
-              if (!result.ok)
-                throw result.reason === "rejected"
-                  ? new PaymentRejected()
-                  : new PaymentUnavailable();
-              return result.payment;
-            },
-          },
-          signingSecret: env.WALLET_SESSION_SECRET,
-          fund: convexMachineFunder(siteUrl, env.GATEWAY_INTERNAL_SECRET),
-        }
-      : undefined;
-  const oauth = oauthConfig(env.MCP_OAUTH_ISSUER, env.MCP_OAUTH_RESOURCE);
-  const deps: WorkerDeps = {
-    machinePayments,
-    oauthVerifier:
-      oauth && env.CLERK_SECRET_KEY && siteUrl && env.GATEWAY_INTERNAL_SECRET
-        ? new ClerkMcpOAuthVerifier({
-            ...oauth,
-            secretKey: env.CLERK_SECRET_KEY,
-            siteUrl,
-            internalSecret: env.GATEWAY_INTERNAL_SECRET,
-          })
-        : undefined,
-    keyVerifier,
-    searchSource:
-      siteUrl && env.GATEWAY_INTERNAL_SECRET
-        ? new InternalHttpCatalogueSearch({
-            siteUrl,
-            internalSecret: env.GATEWAY_INTERNAL_SECRET,
-          })
-        : undefined,
-    specSource: new CachedSpecSource({ inner: innerSpec }),
-    publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
-    catalogueSource: new CachedCatalogueSource({
-      inner: innerCatalogue,
-      ttlMs: 60_000,
-    }),
-  };
-  cachedProdDeps = { fingerprint, deps };
-  return deps;
+  return testDeps ?? nextDeps(env);
 }
 
 function pipelineOnly(deps: WorkerDeps): PipelineDeps {
   return {
     nextExecute: deps.nextExecute,
-    machinePayments: deps.machinePayments,
     keyVerifier: deps.keyVerifier,
     specSource: deps.specSource,
     fetchImpl: deps.fetchImpl,
@@ -332,20 +150,10 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
     pipeline: pipelineOnly(deps),
     pipelineEnv: {
       APP_ORIGIN: env.APP_ORIGIN,
-      WALLET: env.WALLET,
       GATEWAY_INTERNAL_SECRET: env.GATEWAY_INTERNAL_SECRET,
     },
     gatewayOrigin: new URL(request.url).origin,
   };
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) {
-    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return out === 0;
 }
 
 /**
@@ -354,8 +162,7 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
- * - /internal/grant — control-plane grant projection (shared secret)
- * - /internal/sync — control-plane checkpoint refresh (shared secret)
+ * - /internal/next-wake — authenticated wallet coordination
  * - /health
  */
 async function dispatchRequest(
@@ -379,44 +186,28 @@ async function dispatchRequest(
     const deployment = gatewayDeploymentProof(env);
     const specConfigReady =
       testMode ||
-      (env.CONTROL_PLANE_MODE === "next"
-        ? Boolean(
-            env.NEXT_DEPLOYMENT_ID &&
-            env.NEXT_CONVEX_SITE_URL &&
-            env.NEXT_SNAPSHOT_KEYS &&
-            env.NEXT_ADMISSION_KEYS &&
-            env.NEXT_TRANSPORT_KEYS &&
-            env.EDGE_SNAPSHOTS &&
-            env.NEXT_WALLET &&
-            env.GATEWAY_INTERNAL_SECRET,
-          )
-        : Boolean(
-            env.CONVEX_URL &&
-            env.CONVEX_SITE_URL &&
-            env.GATEWAY_INTERNAL_SECRET &&
-            env.CLERK_SECRET_KEY &&
-            validGatewayDeploymentProof(deployment),
-          ));
+      Boolean(
+        env.NEXT_DEPLOYMENT_ID &&
+        env.CONVEX_SITE_URL &&
+        env.NEXT_SNAPSHOT_KEYS &&
+        env.NEXT_ADMISSION_KEYS &&
+        env.NEXT_TRANSPORT_KEYS &&
+        env.EDGE_SNAPSHOTS &&
+        env.NEXT_WALLET &&
+        env.GATEWAY_INTERNAL_SECRET &&
+        (env.ZEVIUM_RELEASE === undefined ||
+          validGatewayDeploymentProof(deployment)),
+      );
     return Response.json(
       {
         ok: specConfigReady,
         service: "zevium-gateway",
         release: env.ZEVIUM_RELEASE ?? "development",
-        contract: env.CONTROL_PLANE_MODE === "next" ? 2 : 1,
+        contract: 2,
         deployment,
       },
       { status: specConfigReady ? 200 : 503 },
     );
-  }
-
-  // POST /internal/grant { clerkOrgId, amount, refId }
-  if (parts[0] === "internal" && parts[1] === "grant" && parts.length === 2) {
-    return handleInternalGrant(request, env);
-  }
-
-  // POST /internal/sync { clerkOrgId }
-  if (parts[0] === "internal" && parts[1] === "sync" && parts.length === 2) {
-    return handleInternalSync(request, env);
   }
 
   // GET /discovery — public machine-readable index
@@ -460,19 +251,7 @@ async function dispatchRequest(
         request.headers.get("authorization") ?? "",
       )?.[1];
       if (!apiKey && !token) return oauthChallenge(oauth);
-      const verifier =
-        apiKey && isWalletSession(apiKey)
-          ? {
-              verify: (session: string) =>
-                verifyWalletSession(
-                  session,
-                  deps.machinePayments?.signingSecret ?? "",
-                  url.origin,
-                  (deps.now ?? Date.now)(),
-                ),
-              verifyWithStatus: undefined,
-            }
-          : deps.keyVerifier;
+      const verifier = deps.keyVerifier;
       const outcome = apiKey
         ? verifier.verifyWithStatus
           ? await verifier.verifyWithStatus(apiKey)
@@ -553,111 +332,3 @@ export default {
     return response;
   },
 } satisfies ExportedHandler<Env>;
-
-async function handleInternalGrant(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (request.method !== "POST") {
-    return Response.json({ error: "method not allowed" }, { status: 405 });
-  }
-
-  const secret = env.GATEWAY_INTERNAL_SECRET;
-  if (!secret) {
-    return Response.json(
-      { error: "misconfigured", message: "GATEWAY_INTERNAL_SECRET not set" },
-      { status: 500 },
-    );
-  }
-
-  const provided =
-    request.headers.get("x-gateway-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  if (!provided || !timingSafeEqual(provided, secret)) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "invalid_json" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object") {
-    return Response.json({ error: "invalid_body" }, { status: 400 });
-  }
-
-  const clerkOrgId =
-    "clerkOrgId" in body && typeof body.clerkOrgId === "string"
-      ? body.clerkOrgId
-      : "";
-  const amount =
-    "amount" in body && typeof body.amount === "number" ? body.amount : NaN;
-  const refId =
-    "refId" in body && typeof body.refId === "string" ? body.refId : "";
-
-  if (!clerkOrgId || !refId || !(amount > 0) || !Number.isFinite(amount)) {
-    return Response.json(
-      {
-        error: "invalid_body",
-        message: "clerkOrgId, amount (>0), refId required",
-      },
-      { status: 400 },
-    );
-  }
-
-  const id = env.WALLET.idFromName(clerkOrgId);
-  const stub = env.WALLET.get(id);
-  const result = await stub.grant(refId, amount);
-  return Response.json(result);
-}
-
-async function handleInternalSync(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  if (request.method !== "POST") {
-    return Response.json({ error: "method not allowed" }, { status: 405 });
-  }
-
-  const secret = env.GATEWAY_INTERNAL_SECRET;
-  if (!secret) {
-    return Response.json(
-      { error: "misconfigured", message: "GATEWAY_INTERNAL_SECRET not set" },
-      { status: 500 },
-    );
-  }
-
-  const provided =
-    request.headers.get("x-gateway-secret") ??
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
-    "";
-  if (!provided || !timingSafeEqual(provided, secret)) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "invalid_json" }, { status: 400 });
-  }
-  if (!body || typeof body !== "object") {
-    return Response.json({ error: "invalid_body" }, { status: 400 });
-  }
-  const clerkOrgId =
-    "clerkOrgId" in body && typeof body.clerkOrgId === "string"
-      ? body.clerkOrgId
-      : "";
-  if (!clerkOrgId) {
-    return Response.json(
-      { error: "invalid_body", message: "clerkOrgId required" },
-      { status: 400 },
-    );
-  }
-
-  const id = env.WALLET.idFromName(clerkOrgId);
-  return Response.json(await env.WALLET.get(id).syncGrants(clerkOrgId));
-}

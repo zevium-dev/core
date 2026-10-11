@@ -14,7 +14,6 @@
       { "name": "EDGE_OAUTH", "class_name": "EdgeOAuthDO" },
       { "name": "EDGE_SNAPSHOTS", "class_name": "EdgeSnapshotDO" },
       { "name": "NEXT_WALLET", "class_name": "NextWalletDO" },
-      { "name": "WALLET", "class_name": "WalletSqliteDO" },
     ],
   },
   "migrations": [
@@ -29,6 +28,10 @@
     {
       "tag": "v5-next-edge",
       "new_sqlite_classes": ["EdgeSnapshotDO", "NextWalletDO", "EdgeOAuthDO"],
+    },
+    {
+      "tag": "v6-control-plane-cutover",
+      "deleted_classes": ["WalletSqliteDO"],
     },
   ],
 }

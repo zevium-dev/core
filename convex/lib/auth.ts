@@ -1,401 +1,110 @@
-import {
-  isPrivilegedOrgRole,
-  projectOrgCapabilities,
-  type OrgCapability,
-  type OrgCapabilityProjection,
-} from "@zevium/shared";
+import { ConvexError } from "convex/values";
+import { isPrivilegedOrgRole, projectOrgCapabilities } from "@zevium/shared";
+import type { QueryCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 
-import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { isOrganizationActive, isProjectRetired } from "./publicRoutes";
-
-export type OrgIdentityClaims = {
-  subject: string;
-  email: string | undefined;
-  orgId: string | undefined;
-  orgSlug: string | undefined;
-  orgRole: string | undefined;
-};
-
-type DbCtx = QueryCtx | MutationCtx;
-type AuthCtx = Pick<QueryCtx, "auth">;
-
-async function hasOrganizationTombstone(
-  ctx: DbCtx,
-  clerkOrgId: string,
-): Promise<boolean> {
-  return (
-    (await ctx.db
-      .query("organizationTombstones")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
-      .unique()) !== null
-  );
-}
-
-export async function requireIdentity(
-  ctx: AuthCtx,
-): Promise<OrgIdentityClaims> {
+export async function requireIdentity(ctx: Pick<QueryCtx, "auth">) {
   const identity = await ctx.auth.getUserIdentity();
-  if (identity === null) {
-    throw new Error("Not authenticated");
-  }
-
-  // Clerk JWT template "convex" maps org claims as org_id / org_slug / org_role.
-  // Convex flattens custom claims onto the identity object.
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  const orgSlug =
-    typeof raw.org_slug === "string"
-      ? raw.org_slug
-      : typeof raw.orgSlug === "string"
-        ? raw.orgSlug
-        : undefined;
-  const orgRole =
-    typeof raw.org_role === "string"
-      ? raw.org_role
-      : typeof raw.orgRole === "string"
-        ? raw.orgRole
-        : undefined;
-  const email = typeof identity.email === "string" ? identity.email : undefined;
-
+  if (!identity) throw new ConvexError("Not authenticated");
+  const stringClaim = (primary: string, fallback: string) => {
+    const value = identity[primary] ?? identity[fallback];
+    return typeof value === "string" ? value : undefined;
+  };
   return {
     subject: identity.subject,
-    email,
-    orgId,
-    orgSlug,
-    orgRole,
+    email: identity.email,
+    orgId: stringClaim("org_id", "orgId"),
+    orgSlug: stringClaim("org_slug", "orgSlug"),
+    orgRole: stringClaim("org_role", "orgRole"),
   };
 }
-
-/** Resolve tenant data from the immutable Clerk organization id in the JWT. */
-export async function getOrgByClerkId(
-  ctx: DbCtx,
-  clerkOrgId: string,
-): Promise<Doc<"organizations"> | null> {
-  const org = await ctx.db
-    .query("organizations")
-    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
-    .unique();
-  if (
-    org === null ||
-    org.archivedAt !== undefined ||
-    (await hasOrganizationTombstone(ctx, clerkOrgId))
-  ) {
-    return null;
-  }
-  return org;
-}
-
-/** Resolve an active organization by internal id with tombstone authority. */
-export async function getActiveOrgById(
-  ctx: DbCtx,
-  organizationId: Id<"organizations">,
-): Promise<Doc<"organizations"> | null> {
-  const org = await ctx.db.get(organizationId);
-  if (
-    org === null ||
-    org.archivedAt !== undefined ||
-    (await hasOrganizationTombstone(ctx, org.clerkOrgId))
-  ) {
-    return null;
-  }
-  return org;
-}
-
-/** Resolve an active organization by Clerk id for internal finance/key gates. */
-export async function requireActiveOrgByClerkId(
-  ctx: DbCtx,
-  clerkOrgId: string,
-): Promise<Doc<"organizations">> {
-  const org = await getOrgByClerkId(ctx, clerkOrgId);
-  if (org === null) throw new Error("Active organization is not provisioned");
-  return org;
-}
-
-/** Public routing uses the product handle, never the Clerk slug. */
-export async function getOrgByPublicHandle(
-  ctx: DbCtx,
-  handle: string,
-): Promise<Doc<"organizations"> | null> {
-  const org = await ctx.db
-    .query("organizations")
-    .withIndex("by_public_handle", (q) =>
-      q.eq("publicHandle", handle.trim().toLowerCase()),
-    )
-    .unique();
-  if (
-    org === null ||
-    org.archivedAt !== undefined ||
-    (await hasOrganizationTombstone(ctx, org.clerkOrgId))
-  ) {
-    return null;
-  }
-  return org;
-}
-
-/**
- * Resolve active tenant exclusively from the JWT org id. `orgSlug` remains in
- * public function contracts for routing compatibility but never scopes data.
- */
-export async function requireOrgMemberBySlug(
-  ctx: DbCtx,
-  _orgSlug: string,
-): Promise<{
-  claims: OrgIdentityClaims;
-  org: Doc<"organizations">;
-  access: OrgCapabilityProjection;
-}> {
+/** JWT identity selects tenant; mutable URL slugs never authorize it. */
+export async function requireActiveOrg(ctx: Pick<QueryCtx, "auth" | "db">) {
   const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined) {
-    throw new Error("No active organization on identity");
-  }
-
-  // URL slugs are mutable display/routing data. Authorization and data scope
-  // come exclusively from the signed, immutable Clerk org id claim.
-  const org = await getOrgByClerkId(ctx, claims.orgId);
-  if (org === null) {
-    throw new Error("Organization not found");
-  }
-  if (org.archivedAt !== undefined) {
-    throw new Error("Organization is archived");
-  }
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_clerk", (q) => q.eq("clerkUserId", claims.subject))
+    .unique();
+  if (user?.deletedAt !== undefined) throw new ConvexError("Not authenticated");
+  if (!claims.orgId) throw new ConvexError("Organization not found");
+  const org = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk", (q) => q.eq("clerkOrgId", claims.orgId!))
+    .unique();
+  const tombstone = await ctx.db
+    .query("orgTombstones")
+    .withIndex("by_clerk", (q) => q.eq("clerkOrgId", claims.orgId!))
+    .unique();
+  if (!org || org.archivedAt !== undefined || tombstone)
+    throw new ConvexError("Organization not found");
   const access = projectOrgCapabilities(claims.orgRole);
-  if (access === null) throw new Error("Organization role is not supported");
+  if (!access) throw new ConvexError("Organization role is not supported");
   return { claims, org, access };
 }
-
-/** Resolve the active Clerk org mirror and its server-owned role projection. */
-export async function requireActiveOrg(ctx: DbCtx): Promise<{
-  claims: OrgIdentityClaims;
-  org: Doc<"organizations">;
-  access: OrgCapabilityProjection;
-}> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined) {
-    throw new Error("No active organization on identity");
-  }
-  const org = await ctx.db
-    .query("organizations")
-    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
-    .unique();
-  if (org === null) throw new Error("Active organization is not provisioned");
-  const access = projectOrgCapabilities(claims.orgRole);
-  if (access === null) throw new Error("Organization role is not supported");
-  return { claims, org, access };
+export function requireOrgAdmin(
+  claims: Awaited<ReturnType<typeof requireIdentity>>,
+) {
+  if (!isPrivilegedOrgRole(claims.orgRole))
+    throw new ConvexError("Org admin or owner role required");
+  return claims;
 }
-
-/**
- * Resolve project and require JWT membership of its owning org.
- */
 export async function requireProjectMember(
-  ctx: DbCtx,
+  ctx: Pick<QueryCtx, "auth" | "db">,
   projectId: Id<"projects">,
-): Promise<{
-  claims: OrgIdentityClaims;
-  org: Doc<"organizations">;
-  project: Doc<"projects">;
-}> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined) {
-    throw new Error("No active organization on identity");
-  }
-
+) {
+  const { claims, org } = await requireActiveOrg(ctx);
   const project = await ctx.db.get(projectId);
-  if (project === null) {
-    throw new Error("Project not found");
-  }
-
-  const org = await getActiveOrgById(ctx, project.organizationId);
-  if (org === null) {
-    throw new Error("Organization not found");
-  }
-  if (org.clerkOrgId !== claims.orgId) {
-    throw new Error("Not a member of this organization");
-  }
   if (
-    !(await isOrganizationActive(ctx, org)) ||
-    (await isProjectRetired(ctx, project))
-  ) {
-    throw new Error("Project not found");
-  }
-
+    !project ||
+    project.organizationId !== org._id ||
+    project.retirement?.state === "retired"
+  )
+    throw new ConvexError("Project not found");
+  const route = await ctx.db
+    .query("routeTombstones")
+    .withIndex("by_project", (q) => q.eq("projectId", project._id))
+    .first();
+  if (route?.retiredAt !== undefined)
+    throw new ConvexError("Project not found");
   return { claims, org, project };
 }
-
-/** Admin/owner project lifecycle gate with cross-org non-enumeration. */
 export async function requireProjectAdmin(
-  ctx: DbCtx,
+  ctx: Pick<QueryCtx, "auth" | "db">,
   projectId: Id<"projects">,
-  options: { allowRetired?: boolean } = {},
-): Promise<{
-  claims: OrgIdentityClaims;
-  org: Doc<"organizations">;
-  project: Doc<"projects">;
-}> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined) {
-    throw new Error("No active organization on identity");
-  }
-  const project = await ctx.db.get(projectId);
-  if (project === null) throw new Error("Project not found");
-  const org = await ctx.db.get(project.organizationId);
-  if (
-    org === null ||
-    org.clerkOrgId !== claims.orgId ||
-    !(await isOrganizationActive(ctx, org)) ||
-    (!options.allowRetired && (await isProjectRetired(ctx, project)))
-  ) {
-    throw new Error("Project not found");
-  }
-  requireOrgAdmin(claims);
-  return { claims, org, project };
+) {
+  const result = await requireProjectMember(ctx, projectId);
+  requireOrgAdmin(result.claims);
+  return result;
 }
 
-/** Admin/owner version lifecycle gate with cross-org non-enumeration. */
 export async function requireSpecVersionAdmin(
-  ctx: DbCtx,
+  ctx: Pick<QueryCtx, "auth" | "db">,
   versionId: Id<"specVersions">,
-): Promise<{
-  claims: OrgIdentityClaims;
-  org: Doc<"organizations">;
-  project: Doc<"projects">;
-  version: Doc<"specVersions">;
-}> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined) {
-    throw new Error("No active organization on identity");
-  }
+) {
   const version = await ctx.db.get(versionId);
-  if (version === null) throw new Error("Version not found");
-  const project = await ctx.db.get(version.projectId);
-  if (project === null) throw new Error("Version not found");
-  const org = await ctx.db.get(project.organizationId);
-  if (
-    org === null ||
-    org.clerkOrgId !== claims.orgId ||
-    !(await isOrganizationActive(ctx, org)) ||
-    (await isProjectRetired(ctx, project))
-  ) {
-    throw new Error("Version not found");
-  }
-  requireOrgAdmin(claims);
-  return { claims, org, project, version };
+  if (!version) throw new ConvexError("Spec version not found");
+  const result = await requireProjectAdmin(ctx, version.projectId);
+  return { ...result, version };
 }
 
-/**
- * Resolve an org-admin mutation by slug. Authorization comes from the JWT org
- * claim (the slug is routing data only), so cross-org failures stay
- * indistinguishable from missing resources while same-org members receive a
- * useful role error.
- */
-export async function requireOrgAdminBySlug(
-  ctx: DbCtx,
-  orgSlug: string,
-): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
-  const { claims, org } = await requireOrgMemberBySlug(ctx, orgSlug);
-  requireOrgAdmin(claims);
-  return { claims, org };
+export async function requireOrgMemberBySlug(
+  ctx: Pick<QueryCtx, "auth" | "db">,
+  _slug: string,
+) {
+  return requireActiveOrg(ctx);
 }
-
-/**
- * Enforce privileged org role from the Clerk JWT claim (owner or admin).
- * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
- * org member can perform admin actions. Callers resolve claims first via
- * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
- * pass the returned `claims` here.
- *
- * Returns the claims for chaining. Does NOT touch the DB.
- *
- * Publication, public visibility, retirement, credential/webhook policy, and
- * organization-wide key policy call this gate. Draft editing and own-key reads
- * intentionally remain member-scoped. UI role checks only explain
- * availability; this server gate remains authoritative.
- * Read-only queries and member collaboration mutations intentionally stay at
- * `requireOrgMemberBySlug` / `requireProjectMember`. Lifecycle, billing, payout,
- * secret, and org-setting writes must use one of the admin-resolving helpers.
- */
-export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
-  if (!isPrivilegedOrgRole(claims.orgRole)) {
-    throw new Error("Org admin or owner role required");
-  }
-  return claims;
-}
-
-export function requireOrgCapability(
-  claims: OrgIdentityClaims,
-  capability: OrgCapability,
-): OrgCapabilityProjection {
-  const access = projectOrgCapabilities(claims.orgRole);
-  if (access === null || !access.capabilities[capability]) {
-    throw new Error("Organization capability required");
-  }
-  return access;
-}
-
-export type ActiveOrgAdminClaims = OrgIdentityClaims & { orgId: string };
-
-export type OrgCapabilities = {
-  canViewOrgUsage: boolean;
-  canManageOrgKeyPolicy: boolean;
-};
-
-/** One privileged-role mapping shared by usage, billing, and key-policy surfaces. */
-export function orgCapabilities(claims: OrgIdentityClaims): OrgCapabilities {
-  const privileged = isPrivilegedOrgRole(claims.orgRole);
-  return {
-    canViewOrgUsage: privileged,
-    canManageOrgKeyPolicy: privileged,
-  };
-}
-
-/** Authenticate an action and require an active Clerk org-admin membership. */
-export async function requireActiveOrgAdmin(
-  ctx: AuthCtx,
-): Promise<ActiveOrgAdminClaims> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgId === undefined || claims.orgId.trim() === "") {
-    throw new Error("Active organization required");
-  }
-  requireOrgAdmin(claims);
-  return { ...claims, orgId: claims.orgId };
-}
-
-/**
- * Platform admin gate. Reads ADMIN_USER_IDS env (comma-separated Clerk user ids).
- * Fails closed when env unset — nobody is admin.
- */
-export async function requireAdmin(ctx: DbCtx): Promise<OrgIdentityClaims> {
-  const claims = await requireIdentity(ctx);
-  const raw = process.env.ADMIN_USER_IDS;
-  if (raw === undefined || raw.trim() === "") {
-    throw new Error("Admin access not configured");
-  }
-  const adminIds = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (!adminIds.includes(claims.subject)) {
-    throw new Error("Not authorized as admin");
-  }
-  return claims;
-}
-
-/**
- * Safe admin check (no throw). Returns false when env unset or user not listed.
- */
-export async function isAdmin(ctx: DbCtx): Promise<boolean> {
+export async function isAdmin(ctx: Pick<QueryCtx, "auth">) {
   const identity = await ctx.auth.getUserIdentity();
-  if (identity === null) return false;
-  const raw = process.env.ADMIN_USER_IDS;
-  if (raw === undefined || raw.trim() === "") return false;
-  const adminIds = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  return adminIds.includes(identity.subject);
+  return (
+    !!identity &&
+    (process.env.ADMIN_USER_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .includes(identity.subject)
+  );
+}
+export async function requireAdmin(ctx: Pick<QueryCtx, "auth">) {
+  if (!(await isAdmin(ctx))) throw new ConvexError("Staff access required");
+  return requireIdentity(ctx);
 }

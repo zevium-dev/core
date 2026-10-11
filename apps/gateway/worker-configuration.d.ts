@@ -1,6 +1,8 @@
 declare namespace Cloudflare {
   interface Env {
-    WALLET: DurableObjectNamespace;
+    NEXT_WALLET: DurableObjectNamespace;
+    EDGE_SNAPSHOTS: DurableObjectNamespace;
+    EDGE_OAUTH: DurableObjectNamespace;
     APP_ORIGIN?: string;
     CLERK_SECRET_KEY?: string;
     CONVEX_URL?: string;

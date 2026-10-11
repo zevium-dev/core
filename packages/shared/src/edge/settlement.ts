@@ -3,7 +3,7 @@ import { digest, fundingSlices, identity, integer } from "./money";
 
 // Admission fields are immutable evidence; final outcome is fingerprinted separately.
 export const admission = z.strictObject({
-  admissionKeyId: identity.optional(),
+  admissionKeyId: identity,
   protocolVersion: z.literal(2),
   deploymentId: identity,
   walletId: identity,

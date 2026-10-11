@@ -53,7 +53,10 @@ import {
 } from "#/lib/admin-filters";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
-import type { AdminProjectView } from "../../../../../convex/admin";
+import type { FunctionReturnType } from "convex/server";
+type AdminProjectView = FunctionReturnType<
+  typeof api.admin.listProjects
+>["page"][number];
 
 const PROJECT_PAGE_SIZE = 25;
 

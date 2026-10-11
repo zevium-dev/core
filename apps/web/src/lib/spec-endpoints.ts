@@ -1,4 +1,3 @@
-import { NEXT_CONTROL_PLANE } from "./control-plane";
 import {
   type TokenPricing,
   extractPricing,
@@ -44,12 +43,7 @@ export function listSpecEndpoints(specText: string): SpecEndpointRow[] | null {
         const pricing = extractPricing(op);
         // Preserve disabled rates in the editor; scalar controls must not replace them.
         const rawCost = op["x-zevium-cost"];
-        if (
-          NEXT_CONTROL_PLANE &&
-          typeof rawCost === "object" &&
-          rawCost !== null
-        )
-          continue;
+        if (typeof rawCost === "object" && rawCost !== null) continue;
         const token =
           typeof rawCost === "object" && rawCost !== null
             ? parseTokenPricing(rawCost)

@@ -1,8 +1,7 @@
 # Publishing specs
 
-> Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
-> Rebuild status: PR #437 review fixes implemented (2026-10-11). Isolated rebuild PR 2 publishing implemented; production still uses existing control plane.
-> Code: `packages/control-plane-next/convex/{specs,projects,publishReadiness}.ts`, `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`, `packages/shared/src/pricing-policy.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Code: `convex/{projects,specs,publishReadiness,publishReadinessAction}.ts`, `convex/lib/{dto,publicRoutes}.ts`, `apps/web/src/components/spec-editor/`, `tests/publishing.test.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -57,56 +56,9 @@ Sign up → Create org → Create project
 
 ## Tech
 
-### PR #442 review fixes — 2026-10-11
+Draft bodies live in projectDrafts; small project metadata/readiness avoids oversized list/lifecycle reads. Paginated project lists and public DTO types are canonical in web. Publication requires the current draftHash and credential-bound reachability evidence, commits immutable versions and permanent route reservation atomically, and retains reload/overwrite conflict UX. Scalar prices only; unpriced/token operations do not become callable. House display metadata has no pricing exemption.
 
-**Status:** implemented in isolated next preview; pending owner sign-off on defaults, legacy remains selected.
-
-Next publish dialog handles `conflict: true` before success/issue handling, closes the publish dialog and passes the canonical snapshot into the existing draft conflict flow, which preserves local edits, pauses autosave, and offers reload/overwrite. Connection-test admission is limited to five requests/org/minute. Public detail serves a spec with unpriced operations removed, retaining explicit zero-cost operations. Code: `apps/web/src/components/spec-editor/publish-version-dialog.tsx`, `packages/control-plane-next/convex/{publishReadiness,catalogue}.ts`, `lib/specPolicy.ts`.
-
-### Isolated rebuild PR 2 — 2026-10-11
-
-PR #437 review fixes: `projectDrafts.by_project` owns draft text/hash/revision/savedAt. Project rows retain small draft metadata and readiness; save updates both atomically and identical retries write neither. `projects.list` now requires `paginationOpts`, returns a page DTO and caps reads at 50 small rows. `specs.publish` requires `draftHash` and returns the same conflict DTO as save on mismatch, before reserving routes or inserting versions. Readiness reads the body only for target extraction. Tests cover 55 near-limit drafts through list/archive/sunset and publication after a collaborator refreshes readiness. Code: `packages/control-plane-next/convex/{specs,projects,publishReadiness}.ts`, `lib/drafts.ts`, `schema/identity.ts`, `tests/publishing.test.ts`.
-
-Next embeds draft/readiness on projects, keeps immutable `specVersions`, reserves routes inside publication, and returns explicit DTO allowlists. Draft CAS, credential-fingerprint/TTL readiness, scalar-only pricing, at most 256 operations and one root upstream are enforced. Unpriced operations remain absent from derived prices/counts. Member draft edits remain allowed; live metadata and publication require admin. Code: `packages/control-plane-next/convex/{projects,specs,publishReadiness}.ts`, `lib/{dto,specPolicy,publicRoutes}.ts`, `tests/publishing.test.ts`. PR 6 must pair the probe fingerprint and wire catalogue, quality and notification side effects before cutover; see [handoff](../architecture/convex-rebuild.md#pr-2-implementation-and-handoff--2026-10-11).
-
-### Accepted changes — implementation pending (2026-10-11)
-
-P0 #428 owns shared OpenAPI conversion and missing CLI/docs generation; existing #110 owns listing MCP generation and P2 #350 SDKs. P1 #427 replaces raw-text-only Try it with spec-generated fields. P0 #425 will hide and block token listings; token code facts below remain current until that follow-up. #314 uses an ordinary publisher org; subsidy cap #429 is optional.
-
-### Current implementation
-
-**Dogfood — 2026-10-10**
-
-- **P0 #389:** credentials stored before publication cause repeated `Run a new credential-free reachability test before publishing.` even after a passing probe. Readiness and publication compare different credential revision representations.
-- **P2 #399:** entering a negative inline price invalidates the draft and disables the field needed to correct it; recovery requires editing the source spec.
-
-Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
-
-- **Inline correction (#399)**: pricing inputs keep invalid text local and show an accessible validation message through blur. Only safe non-negative integers within the shared cost/free-tier limits enter the draft. Invalid input therefore cannot disable its own control or sibling controls; correction clears the field error.
-- **Settings headings (#397)**: project page supplies the level 1 heading; each settings `CardTitle` receives `role="heading" aria-level={2}` at its usage site, including loading, error, and admin-access notices. Webhook delivery history is level 3 under Webhooks. Stock shadcn components remain unchanged. Component tests cover complete heading order and query/access states.
-- **Unpriced operations (#316)**: `collectOpenApiSpecIssues` emits a warning explaining that the operation stays hidden and cannot be called; explicit zero is free. Save/publish remain allowed. `spec-endpoints.ts` represents missing cost as `null`; the editable rail keeps a blank input and a hidden label. Draft price ranges/free-tier counts ignore unpriced operations.
-
-- **Per-token pricing (#329, PR #413): deferred/disabled (2026-10-11).** Shared `isTokenPricingEnabled()` defaults to false: `extractPricing` treats token-priced operations as unpriced, hiding them from public references, discovery/MCP docs/search pricing and preventing gateway/mock execution. Publishing remains allowed with a warning; editor retains rates but marks operations unavailable. Fixed scalar prices (including zero) are unchanged. Metering and settlement code remains for revival and in-flight settlement. [Switch, rollout, and future policy](pricing.md#deferred-llm-pricing-and-future-policy).
-
-From [architecture overview](../architecture/overview.md):
-
-- `projects`, `specs` + `specVersions` (immutable published spec bodies; deprecation metadata remains mutable)
-- `specImportLimits` (durable per-principal/global import concurrency and fixed-window rate bounds); the unused `specImportRateLeases` table is retained for separate schema cleanup.
-- **Spec editor dependencies**: the JSON parser and syntax highlighter share one workspace-pinned `@lezer/common` version. Separate module instances allocate conflicting NodeProp identities and can crash highlighting even when both versions satisfy package ranges.
-
-Code facts (read from source 2026-10-10, not from TECH.md):
-
-- `specs.saveDraft` / `specs.publish` / `specs.listVersions` / `specs.getVersion`. Publish rejects non-semver (`isValidSemver`), rejects an already-published version (`Version X already published (immutable)`), and requires a current publish-readiness record (`publishReadiness.readinessValidity`: status ok, `READINESS_TTL_MS` 15 min, same saved-draft SHA-256 and credential state; see [quality-signals](quality-signals.md) for the shared revision/fingerprint contract). Saving a draft deletes the readiness record. Publish schedules `internal.search.embedProject`.
-- Connection gate: `publishReadinessAction.testConnection` (org admin only) probes the spec's single `x-zevium-health-check` operation without publisher credentials; detail in [quality-signals](quality-signals.md).
-- URL import: `apps/web/src/lib/spec-import.server.ts`, HTTPS only, public-IP DNS check, JSON drafts ≤384 KiB, YAML input ≤256 KiB (converted client-side to canonical JSON). The live path uses `specImportLimits.acquire/renew/release` (per-principal concurrency 2, 10/60s, 30s lease; global concurrency 40, 200/window) on table `specImportLimits`. The duplicate `fetchSpecFromUrlServerBoundary` pipeline and its unused `specImports.acquireLease` mutation were removed after checking callers. `text/plain` responses (including GitHub raw) pass the same validation, DNS, redirect, size, and lease checks.
-- Version view/diff: `components/spec-editor/version-dialog.tsx` shows a published version and a read-only `@codemirror/merge` unified diff against the saved draft. Bounded scanning/time and collapsed unchanged regions replace the quadratic LCS matrix. No rollback.
-
-- **Concurrent saves**: `specs.saveDraft` requires `baseHash` (`null` only for an absent row); it compares the current SHA-256 inside the mutation transaction. A conflict returns the canonical draft/hash/timestamp without changing the draft or readiness. Identical retries remain idempotent. `useSpecDraft` keeps the editing base stable across remote pushes and saves in flight; autosave pauses on conflict. Reload adopts the latest known snapshot; explicit overwrite retries against its hash, so another intervening save can still conflict.
-- **Editor ownership**: the workspace is keyed by project ID. Draft reducer, YAML conversion, publish controls, version dialog, lifecycle dialogs, and rail components are separate modules. `SaveStatusLabel` owns the one-second clock. Publish version suggestions are derived until typed; realtime version updates never reset typed text. Navigation has one save-and-leave completion path and does not leave if new text was typed during the save.
-- **Editor feedback**: pricing rail writes valid bounded integers immediately and keeps raw text such as `1.` until blur; failed `applyPricingEdit` writes show a human error. Endpoint rows are parsed once for the rail and pricing summary. Health results are tied to the tested draft. CodeMirror uses its own debounced linter and syntax-tree diagnostic ranges, without React lint state.
-- **YAML bounds**: byte/line preflight stays outside the killable worker; alias/expansion validation runs inside it, so markdown bullets and scalar text are not mistaken for aliases. A ready handshake separates the 10-second module startup bound from the 250 ms hard parser deadline. Conversion revisions are canceled on replacement, reload, rail edits, and unmount.
-- **Quality tab (#331)**: project route accepts `tab=quality` and mounts `components/project-quality-panel.tsx` for all org members. Current-version metrics, probe history, suspension reasons and recovery steps are owned by [quality-signals](quality-signals.md).
-- **Settings**: project-ID-keyed cards derive untouched fields from realtime data and retain local overrides while typing. Convex subscriptions own updates; there are no cache invalidations or manual optimistic cache writes in editor/settings. Admin/owner access follows the shared privileged-role predicate. Webhook URL input survives rotation; reveal-once version tracking remains intact.
+[Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
 

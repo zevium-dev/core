@@ -1,10 +1,10 @@
+import type { ProjectView } from "#/lib/project-view";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
-import type { Doc } from "#/lib/convex-data-model";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { UpstreamCredentialsCard } from "./project/credentials-card";
@@ -17,7 +17,7 @@ export function ProjectSettingsPanel({
   project,
   canAdminister,
 }: {
-  project: Doc<"projects">;
+  project: ProjectView;
   orgSlug: string;
   canAdminister: boolean;
 }) {

@@ -1,4 +1,3 @@
-import { isWalletSession, verifyWalletSession } from "./wallet-session";
 /**
  * Minimal MCP Streamable HTTP endpoint for workerd.
  *
@@ -309,16 +308,7 @@ async function handleSearchApis(
   }
   const caller =
     deps.pipeline.authenticatedKey ??
-    (secret
-      ? isWalletSession(secret)
-        ? await verifyWalletSession(
-            secret,
-            deps.pipeline.machinePayments?.signingSecret ?? "",
-            new URL(request.url).origin,
-            (deps.pipeline.now ?? Date.now)(),
-          )
-        : await deps.pipeline.keyVerifier.verify(secret)
-      : undefined);
+    (secret ? await deps.pipeline.keyVerifier.verify(secret) : undefined);
   if (caller === null) return toolError("API key is invalid or unavailable");
   const result =
     query && deps.searchSource
@@ -407,7 +397,7 @@ async function handleGetApiDocs(
       "Authenticate MCP calls with OAuth or a Zevium API key; direct gateway calls use Authorization: Bearer <ak_…|zev_…> or x-api-key.",
       "Credits are prepaid on the consumer org wallet; zero balance returns 402.",
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
-      "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec. Token rates are credits per million input/output tokens: hold estimated input plus max_tokens (default 4096), settle observed usage, release remainder. Holds round up and actual charges round down to whole credits; missing usage charges zero. Actual never exceeds the hold.",
+      "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec. Per-token execution is unavailable.",
       "Use search_apis to find a match, get_api_docs to read its reference, and call_api to execute an endpoint.",
       "Use call_api pathParams for documented {name} path placeholders and query for query parameters (scalars or arrays of repeated values). An encoded query string in path is also supported; query entries replace same-name inline values. For other serialization styles, pre-serialize per the reference. Send body with the documented Content-Type header.",
       "Local component refs use publisherData.components. External and non-component refs, security metadata, response links/headers, and content encoding metadata are omitted; no references are fetched.",
@@ -578,9 +568,7 @@ async function handleCallApi(
     // Never forward upstream error bodies, headers, or exception details.
     const message =
       response.status === 402
-        ? deps.pipeline.machinePayments
-          ? "A valid API key or wallet session with sufficient credits is required."
-          : "A valid API key with sufficient credits is required."
+        ? "A valid API key with sufficient credits is required."
         : response.status === 403
           ? "This API call is not permitted. Check your API key and spending limit."
           : platformRateLimited

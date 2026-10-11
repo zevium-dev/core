@@ -29,7 +29,7 @@ export async function trustedCatalogueSearch(
     request = getRequest();
   const settings = process.env;
   const secret = settings.NEXT_WEB_SEARCH_SECRET,
-    site = settings.NEXT_CONVEX_SITE_URL;
+    site = settings.CONVEX_SITE_URL;
   const ip =
     "cf" in request && request.cf && request.headers.get("cf-connecting-ip");
   if (!site || !secret || typeof ip !== "string" || ip.length > 64)

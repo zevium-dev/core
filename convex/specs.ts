@@ -1,364 +1,169 @@
-import { v } from "convex/values";
-import {} from "@zevium/shared";
-import {
-  internalMutation,
-  internalQuery,
-  mutation,
-  query,
-} from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import { limitLifecycle, publicationNotice } from "./lifecycleNotices";
+import { upsertNotification } from "./lib/notifications";
+import { fireWebhookEvent } from "./webhooks";
+import { syncCatalogue, adjustStat } from "./lib/catalogue";
+import { setupQuality } from "./quality";
 import { internal } from "./_generated/api";
+import { getProjectDraft, draftConflict } from "./lib/drafts";
+import { v, ConvexError } from "convex/values";
+import { isValidSemver, sha256Hex } from "@zevium/shared";
+import { mutation, query } from "./_generated/server";
 import {
-  getActiveOrgById,
-  requireOrgAdmin,
   requireProjectMember,
+  requireProjectAdmin,
   requireSpecVersionAdmin,
 } from "./lib/auth";
-import { createNotification, upsertNotification } from "./lib/notifications";
-import { fireWebhookEvent } from "./webhooks";
+import { projectDto, versionDto } from "./lib/dto";
 import {
-  decryptCredential,
-  requireEncryptedCredential,
-} from "./lib/credentialCrypto";
-
-import {
-  credentialRevision,
-  credentialSetFingerprint,
-  draftFingerprint,
-  readinessValidity,
-} from "./publishReadiness";
-import { syncCatalogueListing } from "./catalogue";
-import { enqueuePublishedProjectProjection } from "./registrySync";
-import { resolveActivePublicRoute } from "./lib/publicRoutes";
-import {
-  isOrganizationPublicSurfaceAllowed,
-  isPublishedSurfaceAllowed,
-} from "./lib/publicSurface";
-import {
-  isValidSemver,
-  type SpecIssue,
-  validateOpenApiSpec,
-} from "./lib/validate";
-
+  reservePublicRoute,
+  resolveActivePublicRoute,
+} from "./lib/publicRoutes";
+import { pricingSummary, specIssues } from "./lib/specPolicy";
+import { readinessValidity } from "./publishReadiness";
+import { MIN_DEPRECATION_NOTICE_MS } from "./projects";
 export const getDraft = query({
   args: { projectId: v.id("projects") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    draft: string;
-    draftHash: string;
-    lastSavedAt: number;
-  } | null> => {
-    await requireProjectMember(ctx, args.projectId);
-    const row = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (row === null) return null;
-    return {
-      draft: row.draft,
-      draftHash: await draftFingerprint(row.draft),
-      lastSavedAt: row.lastSavedAt,
-    };
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectMember(ctx, args.projectId);
+    const draft = await getProjectDraft(ctx, project._id);
+    return draft
+      ? {
+          draft: draft.text,
+          draftHash: draft.hash,
+          lastSavedAt: draft.savedAt,
+        }
+      : null;
   },
 });
-
 export const saveDraft = mutation({
   args: {
     projectId: v.id("projects"),
     spec: v.string(),
     baseHash: v.union(v.string(), v.null()),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    ok: boolean;
-    issues: SpecIssue[];
-    draft: string;
-    draftHash?: string | null;
-    conflict?: boolean;
-    lastSavedAt: number;
-  }> => {
-    await requireProjectMember(ctx, args.projectId);
-
-    const issues = validateOpenApiSpec(args.spec);
-    // Empty draft is allowed to clear editor; only non-empty drafts must parse.
-    const effectiveIssues = args.spec.trim() === "" ? [] : issues;
-
-    const hasError = effectiveIssues.some((i) => i.level === "error");
-    if (hasError) {
-      return {
-        ok: false,
-        issues: effectiveIssues,
-        draft: args.spec,
-        lastSavedAt: 0,
-      };
-    }
-
-    const now = Date.now();
-    const existing = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-
-    if (existing !== null && existing.draft === args.spec) {
+  handler: async (ctx, args) => {
+    const { project } = await requireProjectMember(ctx, args.projectId);
+    const issues = args.spec.trim() ? specIssues(args.spec) : [];
+    if (issues.some((i) => i.level === "error"))
+      return { ok: false, issues, draft: args.spec, lastSavedAt: 0 };
+    const current = await getProjectDraft(ctx, project._id);
+    if (current?.text === args.spec)
       return {
         ok: true,
-        issues: effectiveIssues,
-        draft: existing.draft,
-        draftHash: await draftFingerprint(existing.draft),
-        lastSavedAt: existing.lastSavedAt,
+        issues,
+        draft: current.text,
+        draftHash: current.hash,
+        lastSavedAt: current.savedAt,
       };
-    }
-
-    // The read and write share one Convex transaction: a concurrent save
-    // retries against the latest row, then fails this compare-and-swap.
-    const currentHash = existing
-      ? await draftFingerprint(existing.draft)
-      : null;
-    if (args.baseHash !== currentHash) {
-      return {
-        ok: false,
-        conflict: true,
-        issues: [],
-        draft: existing?.draft ?? "",
-        draftHash: currentHash,
-        lastSavedAt: existing?.lastSavedAt ?? 0,
-      };
-    }
-
-    if (existing === null) {
-      await ctx.db.insert("specs", {
-        projectId: args.projectId,
-        draft: args.spec,
-        lastSavedAt: now,
+    if (args.baseHash !== (current?.hash ?? null))
+      return draftConflict(current);
+    const draft = {
+      revision: (current?.revision ?? 0) + 1,
+      hash: await sha256Hex(args.spec),
+      savedAt: Date.now(),
+    };
+    if (current) await ctx.db.patch(current._id, { ...draft, text: args.spec });
+    else
+      await ctx.db.insert("projectDrafts", {
+        projectId: project._id,
+        ...draft,
+        text: args.spec,
       });
-    } else {
-      await ctx.db.patch(existing._id, {
-        draft: args.spec,
-        lastSavedAt: now,
-      });
-    }
-    const readiness = await ctx.db
-      .query("publishReadiness")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (readiness) await ctx.db.delete(readiness._id);
-
+    await ctx.db.patch(project._id, { draft });
     return {
       ok: true,
-      issues: effectiveIssues,
+      issues,
       draft: args.spec,
-      draftHash: await draftFingerprint(args.spec),
-      lastSavedAt: now,
+      draftHash: draft.hash,
+      lastSavedAt: draft.savedAt,
     };
   },
 });
-
 export const publish = mutation({
   args: {
     projectId: v.id("projects"),
     version: v.string(),
+    draftHash: v.string(),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    ok: boolean;
-    issues: SpecIssue[];
-    version?: Doc<"specVersions">;
-    project?: Doc<"projects">;
-  }> => {
-    const { claims, org } = await requireProjectMember(ctx, args.projectId);
-    requireOrgAdmin(claims);
-
+  handler: async (ctx, args) => {
+    const { project, org } = await requireProjectAdmin(ctx, args.projectId);
+    const draft = await getProjectDraft(ctx, project._id);
+    if (args.draftHash !== (draft?.hash ?? null)) return draftConflict(draft);
     const version = args.version.trim();
-    if (!isValidSemver(version)) {
-      return {
-        ok: false,
-        issues: [
-          {
-            level: "error",
-            path: "version",
-            message: "Version must be valid semver (e.g. 0.1.0)",
-          },
-        ],
-      };
-    }
-    const draftForReadiness = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const credentialRows = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .collect();
-    const currentCredentialRevision = credentialRevision(credentialRows);
-    const credentialFingerprint =
-      await credentialSetFingerprint(credentialRows);
-    const readiness = await ctx.db
-      .query("publishReadiness")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    const readinessState = await readinessValidity(
-      readiness,
-      draftForReadiness?.draft ?? null,
-      currentCredentialRevision,
-      credentialFingerprint,
-    );
-    if (!readinessState.current) {
-      const readinessMessages = {
-        missing: "Run a passing connection test before publishing.",
-        draft_missing:
-          "Save a draft, then run a passing connection test before publishing.",
-        status_not_ok: "Run a passing connection test before publishing.",
-        expired:
-          "The passing connection test expired. Run it again before publishing.",
-        draft_changed:
-          "The saved draft changed after the connection test. Run it again before publishing.",
-        credentials_changed:
-          "Run a new credential-free reachability test before publishing.",
-      } as const;
-      return {
-        ok: false,
-        issues: [
-          {
-            level: "error",
-            path: "readiness",
-            message: readinessMessages[readinessState.reason],
-          },
-        ],
-      };
-    }
-
-    const existingVersion = await ctx.db
-      .query("specVersions")
-      .withIndex("by_project_version", (q) =>
-        q.eq("projectId", args.projectId).eq("version", version),
-      )
-      .unique();
-    if (existingVersion !== null) {
-      return {
-        ok: false,
-        issues: [
-          {
-            level: "error",
-            path: "version",
-            message: `Version ${version} already published (immutable)`,
-          },
-        ],
-      };
-    }
-
-    const draftRow = await ctx.db
-      .query("specs")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .unique();
-    if (draftRow === null || draftRow.draft.trim() === "") {
-      return {
-        ok: false,
-        issues: [
-          {
-            level: "error",
-            path: "$",
-            message: "Save a draft spec before publishing",
-          },
-        ],
-      };
-    }
-
-    const issues = [
-      ...validateOpenApiSpec(draftRow.draft),
-      ...(isOrganizationPublicSurfaceAllowed(org)
-        ? []
-        : [
-            {
-              level: "error" as const,
-              path: "publisher",
-              message: "Publisher needs a public handle before publishing.",
-            },
-          ]),
-    ];
-    if (issues.some((i) => i.level === "error")) {
-      return { ok: false, issues };
-    }
-
+    const error = (path: string, message: string) => ({
+      ok: false,
+      issues: [{ level: "error" as const, path, message }],
+    });
+    if (!isValidSemver(version))
+      return error("version", "Version must be valid semver (e.g. 0.1.0)");
+    if (project.retirement)
+      return error("project", "Cancel retirement before publishing");
+    if (
+      await ctx.db
+        .query("specVersions")
+        .withIndex("by_version", (q) =>
+          q.eq("projectId", project._id).eq("version", version),
+        )
+        .unique()
+    )
+      return error(
+        "version",
+        `Version ${version} already published (immutable)`,
+      );
+    if (!draft?.text.trim())
+      return error("$", "Save a draft spec before publishing");
+    const issues = specIssues(draft.text);
+    if (issues.some((i) => i.level === "error")) return { ok: false, issues };
+    if (!(await readinessValidity(ctx, project)).current)
+      return error(
+        "readiness",
+        "Run a passing connection test for the current draft and credentials before publishing.",
+      );
+    await reservePublicRoute(ctx, org, project);
     const publishedAt = Date.now();
-    const versionId = await ctx.db.insert("specVersions", {
-      projectId: args.projectId,
+    const id = await ctx.db.insert("specVersions", {
+      projectId: project._id,
       version,
-      spec: draftRow.draft,
+      spec: draft.text,
+      contentHash: draft.hash,
       publishedAt,
     });
-
-    const currentProject = await ctx.db.get(args.projectId);
-    if (currentProject === null) throw new Error("Project not found");
-    await ctx.db.patch(args.projectId, {
+    await ctx.db.patch(project._id, {
       status: "published",
-      publicationGeneration: (currentProject.publicationGeneration ?? 0) + 1,
+      latestVersionId: id,
+      publicationGeneration: project.publicationGeneration + 1,
+      revision: project.revision + 1,
+      publishedAt,
+      ...pricingSummary(draft.text),
+      discoverable:
+        project.visibility === "public" && project.qualityStatus === "active",
     });
-
-    const versionDoc = await ctx.db.get(versionId);
-    const project = await ctx.db.get(args.projectId);
-    if (versionDoc === null || project === null) {
-      throw new Error("Failed to load published version");
+    await syncCatalogue(ctx, project, (await ctx.db.get(project._id))!);
+    if (project.status === "draft") {
+      await adjustStat(ctx, "draft", project._id, -1);
+      await adjustStat(ctx, "published", project._id, 1);
     }
-    await syncCatalogueListing(ctx, project._id);
-    await enqueuePublishedProjectProjection(ctx, args.projectId);
-    // Notify publisher org + fire webhook event.
-    await createNotification(ctx, {
-      clerkOrgId: org.clerkOrgId,
-      kind: "spec_published",
-      title: "Spec published",
-      body: `Version ${version} published for ${project.name}.`,
-      refId: `spec_published:${versionId}`,
-    });
-    await fireWebhookEvent(ctx, args.projectId, "spec.published", {
-      projectId: args.projectId,
-      version,
-    });
-    // Rebuild the catalogue search embedding from the new published spec.
-    await ctx.scheduler.runAfter(0, internal.search.embedProject, {
-      projectId: args.projectId,
-    });
-
-    await ctx.scheduler.runAfter(0, internal.quality.syncPublishedTarget, {
-      projectId: args.projectId,
-      specVersionId: versionId,
-    });
-
+    await setupQuality(ctx, project._id);
+    await publicationNotice(
+      ctx,
+      (await ctx.db.get(project._id))!,
+      (await ctx.db.get(id))!,
+    );
     return {
       ok: true,
-      issues, // warnings (e.g. missing x-zevium-cost) still returned
-      version: versionDoc,
-      project,
+      issues,
+      version: versionDto((await ctx.db.get(id))!),
+      project: projectDto((await ctx.db.get(project._id))!),
     };
   },
 });
-
 export const listVersions = query({
   args: { projectId: v.id("projects") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<
-    Array<{
-      _id: Doc<"specVersions">["_id"];
-      version: string;
-      publishedAt: number;
-      deprecatedAt: number | undefined;
-      sunsetAt: number | undefined;
-      deprecationMessage: string | undefined;
-    }>
-  > => {
+  handler: async (ctx, args) => {
     await requireProjectMember(ctx, args.projectId);
     const rows = await ctx.db
       .query("specVersions")
-      .withIndex("by_project_published", (q) =>
-        q.eq("projectId", args.projectId),
-      )
+      .withIndex("by_project_time", (q) => q.eq("projectId", args.projectId))
       .order("desc")
       .collect();
     return rows.map((r) => ({
@@ -371,421 +176,136 @@ export const listVersions = query({
     }));
   },
 });
-
-/**
- * Fetch one immutable published version (full spec body).
- * Auth: caller must be a member of the org that owns the project.
- */
 export const getVersion = query({
   args: { versionId: v.id("specVersions") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    version: string;
-    spec: string;
-    publishedAt: number;
-  } | null> => {
-    const row = await ctx.db.get(args.versionId);
-    if (row === null) {
-      return null;
-    }
-    await requireProjectMember(ctx, row.projectId);
+  handler: async (ctx, args) => {
+    const version = await ctx.db.get(args.versionId);
+    if (!version) return null;
+    await requireProjectMember(ctx, version.projectId);
     return {
-      version: row.version,
-      spec: row.spec,
-      publishedAt: row.publishedAt,
+      version: version.version,
+      spec: version.spec,
+      publishedAt: version.publishedAt,
     };
   },
 });
-
-/**
- * Public immutable spec DTO for docs, discovery, and keyless mocks.
- * Metering identifiers and Clerk identity stay behind gateway-spec httpAction.
- */
 export const getPublishedForGateway = query({
-  args: {
-    publisherHandle: v.string(),
-    projectSlug: v.string(),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    spec: string;
-    version: string;
-    specVersionId: string;
-    visibility: Doc<"projects">["visibility"];
-    deprecatedAt: number | undefined;
-    sunsetAt: number | undefined;
-    deprecationMessage: string | undefined;
-    retiredAt: number | undefined;
-  } | null> => {
+  args: { publisherHandle: v.string(), projectSlug: v.string() },
+  handler: async (ctx, args) => {
     const route = await resolveActivePublicRoute(
       ctx,
       args.publisherHandle,
       args.projectSlug,
     );
-    if (route === null) return null;
-    const { organization, project } = route;
-    if (project.visibility !== "public") return null;
-    if (project.status !== "published") return null;
-
-    const latest = await ctx.db
-      .query("specVersions")
-      .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
-      .order("desc")
-      .first();
-    if (latest === null) return null;
-    if (!isPublishedSurfaceAllowed(organization, latest)) return null;
-
+    if (!route?.project.latestVersionId) return null;
+    const version = await ctx.db.get(route.project.latestVersionId);
+    if (
+      !version ||
+      version.projectId !== route.project._id ||
+      specIssues(version.spec).some((i) => i.level === "error")
+    )
+      return null;
     return {
-      spec: latest.spec,
-      version: latest.version,
-      specVersionId: latest._id,
-      visibility: project.visibility,
-      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
-      // Version sunset is informational. Only project retirement may cut off
-      // execution, because that lifecycle owns consumer notice and wind-down.
-      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
+      spec: version.spec,
+      version: version.version,
+      specVersionId: version._id,
+      visibility: route.project.visibility,
+      deprecatedAt: route.project.retirement?.startedAt ?? version.deprecatedAt,
+      sunsetAt: route.project.retirement?.sunsetAt,
       deprecationMessage:
-        project.deprecationMessage ?? latest.deprecationMessage,
-      retiredAt: project.retiredAt,
+        route.project.retirement?.message ?? version.deprecationMessage,
+      retiredAt: route.project.retirement?.retiredAt,
     };
   },
 });
-
-/**
- * Internal gateway lookup. Same immutable published snapshot as public query,
- * plus publisher-owned headers. Only reachable through authenticated httpAction.
- */
-export const getPublishedForGatewayInternal = internalQuery({
-  args: {
-    publisherHandle: v.string(),
-    projectSlug: v.string(),
-    consumerClerkOrgId: v.optional(v.string()),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    admission: {
-      mode: "open" | "entitled_only";
-      policyRevision: number;
-      allowed: boolean;
-    };
-    spec: string;
-    version: string;
-    specVersionId: string;
-    projectId: string;
-    organizationId: string;
-    clerkOrgId: string;
-    visibility: Doc<"projects">["visibility"];
-    upstreamHeaders: Record<string, string>;
-    deprecatedAt: number | undefined;
-    sunsetAt: number | undefined;
-    deprecationMessage: string | undefined;
-    retiredAt: number | undefined;
-  } | null> => {
-    let route = await resolveActivePublicRoute(
-      ctx,
-      args.publisherHandle,
-      args.projectSlug,
-    );
-    if (route === null) {
-      // Retired routes lose their active binding but must still resolve so the
-      // gateway can answer 410 with immutable deprecation metadata.
-      const organization = await ctx.db
-        .query("organizations")
-        .withIndex("by_public_handle", (q) =>
-          q.eq("publicHandle", args.publisherHandle.trim().toLowerCase()),
-        )
-        .unique();
-      if (organization === null || organization.archivedAt !== undefined) {
-        return null;
-      }
-      const candidates = await ctx.db
-        .query("projects")
-        .withIndex("by_org_slug", (q) =>
-          q.eq("organizationId", organization._id).eq("slug", args.projectSlug),
-        )
-        .take(2);
-      const retired = candidates.length === 1 ? candidates[0]! : null;
-      if (retired === null || retired.retiredAt === undefined) return null;
-      const tombstone = await ctx.db
-        .query("publicRouteTombstones")
-        .withIndex("by_project", (q) => q.eq("projectId", retired._id))
-        .first();
-      if (tombstone === null) return null;
-      route = { organization, project: retired, binding: tombstone };
-    }
-    const { organization: org, project } = route;
-    if (project.status !== "published") return null;
-
-    const latest = await ctx.db
-      .query("specVersions")
-      .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
-      .order("desc")
-      .first();
-    if (latest === null) return null;
-    if (!isPublishedSurfaceAllowed(org, latest)) return null;
-
-    const isPastSunset =
-      project.retiredAt !== undefined ||
-      (project.sunsetAt !== undefined && project.sunsetAt <= Date.now());
-    const upstreamHeaders = isPastSunset
-      ? []
-      : await ctx.db
-          .query("upstreamCredentials")
-          .withIndex("by_project", (q) => q.eq("projectId", project._id))
-          .collect();
-
-    const mode =
-      project.deprecationStartedAt === undefined ? "open" : "entitled_only";
-    let allowed = mode === "open" || args.consumerClerkOrgId === org.clerkOrgId;
-    if (!allowed && args.consumerClerkOrgId) {
-      const consumer = await ctx.db
-        .query("organizations")
-        .withIndex("by_clerk_org", (q) =>
-          q.eq("clerkOrgId", args.consumerClerkOrgId!),
-        )
-        .unique();
-      if (consumer) {
-        const entitlement = await ctx.db
-          .query("projectConsumerEntitlements")
-          .withIndex("by_project_consumer", (q) =>
-            q
-              .eq("projectId", project._id)
-              .eq("consumerOrganizationId", consumer._id),
-          )
-          .unique();
-        const historical = entitlement
-          ? null
-          : await ctx.db
-              .query("usageEvents")
-              .withIndex("by_org_project_at", (q) =>
-                q
-                  .eq("organizationId", consumer._id)
-                  .eq("projectId", project._id)
-                  .lte("at", project.deprecationStartedAt!),
-              )
-              .first();
-        allowed = entitlement !== null || historical !== null;
-      }
-    }
-    return {
-      admission: {
-        mode,
-        policyRevision: (project.retirementRevision ?? 0) + 1,
-        allowed,
-      },
-      spec: latest.spec,
-      version: latest.version,
-      specVersionId: latest._id,
-      projectId: project._id,
-      organizationId: org._id,
-      clerkOrgId: org.clerkOrgId,
-      visibility: project.visibility,
-      upstreamHeaders: Object.fromEntries(
-        await Promise.all(
-          upstreamHeaders.map(async (row) => [
-            row.name,
-            await decryptCredential(
-              requireEncryptedCredential(row),
-              row.projectId,
-              row.name,
-            ),
-          ]),
-        ),
-      ),
-      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
-      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
-      deprecationMessage:
-        project.deprecationMessage ?? latest.deprecationMessage,
-      retiredAt: project.retiredAt,
-    };
-  },
-});
-
-/**
- * Deprecate a published version (metadata only — spec body immutable).
- * Auth: org admin owning the project.
- * Fires version_deprecated notification + spec.deprecated webhook.
- */
 export const deprecateVersion = mutation({
   args: {
     versionId: v.id("specVersions"),
     sunsetAt: v.optional(v.number()),
     message: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const { org, version } = await requireSpecVersionAdmin(ctx, args.versionId);
-
-    const now = Date.now();
-    if (version.sunsetAt !== undefined && version.sunsetAt <= now) {
-      throw new Error("A version cannot be changed after its sunset");
-    }
+  handler: async (ctx, args) => {
+    const { version, project } = await requireSpecVersionAdmin(
+      ctx,
+      args.versionId,
+    );
+    if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now())
+      throw new ConvexError("A version cannot be changed after its sunset");
     if (
       args.sunsetAt !== undefined &&
       (!Number.isSafeInteger(args.sunsetAt) ||
         !Number.isFinite(new Date(args.sunsetAt).getTime()) ||
-        args.sunsetAt < now + 7 * 24 * 60 * 60 * 1000)
-    ) {
-      throw new Error("Sunset must be a safe timestamp at least 7 days away");
-    }
+        args.sunsetAt < Date.now() + MIN_DEPRECATION_NOTICE_MS)
+    )
+      throw new ConvexError(
+        "Sunset must be a safe timestamp at least 7 days away",
+      );
     const message = args.message?.trim();
+    if (message !== undefined && (!message || message.length > 1000))
+      throw new ConvexError("Deprecation message must be 1 to 1000 characters");
     if (
-      message !== undefined &&
-      (message.length === 0 || message.length > 1000)
-    ) {
-      throw new Error("Deprecation message must be 1 to 1000 characters");
-    }
-    await ctx.db.patch(args.versionId, {
-      deprecatedAt: version.deprecatedAt ?? now,
+      version.deprecatedAt !== undefined &&
+      version.sunsetAt === args.sunsetAt &&
+      version.deprecationMessage === (message ?? version.deprecationMessage)
+    )
+      return versionDto(version);
+    await limitLifecycle(ctx, project);
+    await ctx.db.patch(version._id, {
+      deprecatedAt: version.deprecatedAt ?? Date.now(),
+      noticeRevision: (version.noticeRevision ?? 0) + 1,
       sunsetAt: args.sunsetAt,
       deprecationMessage: message ?? version.deprecationMessage,
     });
-    await enqueuePublishedProjectProjection(ctx, version.projectId);
-
-    const noticeMessage = message ?? version.deprecationMessage;
-    await upsertNotification(ctx, {
-      clerkOrgId: org.clerkOrgId,
-      kind: "version_deprecated",
-      title: "Version deprecated",
-      body: versionDeprecationBody(
-        version.version,
-        args.sunsetAt,
-        noticeMessage,
-      ),
-      refId: `version_deprecated:${args.versionId}`,
-    });
-    await ctx.scheduler.runAfter(
-      0,
-      internal.specs.notifyDeprecatedVersionConsumersPage,
-      {
-        versionId: args.versionId,
-        deprecatedAt: version.deprecatedAt ?? now,
-        sunsetAt: args.sunsetAt,
-        message: noticeMessage,
-        cursor: null,
-      },
-    );
-
-    await fireWebhookEvent(ctx, version.projectId, "spec.deprecated", {
-      projectId: version.projectId,
-      version: version.version,
-      sunsetAt: args.sunsetAt,
-    });
-
-    const updated = await ctx.db.get(args.versionId);
-    if (updated === null) {
-      throw new Error("Failed to load version");
-    }
-    return updated;
-  },
-});
-
-/**
- * Clear deprecation metadata from a version.
- * Auth: org admin owning the project.
- */
-export const undeprecateVersion = mutation({
-  args: { versionId: v.id("specVersions") },
-  handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const { version } = await requireSpecVersionAdmin(ctx, args.versionId);
-
-    if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now()) {
-      throw new Error("A version cannot be restored after its sunset");
-    }
-    // Replace to unset optional fields — patch cannot delete them.
-    await ctx.db.replace(args.versionId, {
-      projectId: version.projectId,
-      version: version.version,
-      spec: version.spec,
-      publishedAt: version.publishedAt,
-    });
-    await enqueuePublishedProjectProjection(ctx, version.projectId);
-
-    const updated = await ctx.db.get(args.versionId);
-    if (updated === null) {
-      throw new Error("Failed to load version");
-    }
-    return updated;
-  },
-});
-
-function versionDeprecationBody(
-  version: string,
-  sunsetAt?: number,
-  message?: string,
-): string {
-  return `Version ${version} has been deprecated.${sunsetAt === undefined ? "" : ` Sunset: ${new Date(sunsetAt).toISOString()}.`}${message === undefined ? "" : ` ${message}`}`;
-}
-
-/** Existing consumers of this version (plus unversioned legacy usage), in bounded pages. */
-export const notifyDeprecatedVersionConsumersPage = internalMutation({
-  args: {
-    versionId: v.id("specVersions"),
-    deprecatedAt: v.number(),
-    sunsetAt: v.optional(v.number()),
-    message: v.optional(v.string()),
-    cursor: v.union(v.string(), v.null()),
-  },
-  handler: async (ctx, args): Promise<void> => {
-    const version = await ctx.db.get(args.versionId);
+    await ctx.db.patch(project._id, { revision: project.revision + 1 });
+    const changed = await ctx.db.get(version._id);
     if (
-      !version ||
-      version.deprecatedAt !== args.deprecatedAt ||
-      version.sunsetAt !== args.sunsetAt ||
-      version.deprecationMessage !== args.message
-    )
-      return;
-    const project = await ctx.db.get(version.projectId);
-    if (
-      !project ||
-      project.retiredAt !== undefined ||
-      project.deletionState !== undefined
-    )
-      return;
-    const publisher = await getActiveOrgById(ctx, project.organizationId);
-    if (!publisher) return;
-    const page = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_project_at", (q) => q.eq("projectId", project._id))
-      .order("asc")
-      .paginate({ cursor: args.cursor, numItems: 50 });
-    const consumerIds = new Set(
-      page.page
-        .filter(
-          (event) =>
-            event.specVersionId === undefined ||
-            event.specVersionId === version._id,
-        )
-        .map((event) => event.organizationId),
-    );
-    for (const organizationId of consumerIds) {
-      if (organizationId === publisher._id) continue;
-      const consumer = await getActiveOrgById(ctx, organizationId);
-      if (!consumer) continue;
+      changed?.deprecatedAt !== undefined &&
+      (version.deprecatedAt !== changed.deprecatedAt ||
+        version.sunsetAt !== changed.sunsetAt ||
+        version.deprecationMessage !== changed.deprecationMessage)
+    ) {
+      const body = `${project.name} version ${version.version} is deprecated. ${changed.deprecationMessage ?? "Migrate to the current version."}`;
       await upsertNotification(ctx, {
-        clerkOrgId: consumer.clerkOrgId,
+        organizationId: project.organizationId,
         kind: "version_deprecated",
-        title: `${project.name} version ${version.version} deprecated`,
-        body: versionDeprecationBody(
-          version.version,
-          version.sunsetAt,
-          version.deprecationMessage,
-        ),
-        refId: `version_deprecated:${version._id}:consumer:${consumer.clerkOrgId}`,
-        publisherHandle: publisher.publicHandle,
-        projectSlug: project.slug,
+        title: "Version deprecated",
+        body,
+        refId: `deprecation:${version._id}`,
+        email: version.deprecatedAt === undefined,
+      });
+      await fireWebhookEvent(ctx, project._id, "spec.deprecated", {
+        projectId: project._id,
+        version: version.version,
+      });
+      await ctx.scheduler.runAfter(0, internal.lifecycleNotices.consumers, {
+        projectId: project._id,
+        revision: changed.noticeRevision!,
+        email: version.deprecatedAt === undefined,
+        versionId: version._id,
+        cursor: null,
+        body,
       });
     }
-    if (!page.isDone)
-      await ctx.scheduler.runAfter(
-        0,
-        internal.specs.notifyDeprecatedVersionConsumersPage,
-        { ...args, cursor: page.continueCursor },
-      );
+    return versionDto((await ctx.db.get(version._id))!);
+  },
+});
+export const undeprecateVersion = mutation({
+  args: { versionId: v.id("specVersions") },
+  handler: async (ctx, args) => {
+    const { version, project } = await requireSpecVersionAdmin(
+      ctx,
+      args.versionId,
+    );
+    if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now())
+      throw new ConvexError("A version cannot be changed after its sunset");
+    await limitLifecycle(ctx, project);
+    await ctx.db.patch(version._id, {
+      deprecatedAt: undefined,
+      noticeRevision: (version.noticeRevision ?? 0) + 1,
+      sunsetAt: undefined,
+      deprecationMessage: undefined,
+    });
+    await ctx.db.patch(project._id, { revision: project.revision + 1 });
+    return versionDto((await ctx.db.get(version._id))!);
   },
 });

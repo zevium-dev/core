@@ -1,3 +1,4 @@
+import type { ProjectView } from "#/lib/project-view";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, Eye, EyeOff, Webhook } from "lucide-react";
@@ -16,14 +17,13 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Switch } from "#/components/ui/switch";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import {
   SettingsCardSkeleton,
   SettingsQueryErrorCard,
 } from "./settings-query-state";
 import { WebhookDeliveries } from "./webhook-deliveries";
-export function WebhooksCard({ project }: { project: Doc<"projects"> }) {
+export function WebhooksCard({ project }: { project: ProjectView }) {
   const endpointQuery = useQuery(
     convexQuery(api.webhooks.getEndpoint, { projectId: project._id }),
   );

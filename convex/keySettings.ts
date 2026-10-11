@@ -1,683 +1,322 @@
-/**
- * Per-key controls: monthly credit cap, enable/disable, rotation grace.
- *
- * Clerk owns the key itself; these rows are Zevium metadata pulled by the
- * gateway wallet DO during the ledger sync — never per-request.
- *
- * Auth model: the active Clerk org claim (identity.orgId) is the org scope.
- * Existing controls require an exact key.put event; new rows require a
- * short-lived HMAC projection created only after the server verifies Clerk.
- */
-
+import { v, ConvexError } from "convex/values";
+import { isPrivilegedOrgRole, canonicalJson, sha256Hex } from "@zevium/shared";
 import {
-  REGISTRY_MAX_CLOCK_SKEW_MS,
-  isPrivilegedOrgRole,
-  canonicalJson,
-  validateRegistryEvent,
-  verifyRegistryVerifiedKeyProjection,
-  verifyRegistryVerifiedKeyRotationProjection,
-  type RegistryEvent,
-  type RegistryKeyLifecycle,
-  type RegistryPayloadMap,
-  type RegistryVerifiedKeyProjection,
-  type RegistryVerifiedKeyRotationProjection,
-} from "@zevium/shared";
-import { ConvexError, v } from "convex/values";
-import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
-import {
-  internalMutation,
-  internalQuery,
   mutation,
   query,
-  type MutationCtx,
-  type QueryCtx,
+  internalMutation,
+  internalQuery,
 } from "./_generated/server";
-import { requireIdentity, requireOrgAdmin } from "./lib/auth";
+import { internal } from "./_generated/api";
+import { requireActiveOrg, requireOrgAdmin } from "./lib/auth";
+import { getOrganization, isActive } from "./lib/identity";
 import {
-  getActiveOrganizationByClerkId,
-  getOrganizationTombstone,
-} from "./lib/publicRoutes";
+  currentKey,
+  insertKey,
+  keyDto,
+  ownedKey,
+  requireKeyManager,
+  revokeKey,
+  rotationDto,
+  membershipRemoved,
+  type Key,
+  type Rotation,
+} from "./lib/keys";
 import {
-  enqueueKeyLifecycle,
-  enqueueKeyPut,
-  enqueueKeyRevoke,
-} from "./registrySync";
-
-const keyProvisionValidator = v.object({
-  secretSha256: v.string(),
-  clerkKeyId: v.string(),
-  clerkOrgId: v.string(),
-  ownerUserId: v.string(),
-  subjectUserId: v.string(),
-  budgetId: v.string(),
-  budgetRevision: v.number(),
-  lifecycle: v.union(
-    v.literal("active"),
-    v.literal("grace"),
-    v.literal("disabled"),
-  ),
-  monthlyCapCredits: v.union(v.number(), v.null()),
-  graceUntil: v.union(v.number(), v.null()),
-  expiresAt: v.union(v.number(), v.null()),
-  scopes: v.array(v.string()),
-});
-
-const verifiedKeyProjectionValidator = v.object({
-  schemaVersion: v.literal(1),
-  verifiedAt: v.number(),
-  provision: keyProvisionValidator,
-});
-
-const verifiedKeyRotationProjectionValidator = v.object({
-  schemaVersion: v.literal(1),
-  verifiedAt: v.number(),
-  operationId: v.string(),
-  oldKeyId: v.string(),
-  newProvision: keyProvisionValidator,
-  graceUntil: v.number(),
-});
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type KeySettingView = {
-  _id: Id<"keySettings">;
-  keyId: string;
-  keyFamilyId: string;
-  keyName?: string;
-  ownerUserId?: string;
-  budgetId?: string;
-  budgetRevision?: number;
-  /** Absent = unlimited. */
-  monthlyCapCredits?: number;
-  disabled: boolean;
-  rotatedFromKeyId?: string;
-  /** Old rotated key works until this ms epoch. */
-  graceUntil?: number;
-  rotationRequiredAt?: number;
-  lifecycle?: "active" | "grace" | "disabled" | "revoked";
-  createdAt: number;
-  updatedAt: number;
-};
-
-export type GatewayKeySettingRow = {
-  keyId: string;
-  keyFamilyId: string;
-  budgetId?: string;
-  budgetRevision?: number;
-  monthlyCapCredits?: number;
-  disabled: boolean;
-  rotatedFromKeyId?: string;
-  graceUntil?: number;
-  rotationRequiredAt?: number;
-  lifecycle?: "active" | "grace" | "disabled" | "revoked";
-};
-
-function toView(doc: Doc<"keySettings">): KeySettingView {
-  return {
-    _id: doc._id,
-    keyId: doc.keyId,
-    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
-    keyName: doc.keyName,
-    ownerUserId: doc.ownerUserId,
-    budgetId: doc.budgetId,
-    budgetRevision: doc.budgetRevision,
-    monthlyCapCredits: doc.monthlyCapCredits,
-    disabled: doc.disabled,
-    rotatedFromKeyId: doc.rotatedFromKeyId,
-    graceUntil: doc.graceUntil,
-    rotationRequiredAt: doc.rotationRequiredAt,
-    lifecycle: doc.lifecycle,
-    createdAt: doc._creationTime,
-    updatedAt: doc.updatedAt,
-  };
+  provisionHash,
+  verifiedKeyProjectionValidator,
+  verifiedKeyRotationProjectionValidator,
+  verifyProjection,
+} from "./lib/keyProjection";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+async function visible(ctx: QueryCtx) {
+  const { org, claims } = await requireActiveOrg(ctx);
+  const rows = isPrivilegedOrgRole(claims.orgRole)
+    ? await ctx.db
+        .query("apiKeys")
+        .withIndex("by_org", (q) =>
+          q.eq("kind", "key").eq("organizationId", org._id),
+        )
+        .collect()
+    : await ctx.db
+        .query("apiKeys")
+        .withIndex("by_org_owner", (q) =>
+          q
+            .eq("kind", "key")
+            .eq("organizationId", org._id)
+            .eq("ownerUserId", claims.subject),
+        )
+        .collect();
+  return rows.filter((r): r is Key => r.kind === "key");
 }
-
-export function toGatewayRow(doc: Doc<"keySettings">): GatewayKeySettingRow {
-  return {
-    keyId: doc.keyId,
-    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
-    budgetId: doc.budgetId,
-    budgetRevision: doc.budgetRevision,
-    monthlyCapCredits: doc.monthlyCapCredits,
-    disabled: doc.disabled,
-    rotatedFromKeyId: doc.rotatedFromKeyId,
-    graceUntil: doc.graceUntil,
-    rotationRequiredAt: doc.rotationRequiredAt,
-    lifecycle: doc.lifecycle,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Auth
-// ---------------------------------------------------------------------------
-
-type DbCtx = QueryCtx | MutationCtx;
-
-/**
- * Require an authenticated member of the active Clerk org. The org is derived
- * from the JWT active-org claim (identity.orgId); a mirrored org row must exist.
- */
-async function requireOrgByClerkId(ctx: DbCtx): Promise<{
-  clerkOrgId: string;
-  claims: Awaited<ReturnType<typeof requireIdentity>>;
-}> {
-  const claims = await requireIdentity(ctx);
-  if (claims.orgRole !== "org:member" && !isPrivilegedOrgRole(claims.orgRole)) {
-    throw new ConvexError("Organization role is not supported");
-  }
-  const clerkOrgId = claims.orgId;
-  if (typeof clerkOrgId !== "string" || clerkOrgId.length === 0) {
-    throw new ConvexError("Select an organization before managing API keys");
-  }
-  if ((await getOrganizationTombstone(ctx, clerkOrgId)) !== null) {
-    throw new ConvexError("Organization is archived");
-  }
-  const org = await getActiveOrganizationByClerkId(ctx, clerkOrgId);
-  if (org === null) {
-    throw new ConvexError("Organization not found");
-  }
-  return { clerkOrgId, claims };
-}
-
-/** Load a keySettings row by keyId, enforcing org ownership. */
-async function getOwnedVerifiedRow(
-  ctx: MutationCtx,
-  clerkOrgId: string,
-  keyId: string,
-): Promise<Doc<"keySettings">> {
-  const existing = await ctx.db
-    .query("keySettings")
-    .withIndex("by_key", (q) => q.eq("keyId", keyId))
-    .unique();
-  if (
-    existing === null ||
-    existing.clerkOrgId !== clerkOrgId ||
-    existing.ownerUserId === undefined
-  ) {
-    // Cross-org attempt — do not leak existence.
-    throw new ConvexError("Verified key not found");
-  }
-  const firstEvent =
-    existing.secretSha256 === undefined
-      ? null
-      : await ctx.db
-          .query("registryOutbox")
-          .withIndex("by_stream_revision", (q) =>
-            q.eq("streamKey", `key:${existing.secretSha256}`).eq("revision", 1),
-          )
-          .unique();
-  const event =
-    firstEvent === null
-      ? null
-      : await validateRegistryEvent(JSON.parse(firstEvent.eventJson));
-  const provision =
-    event?.operation === "key.put"
-      ? (event as RegistryEvent & { operation: "key.put" })
-      : null;
-  if (
-    provision === null ||
-    provision.payload.clerkOrgId !== clerkOrgId ||
-    provision.payload.ownerUserId !== existing.ownerUserId ||
-    provision.payload.clerkKeyId !== existing.keyId
-  ) {
-    throw new ConvexError("Verified key not found");
-  }
-  return existing;
-}
-
-function requireKeyManager(
-  claims: Awaited<ReturnType<typeof requireIdentity>>,
-  row: Doc<"keySettings">,
-): void {
-  if (
-    row.ownerUserId !== claims.subject &&
-    !isPrivilegedOrgRole(claims.orgRole)
-  ) {
-    throw new ConvexError("Verified key not found");
-  }
-}
-
-function occupiesKeySlot(row: Doc<"keySettings">): boolean {
-  return (
-    row.lifecycle !== "revoked" &&
-    row.membershipRevokedAt === undefined &&
-    row.graceUntil === undefined &&
-    (row.expiresAt === undefined || row.expiresAt > Date.now())
-  );
-}
-
-async function visibleKeys(ctx: DbCtx): Promise<Doc<"keySettings">[]> {
-  const { clerkOrgId, claims } = await requireOrgByClerkId(ctx);
-  if (isPrivilegedOrgRole(claims.orgRole)) {
-    return await ctx.db
-      .query("keySettings")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", clerkOrgId))
-      .collect();
-  }
-  return await ctx.db
-    .query("keySettings")
-    .withIndex("by_owner_status", (q) =>
-      q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
-    )
-    .collect();
-}
-
-async function insertVerifiedSetting(
-  ctx: MutationCtx,
-  provision: RegistryPayloadMap["key.put"],
-  patch: Pick<UpsertPatch, "rotatedFromKeyId" | "keyFamilyId"> = {},
-): Promise<Doc<"keySettings">> {
-  const now = Date.now();
-  const id = await ctx.db.insert("keySettings", {
-    clerkOrgId: provision.clerkOrgId,
-    keyId: provision.clerkKeyId,
-    keyFamilyId: patch.keyFamilyId ?? provision.clerkKeyId,
-    subjectUserId: provision.subjectUserId,
-    ownerUserId: provision.ownerUserId,
-    budgetId: provision.budgetId,
-    budgetRevision: provision.budgetRevision,
-    secretSha256: provision.secretSha256,
-    lifecycle: provision.lifecycle,
-    disabled: provision.lifecycle === "disabled",
-    updatedAt: now,
-    ...(provision.monthlyCapCredits !== null
-      ? { monthlyCapCredits: provision.monthlyCapCredits }
-      : {}),
-    ...(patch.rotatedFromKeyId !== undefined
-      ? { rotatedFromKeyId: patch.rotatedFromKeyId }
-      : {}),
-    ...(provision.graceUntil === null
-      ? {}
-      : { graceUntil: provision.graceUntil }),
-    ...(provision.expiresAt === null ? {} : { expiresAt: provision.expiresAt }),
-  });
-  const created = await ctx.db.get(id);
-  if (created === null)
-    throw new ConvexError("Failed to read created key setting");
-  return created;
-}
-
-type UpsertPatch = {
-  keyFamilyId?: string;
-  monthlyCapCredits?: number;
-  disabled?: boolean;
-  rotatedFromKeyId?: string;
-  graceUntil?: number;
-  keyName?: string;
-  ownerUserId?: string;
-  rotationRequiredAt?: number;
-  lifecycle?: "active" | "grace" | "disabled" | "revoked";
-};
-
-/**
- * Update an existing row's fields. A field set to `undefined` is deleted from
- * the document (Convex patch semantics) — used to clear monthlyCapCredits.
- */
-async function patchSetting(
-  ctx: MutationCtx,
-  id: Id<"keySettings">,
-  patch: UpsertPatch,
-): Promise<Doc<"keySettings">> {
-  const update: Record<string, unknown> = { updatedAt: Date.now() };
-  for (const [k, value] of Object.entries(patch)) {
-    update[k] = value;
-  }
-  await ctx.db.patch(id, update as Partial<Doc<"keySettings">>);
-  const updated = await ctx.db.get(id);
-  if (updated === null)
-    throw new ConvexError("Failed to read updated key setting");
-  return updated;
-}
-
-function currentLifecycle(
-  row: Doc<"keySettings">,
-  now: number,
-): RegistryKeyLifecycle {
-  if (row.lifecycle === "revoked") return "revoked";
-  if (row.lifecycle === "disabled") return "disabled";
-  if (row.lifecycle === "grace" && (row.graceUntil ?? 0) > now) return "grace";
-  if (row.disabled) return "disabled";
-  if (row.graceUntil !== undefined) {
-    return row.graceUntil > now ? "grace" : "disabled";
-  }
-  return "active";
-}
-
-function projectionSecret(): string {
-  const secret = process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET;
-  if (!secret)
-    throw new ConvexError("Verified key projection is not configured");
-  return secret;
-}
-
-function requireFreshProjection(verifiedAt: number): void {
-  const delta = Math.abs(Date.now() - verifiedAt);
-  if (!Number.isSafeInteger(verifiedAt) || delta > REGISTRY_MAX_CLOCK_SKEW_MS) {
-    throw new ConvexError("Verified key projection is expired");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Queries
-// ---------------------------------------------------------------------------
-
-/**
- * All key settings for the active org. Realtime-synced to the keys screen.
- */
 export const getForOrg = query({
   args: {},
-  handler: async (ctx): Promise<KeySettingView[]> => {
-    const rows = await visibleKeys(ctx);
-    return rows.map(toView);
-  },
+  handler: async (ctx) => (await visible(ctx)).map(keyDto),
 });
-
-/** Realtime display DTO. No provider reads or secret/hash fields. */
 export const listKeys = query({
   args: {},
-  handler: async (ctx) => {
-    const rows = await visibleKeys(ctx);
-    return rows
-      .filter((row) => row.lifecycle !== "revoked")
-      .map((row) => ({
-        id: row.keyId,
-        name: row.keyName ?? "API key",
-        masked: `••••${row.keyId.slice(-4)}`,
+  handler: async (ctx) =>
+    (await visible(ctx))
+      .filter((r) => r.revokedAt === undefined)
+      .map((r) => ({
+        ...keyDto(r),
+        id: r.keyId,
+        name: r.keyName,
+        masked: `••••${r.keyId.slice(-4)}`,
         lastUsedAt: null,
         revoked: false,
-        current: occupiesKeySlot(row),
-        ...toView(row),
-      }));
-  },
+        current: currentKey(r),
+      })),
 });
-
-// ---------------------------------------------------------------------------
-// Mutations
-// ---------------------------------------------------------------------------
-
-/** Persist only a server-verified Clerk projection; raw secret never crosses. */
 export const registerVerified = mutation({
   args: {
     projection: verifiedKeyProjectionValidator,
     signature: v.string(),
     keyName: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    const projection = args.projection as RegistryVerifiedKeyProjection;
-    const { clerkOrgId, claims } = await requireOrgByClerkId(ctx);
-    requireFreshProjection(projection.verifiedAt);
+  handler: async (ctx, args) => {
+    const { org, claims } = await requireActiveOrg(ctx);
+    await verifyProjection(args.projection, args.signature, false);
+    const p = args.projection.provision;
     if (
-      !(await verifyRegistryVerifiedKeyProjection(
-        projectionSecret(),
-        projection,
-        args.signature,
-      ))
-    ) {
-      throw new ConvexError("Verified key projection signature is invalid");
-    }
-    const provision = projection.provision;
-    if (
-      provision.clerkOrgId !== clerkOrgId ||
-      provision.ownerUserId !== claims.subject ||
-      provision.subjectUserId !== claims.subject
-    ) {
+      p.clerkOrgId !== org.clerkOrgId ||
+      p.ownerUserId !== claims.subject ||
+      p.subjectUserId !== claims.subject
+    )
       throw new ConvexError("Verified key projection does not match identity");
-    }
-
-    const existing = await ctx.db
-      .query("keySettings")
-      .withIndex("by_key", (q) => q.eq("keyId", provision.clerkKeyId))
+    const row = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_key", (q) => q.eq("keyId", p.clerkKeyId))
       .unique();
-    if (existing !== null) {
-      const firstEvent = await ctx.db
-        .query("registryOutbox")
-        .withIndex("by_stream_revision", (q) =>
-          q.eq("streamKey", `key:${provision.secretSha256}`).eq("revision", 1),
-        )
-        .unique();
-      const event =
-        firstEvent === null
-          ? null
-          : await validateRegistryEvent(JSON.parse(firstEvent.eventJson));
+    if (row) {
       if (
-        existing.clerkOrgId === clerkOrgId &&
-        existing.ownerUserId === claims.subject &&
-        event?.operation === "key.put" &&
-        canonicalJson(event.payload) === canonicalJson(provision)
-      ) {
-        return toView(existing);
-      }
-      throw new ConvexError(
-        "Verified key projection conflicts with existing state",
-      );
-    }
-
-    // This indexed read and insertion share one serializable transaction.
-    // Disabled keys still occupy the member's slot until explicitly revoked.
-    const owned = await ctx.db
-      .query("keySettings")
-      .withIndex("by_owner_status", (q) =>
-        q.eq("clerkOrgId", clerkOrgId).eq("ownerUserId", claims.subject),
+        row.kind !== "key" ||
+        row.organizationId !== org._id ||
+        row.ownerUserId !== claims.subject ||
+        row.verifiedProjectionHash !== (await provisionHash(p))
       )
-      .collect();
-    if (owned.some(occupiesKeySlot)) {
-      throw new ConvexError(
-        "You already have a key in this organization. Rotate or revoke it before creating another.",
-      );
+        throw new ConvexError(
+          "Verified key projection conflicts with existing state",
+        );
+      return keyDto(row);
     }
-    const created = await insertVerifiedSetting(ctx, provision);
-    await enqueueKeyPut(ctx, provision);
-    return toView(
-      await patchSetting(ctx, created._id, {
-        keyName: args.keyName?.trim().slice(0, 64),
-      }),
+    return keyDto(
+      await insertKey(ctx, org, p, args.projection.verifiedAt, args.keyName),
     );
   },
 });
-
-/**
- * Stamp display attribution after Clerk creates or rotates a key. Identity
- * supplies owner + organization; callers cannot assign metadata to a member.
- */
 export const registerOwnedKey = mutation({
   args: { keyId: v.string(), keyName: v.string() },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    const keyId = args.keyId.trim();
-    const keyName = args.keyName.trim();
-    if (keyId.length === 0) throw new ConvexError("keyId is required");
-    if (keyName.length === 0 || keyName.length > 64) {
-      throw new ConvexError("Key name must be 1–64 characters");
-    }
-    const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, keyId);
-    if (
-      existing.ownerUserId !== claims.subject ||
-      existing.subjectUserId !== claims.subject
-    ) {
+  handler: async (ctx, args) => {
+    const { key, claims } = await ownedKey(ctx, args.keyId);
+    if (key.ownerUserId !== claims.subject)
       throw new ConvexError("Verified key not found");
-    }
-    const doc = await patchSetting(ctx, existing._id, { keyName });
-    return toView(doc);
+    const name = args.keyName.trim();
+    if (!name || name.length > 64)
+      throw new ConvexError("Key name must be 1–64 characters");
+    await ctx.db.patch(key._id, { keyName: name, updatedAt: Date.now() });
+    return keyDto((await ctx.db.get(key._id)) as Key);
   },
 });
-
-/** Set or clear (null) the monthly credit cap for a key. */
 export const setCap = mutation({
-  args: {
-    keyId: v.string(),
-    /** null clears the cap (unlimited); a positive integer sets it. */
-    monthlyCapCredits: v.union(v.number(), v.null()),
-  },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
+  args: { keyId: v.string(), monthlyCapCredits: v.union(v.number(), v.null()) },
+  handler: async (ctx, args) => {
+    const { key, claims, org } = await ownedKey(ctx, args.keyId);
     requireOrgAdmin(claims);
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    if (args.keyId.trim().length === 0) {
-      throw new ConvexError("keyId is required");
-    }
     if (
       args.monthlyCapCredits !== null &&
-      (!Number.isFinite(args.monthlyCapCredits) ||
-        args.monthlyCapCredits <= 0 ||
-        !Number.isInteger(args.monthlyCapCredits))
-    ) {
+      (!Number.isSafeInteger(args.monthlyCapCredits) ||
+        args.monthlyCapCredits <= 0)
+    )
       throw new ConvexError("Cap must be a positive whole number of credits");
-    }
-    // null clears the field (undefined in patch deletes it); a number sets it.
-    const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
-    const doc = await patchSetting(ctx, existing._id, {
-      monthlyCapCredits:
-        args.monthlyCapCredits === null ? undefined : args.monthlyCapCredits,
-    });
-    await enqueueKeyLifecycle(
-      ctx,
-      doc,
-      currentLifecycle(doc, Date.now()) as Exclude<
-        RegistryKeyLifecycle,
-        "revoked"
-      >,
-    );
-    return toView(doc);
+    // Apply one policy revision to current/grace family members so rotation cannot split a budget.
+    const family = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_org_owner", (q) =>
+        q
+          .eq("kind", "key")
+          .eq("organizationId", org._id)
+          .eq("ownerUserId", key.ownerUserId),
+      )
+      .collect();
+    const revision =
+      Math.max(
+        ...family
+          .filter(
+            (r): r is Key =>
+              r.kind === "key" && r.keyFamilyId === key.keyFamilyId,
+          )
+          .map((r) => r.budgetRevision),
+      ) + 1;
+    for (const row of family)
+      if (
+        row.kind === "key" &&
+        row.keyFamilyId === key.keyFamilyId &&
+        row.revokedAt === undefined
+      )
+        await ctx.db.patch(row._id, {
+          monthlyCapCredits: args.monthlyCapCredits ?? undefined,
+          budgetRevision: revision,
+          edgeRevision: row.edgeRevision + 1,
+          updatedAt: Date.now(),
+        });
+    return keyDto((await ctx.db.get(key._id)) as Key);
   },
 });
-
-/** Enable or disable a key. */
 export const setDisabled = mutation({
-  args: {
-    keyId: v.string(),
-    disabled: v.boolean(),
-  },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    if (args.keyId.trim().length === 0) {
-      throw new ConvexError("keyId is required");
-    }
-    const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
-    requireKeyManager(claims, existing);
+  args: { keyId: v.string(), disabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const { key, claims } = await ownedKey(ctx, args.keyId);
+    requireKeyManager(claims.subject, claims.orgRole, key);
     if (
-      existing.lifecycle === "revoked" ||
-      existing.membershipRevokedAt !== undefined ||
-      existing.graceUntil !== undefined
-    ) {
+      !currentKey(key) ||
+      (await membershipRemoved(
+        ctx,
+        key.clerkOrgId,
+        key.ownerUserId,
+        key.verifiedAt,
+      ))
+    )
       throw new ConvexError("This key is no longer active");
-    }
-    if (args.disabled === false && existing.rotationRequiredAt !== undefined) {
-      throw new ConvexError("Key must be rotated before it can be enabled");
-    }
-    const doc = await patchSetting(ctx, existing._id, {
-      disabled: args.disabled,
+    await ctx.db.patch(key._id, {
       lifecycle: args.disabled ? "disabled" : "active",
+      edgeRevision: key.edgeRevision + 1,
+      updatedAt: Date.now(),
     });
-    await enqueueKeyLifecycle(
-      ctx,
-      doc,
-      currentLifecycle(doc, Date.now()) as Exclude<
-        RegistryKeyLifecycle,
-        "revoked"
-      >,
-    );
-    return toView(doc);
+    return keyDto((await ctx.db.get(key._id)) as Key);
   },
 });
-
 export const revokePrevious = mutation({
   args: { keyId: v.string() },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    const existing = await getOwnedVerifiedRow(ctx, clerkOrgId, args.keyId);
-    requireKeyManager(claims, existing);
-    // Terminal registry revocation cannot safely be rolled back after delivery.
-    // Queue provider cleanup atomically, including idempotent user retries.
-    await ctx.scheduler.runAfter(
-      60_000,
-      internal.keyVerification.revokeWithRetry,
-      { keyId: existing.keyId, attempt: 0 },
-    );
-    if (existing.lifecycle === "revoked") return toView(existing);
-    const doc = await patchSetting(ctx, existing._id, {
-      disabled: true,
-      lifecycle: "revoked",
-      graceUntil: undefined,
-    });
-    await enqueueKeyRevoke(ctx, doc, "admin_revoked");
-    return toView(doc);
+  handler: async (ctx, args) => {
+    const { key, claims } = await ownedKey(ctx, args.keyId);
+    requireKeyManager(claims.subject, claims.orgRole, key);
+    return keyDto(await revokeKey(ctx, key));
   },
 });
-
 export const beginRotation = mutation({
   args: { operationId: v.string(), oldKeyId: v.string() },
   handler: async (ctx, args) => {
-    const { claims } = await requireOrgByClerkId(ctx);
-    if (!claims.orgId || !claims.subject)
-      throw new ConvexError("Select an organization before rotating");
-    const oldKey = await getOwnedVerifiedRow(ctx, claims.orgId, args.oldKeyId);
-    requireKeyManager(claims, oldKey);
+    const { org, key, claims } = await ownedKey(ctx, args.oldKeyId);
+    requireKeyManager(claims.subject, claims.orgRole, key);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(args.operationId))
+      throw new ConvexError("Invalid rotation operation");
     const existing = await ctx.db
-      .query("keyRotationOperations")
-      .withIndex("by_operation", (q) =>
+      .query("apiKeys")
+      .withIndex("by_rotation", (q) =>
         q
-          .eq("clerkOrgId", claims.orgId!)
-          .eq("userId", claims.subject!)
+          .eq("kind", "rotation")
+          .eq("organizationId", org._id)
+          .eq("actorUserId", claims.subject)
           .eq("operationId", args.operationId),
       )
       .unique();
-    if (existing && existing.oldKeyId !== args.oldKeyId)
-      throw new ConvexError("Rotation operation conflicts with key");
-    if (
-      existing?.status === "reserved" &&
-      Date.now() - existing.updatedAt > 5 * 60_000
-    ) {
-      await ctx.db.patch(existing._id, {
-        status: "failed",
-        failure: "Reservation expired",
-        updatedAt: Date.now(),
-      });
-      return await ctx.db.get(existing._id);
-    } else if (existing) {
+    if (existing?.kind === "rotation") {
       if (existing.oldKeyId !== args.oldKeyId)
         throw new ConvexError("Rotation operation conflicts with key");
-      return existing;
+      if (
+        existing.state === "pending" &&
+        (existing.leaseUntil ?? 0) <= Date.now()
+      )
+        await ctx.db.patch(existing._id, {
+          state: "failed",
+          failure: "Reservation expired",
+          updatedAt: Date.now(),
+        });
+      return rotationDto(
+        (await ctx.db.get(existing._id)) as Rotation,
+        org.clerkOrgId,
+      );
     }
     const active = await ctx.db
-      .query("keyRotationOperations")
-      .withIndex("by_active_old_key", (q) =>
+      .query("apiKeys")
+      .withIndex("by_active_rotation", (q) =>
         q
-          .eq("clerkOrgId", claims.orgId!)
-          .eq("oldKeyId", args.oldKeyId)
-          .eq("status", "reserved"),
+          .eq("kind", "rotation")
+          .eq("organizationId", org._id)
+          .eq("oldKeyId", key.keyId)
+          .eq("state", "pending"),
       )
       .unique();
-    if (active && Date.now() - active.updatedAt > 5 * 60_000) {
+    if (active?.kind === "rotation") {
+      if ((active.leaseUntil ?? 0) > Date.now())
+        throw new ConvexError("A rotation is already in progress for this key");
       await ctx.db.patch(active._id, {
-        status: "failed",
+        state: "failed",
         failure: "Reservation expired",
         updatedAt: Date.now(),
       });
-    } else if (active) {
-      throw new ConvexError("A rotation is already in progress for this key");
     }
-    if (!occupiesKeySlot(oldKey) || oldKey.disabled)
+    if (
+      !currentKey(key) ||
+      key.lifecycle !== "active" ||
+      (await membershipRemoved(
+        ctx,
+        org.clerkOrgId,
+        key.ownerUserId,
+        key.verifiedAt,
+      ))
+    )
       throw new ConvexError("Only the current key can be rotated");
-    const now = Date.now();
-    const id = await ctx.db.insert("keyRotationOperations", {
-      clerkOrgId: claims.orgId,
-      userId: claims.subject,
+    const id = await ctx.db.insert("apiKeys", {
+      kind: "rotation",
+      organizationId: org._id,
+      actorUserId: claims.subject,
       operationId: args.operationId,
-      oldKeyId: args.oldKeyId,
-      status: "reserved",
-      createdAt: now,
-      updatedAt: now,
+      oldKeyId: key.keyId,
+      state: "pending",
+      requestFingerprint: await sha256Hex(canonicalJson(args)),
+      leaseUntil: Date.now() + 300_000,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     });
-    return await ctx.db.get(id);
+    return rotationDto((await ctx.db.get(id)) as Rotation, org.clerkOrgId);
   },
 });
-
+/** Only authenticated broker projections may nominate a minted key for cleanup. */
+async function recordFailedRotation(
+  ctx: MutationCtx,
+  op: Rotation,
+  clerkOrgId: string,
+  newKeyId?: string,
+) {
+  if (op.state === "complete") return rotationDto(op, clerkOrgId);
+  if (op.newKeyId && newKeyId && op.newKeyId !== newKeyId)
+    throw new ConvexError("Rotation operation conflicts with cleanup key");
+  const keyId = newKeyId ?? op.newKeyId;
+  if (keyId && !op.providerRevoke) {
+    // Never revoke an already registered key or duplicate another cleanup job.
+    const registered = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_key", (q) => q.eq("keyId", keyId))
+      .unique();
+    const cleanup = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_new_key", (q) => q.eq("newKeyId", keyId))
+      .first();
+    if (!registered && (!cleanup || cleanup._id === op._id)) {
+      await ctx.db.patch(op._id, {
+        newKeyId: keyId,
+        providerRevoke: {
+          state: "pending",
+          attempts: 0,
+          nextAttemptAt: Date.now(),
+        },
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.keyVerification.revokeWithRetry,
+        { keyId },
+      );
+    }
+  }
+  if (op.state !== "failed")
+    await ctx.db.patch(op._id, {
+      state: "failed",
+      failure: "Key rotation could not be completed",
+      updatedAt: Date.now(),
+    });
+  return rotationDto((await ctx.db.get(op._id)) as Rotation, clerkOrgId);
+}
 export const completeRotation = mutation({
   args: {
     projection: verifiedKeyRotationProjectionValidator,
@@ -685,331 +324,176 @@ export const completeRotation = mutation({
     keyName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const projection = args.projection as RegistryVerifiedKeyRotationProjection;
-    const { claims } = await requireOrgByClerkId(ctx);
-    if (!claims.orgId || !claims.subject)
-      throw new ConvexError("Select an organization before rotating");
-    requireFreshProjection(projection.verifiedAt);
-    if (
-      !(await verifyRegistryVerifiedKeyRotationProjection(
-        projectionSecret(),
-        projection,
-        args.signature,
-      ))
-    ) {
-      throw new ConvexError("Verified key rotation signature is invalid");
-    }
-    if (projection.newProvision.clerkOrgId !== claims.orgId) {
-      throw new ConvexError("Verified key rotation does not match identity");
-    }
+    const p = args.projection;
+    await verifyProjection(p, args.signature, true, true);
+    const { key: old, org, claims } = await ownedKey(ctx, p.oldKeyId);
+    requireKeyManager(claims.subject, claims.orgRole, old);
     const op = await ctx.db
-      .query("keyRotationOperations")
-      .withIndex("by_operation", (q) =>
+      .query("apiKeys")
+      .withIndex("by_rotation", (q) =>
         q
-          .eq("clerkOrgId", claims.orgId!)
-          .eq("userId", claims.subject!)
-          .eq("operationId", projection.operationId),
+          .eq("kind", "rotation")
+          .eq("organizationId", org._id)
+          .eq("actorUserId", claims.subject)
+          .eq("operationId", p.operationId),
       )
       .unique();
-    if (!op || op.oldKeyId !== projection.oldKeyId)
+    if (!op || op.kind !== "rotation" || op.oldKeyId !== p.oldKeyId)
       throw new ConvexError("Rotation operation not found");
-    if (op.status === "completed") {
-      if (op.newKeyId !== projection.newProvision.clerkKeyId) {
+    const fingerprint = await sha256Hex(canonicalJson(p));
+    if (op.state === "complete") {
+      if (op.requestFingerprint !== fingerprint)
         throw new ConvexError(
           "Rotation operation conflicts with completed key",
         );
-      }
-      return op;
+      return { ...rotationDto(op, org.clerkOrgId), graceUntil: p.graceUntil };
     }
-    if (op.status !== "reserved")
-      throw new ConvexError("Rotation operation failed");
-    const old = await getOwnedVerifiedRow(
-      ctx,
-      claims.orgId,
-      projection.oldKeyId,
-    );
-    requireKeyManager(claims, old);
-    if (!occupiesKeySlot(old) || old.disabled)
-      throw new ConvexError("Only the current key can be rotated");
+    const n = p.newProvision;
+    const fail = () =>
+      recordFailedRotation(ctx, op, org.clerkOrgId, n.clerkKeyId);
     if (
-      projection.newProvision.ownerUserId !== old.ownerUserId ||
-      projection.newProvision.subjectUserId !== old.subjectUserId ||
-      projection.newProvision.budgetId !== old.budgetId ||
-      projection.newProvision.monthlyCapCredits !==
-        (old.monthlyCapCredits ?? null)
-    ) {
-      throw new ConvexError("Verified key rotation does not match identity");
+      op.state !== "pending" ||
+      (op.leaseUntil ?? 0) <= Date.now() ||
+      Math.abs(Date.now() - p.verifiedAt) > 300_000
+    )
+      return fail();
+    if (
+      !currentKey(old) ||
+      old.lifecycle !== "active" ||
+      (await membershipRemoved(
+        ctx,
+        old.clerkOrgId,
+        old.ownerUserId,
+        old.verifiedAt,
+      ))
+    )
+      return fail();
+    if (
+      n.clerkOrgId !== org.clerkOrgId ||
+      n.ownerUserId !== old.ownerUserId ||
+      n.subjectUserId !== old.subjectUserId ||
+      n.budgetId !== old.budgetId ||
+      n.budgetRevision !== old.budgetRevision ||
+      n.monthlyCapCredits !== (old.monthlyCapCredits ?? null) ||
+      canonicalJson(n.scopes) !== canonicalJson(old.scopes)
+    )
+      return fail();
+    if (p.graceUntil !== p.verifiedAt + 86_400_000) return fail();
+    try {
+      await insertKey(ctx, org, n, p.verifiedAt, args.keyName, old);
+    } catch (error) {
+      // insertKey's domain checks throw before any write; database failures still roll back.
+      if (!(error instanceof ConvexError)) throw error;
+      return fail();
     }
-    const existingNew = await ctx.db
-      .query("keySettings")
-      .withIndex("by_key", (q) =>
-        q.eq("keyId", projection.newProvision.clerkKeyId),
-      )
-      .unique();
-    if (existingNew !== null) {
-      throw new ConvexError("Verified replacement key already exists");
-    }
-    if (projection.graceUntil !== projection.verifiedAt + 24 * 60 * 60 * 1000) {
-      throw new ConvexError("Rotation grace must be 24 hours");
-    }
-    const newDoc = await insertVerifiedSetting(ctx, projection.newProvision, {
-      rotatedFromKeyId: projection.oldKeyId,
-      keyFamilyId: old.keyFamilyId ?? old.keyId,
-    });
-    await enqueueKeyPut(ctx, projection.newProvision);
-    await patchSetting(ctx, newDoc._id, {
-      keyName: args.keyName?.trim().slice(0, 64),
-    });
-    const oldDoc = await patchSetting(ctx, old._id, {
-      disabled: false,
+    await ctx.db.patch(old._id, {
       lifecycle: "grace",
-      graceUntil: projection.graceUntil,
-    });
-    await enqueueKeyLifecycle(ctx, oldDoc, "grace");
-    await ctx.scheduler.runAt(
-      projection.graceUntil,
-      internal.keySettings.expireGrace,
-      { keyId: old.keyId },
-    );
-    await ctx.db.patch(op._id, {
-      status: "completed",
-      newKeyId: projection.newProvision.clerkKeyId,
-      graceUntil: oldDoc.graceUntil,
+      graceUntil: p.graceUntil,
+      edgeRevision: old.edgeRevision + 1,
       updatedAt: Date.now(),
     });
-    return await ctx.db.get(op._id);
+    await ctx.db.patch(op._id, {
+      state: "complete",
+      newKeyId: n.clerkKeyId,
+      requestFingerprint: fingerprint,
+      updatedAt: Date.now(),
+    });
+    await ctx.scheduler.runAt(p.graceUntil, internal.keySettings.expireGrace, {
+      keyId: old.keyId,
+    });
+    return {
+      ...rotationDto((await ctx.db.get(op._id)) as Rotation, org.clerkOrgId),
+      graceUntil: p.graceUntil,
+    };
   },
 });
-
 export const failRotation = mutation({
-  args: { operationId: v.string(), message: v.string() },
+  args: {
+    operationId: v.string(),
+    message: v.string(),
+    cleanup: v.optional(
+      v.object({
+        projection: verifiedKeyRotationProjectionValidator,
+        signature: v.string(),
+      }),
+    ),
+  },
   handler: async (ctx, args) => {
-    const { claims } = await requireOrgByClerkId(ctx);
-    if (!claims.orgId || !claims.subject)
-      throw new ConvexError("Select an organization before rotating");
+    const { org, claims } = await requireActiveOrg(ctx);
     const op = await ctx.db
-      .query("keyRotationOperations")
-      .withIndex("by_operation", (q) =>
+      .query("apiKeys")
+      .withIndex("by_rotation", (q) =>
         q
-          .eq("clerkOrgId", claims.orgId!)
-          .eq("userId", claims.subject!)
+          .eq("kind", "rotation")
+          .eq("organizationId", org._id)
+          .eq("actorUserId", claims.subject)
           .eq("operationId", args.operationId),
       )
       .unique();
-    if (!op) throw new ConvexError("Rotation operation not found");
-    if (op.status === "completed" || op.status === "failed") return op;
-    await ctx.db.patch(op._id, {
-      status: "failed",
-      failure: args.message.slice(0, 160),
-      updatedAt: Date.now(),
-    });
-    return await ctx.db.get(op._id);
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Provider-verified ownership (#228): gateway verifies the key against Clerk,
-// then records ownership here. Predates/parallel to registry projections.
-// ---------------------------------------------------------------------------
-
-async function getOwnedRow(
-  ctx: MutationCtx,
-  clerkOrgId: string,
-  keyId: string,
-): Promise<Doc<"keySettings"> | null> {
-  const existing = await ctx.db
-    .query("keySettings")
-    .withIndex("by_key", (q) => q.eq("keyId", keyId))
-    .unique();
-  if (existing !== null && existing.clerkOrgId !== clerkOrgId)
-    throw new ConvexError("Verified key not found");
-  if (existing === null) return null;
-  return existing;
-}
-
-async function insertSetting(
-  ctx: MutationCtx,
-  clerkOrgId: string,
-  keyId: string,
-  patch: UpsertPatch,
-): Promise<Doc<"keySettings">> {
-  const id = await ctx.db.insert("keySettings", {
-    clerkOrgId,
-    keyId,
-    disabled: patch.disabled ?? false,
-    updatedAt: Date.now(),
-    ...(patch.monthlyCapCredits !== undefined
-      ? { monthlyCapCredits: patch.monthlyCapCredits }
-      : {}),
-    ...(patch.rotatedFromKeyId !== undefined
-      ? { rotatedFromKeyId: patch.rotatedFromKeyId }
-      : {}),
-    ...(patch.graceUntil !== undefined ? { graceUntil: patch.graceUntil } : {}),
-    ...(patch.keyName !== undefined ? { keyName: patch.keyName } : {}),
-    ...(patch.ownerUserId !== undefined
-      ? { ownerUserId: patch.ownerUserId }
-      : {}),
-  });
-  const created = await ctx.db.get(id);
-  if (created === null)
-    throw new ConvexError("Failed to read created key setting");
-  return created;
-}
-
-export const recordProviderVerifiedKey = internalMutation({
-  args: {
-    keyId: v.string(),
-    ownerUserId: v.string(),
-    clerkOrgId: v.string(),
-  },
-  handler: async (ctx, args): Promise<KeySettingView> => {
-    if (
-      args.keyId.trim() === "" ||
-      args.ownerUserId.trim() === "" ||
-      args.clerkOrgId.trim() === ""
-    ) {
-      throw new ConvexError("Provider key ownership could not be verified");
-    }
-    if ((await getActiveOrganizationByClerkId(ctx, args.clerkOrgId)) === null) {
-      throw new ConvexError("Organization is archived or not provisioned");
-    }
-    const existing = await getOwnedRow(ctx, args.clerkOrgId, args.keyId);
-    const doc =
-      existing === null
-        ? await insertSetting(ctx, args.clerkOrgId, args.keyId, {})
-        : await patchSetting(ctx, existing._id, {});
-    if (doc.ownerUserId !== args.ownerUserId) {
-      await ctx.db.patch(doc._id, {
-        ownerUserId: args.ownerUserId,
-        updatedAt: Date.now(),
-      });
-    }
-    const updated = await ctx.db.get(doc._id);
-    if (updated === null) throw new ConvexError("Key setting disappeared");
-    return toView(updated);
-  },
-});
-
-/**
- * organizationMembership.deleted: terminally disable every key the departed
- * member owned in this org. Idempotent by Svix receipt; gateway learns through
- * the registry outbox like any other revocation.
- */
-export const revokeMembershipVerified = internalMutation({
-  args: {
-    clerkOrgId: v.string(),
-    userId: v.string(),
-    svixId: v.string(),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ duplicate: boolean; keyIds: string[] }> => {
-    if (args.svixId.trim() === "")
-      throw new ConvexError("Invalid Clerk webhook envelope");
-    const prior = await ctx.db
-      .query("clerkWebhookReceipts")
-      .withIndex("by_svix_id", (q) => q.eq("svixId", args.svixId))
-      .unique();
-    if (prior !== null) return { duplicate: true, keyIds: [] };
-    const now = Date.now();
-    await ctx.db.insert("clerkWebhookReceipts", {
-      svixId: args.svixId,
-      eventType: "organizationMembership.deleted",
-      eventTimestamp: now,
-      status: "processed",
-      attempts: 1,
-      lastAttemptAt: now,
-      receivedAt: now,
-      processedAt: now,
-    });
-    const rows = await ctx.db
-      .query("keySettings")
-      .withIndex("by_owner_status", (q) =>
-        q
-          .eq("clerkOrgId", args.clerkOrgId)
-          .eq("ownerUserId", args.userId)
-          .eq("disabled", false),
-      )
-      .collect();
-    const keyIds: string[] = [];
-    for (const row of rows) {
-      await ctx.db.patch(row._id, {
-        disabled: true,
-        membershipRevokedAt: now,
-        lifecycle: "disabled",
-        updatedAt: now,
-      });
-      keyIds.push(row.keyId);
-      const updated = await ctx.db.get(row._id);
+    if (!op || op.kind !== "rotation")
+      throw new ConvexError("Rotation operation not found");
+    if (args.cleanup) {
+      const { projection, signature } = args.cleanup;
+      await verifyProjection(projection, signature, true, true);
       if (
-        updated !== null &&
-        updated.secretSha256 !== undefined &&
-        updated.ownerUserId !== undefined &&
-        updated.budgetId !== undefined
-      ) {
-        await enqueueKeyRevoke(ctx, updated, "provider_revoked");
-      }
+        projection.operationId !== op.operationId ||
+        projection.oldKeyId !== op.oldKeyId
+      )
+        throw new ConvexError("Rotation operation conflicts with cleanup key");
     }
-    return { duplicate: false, keyIds };
+    return recordFailedRotation(
+      ctx,
+      op,
+      org.clerkOrgId,
+      args.cleanup?.projection.newProvision.clerkKeyId,
+    );
   },
 });
-
-/** Grace expiry is durable even when no browser is open. */
 export const expireGrace = internalMutation({
   args: { keyId: v.string() },
   handler: async (ctx, args) => {
-    const row = await ctx.db
-      .query("keySettings")
+    const key = await ctx.db
+      .query("apiKeys")
       .withIndex("by_key", (q) => q.eq("keyId", args.keyId))
       .unique();
     if (
-      !row ||
-      row.lifecycle === "revoked" ||
-      row.graceUntil === undefined ||
-      row.graceUntil > Date.now()
+      key?.kind === "key" &&
+      key.graceUntil !== undefined &&
+      key.graceUntil <= Date.now()
     )
-      return;
-    const revoked = await patchSetting(ctx, row._id, {
-      disabled: true,
-      lifecycle: "revoked",
-    });
-    await enqueueKeyRevoke(ctx, revoked, "admin_revoked");
-    await ctx.scheduler.runAfter(0, internal.keyVerification.revokeWithRetry, {
-      keyId: row.keyId,
-      attempt: 0,
-    });
+      await revokeKey(ctx, key);
   },
 });
-
-/** OAuth spends through the member's existing current key, never a new budget. */
 export const resolveMcpIdentity = internalQuery({
   args: { userId: v.string(), orgId: v.string() },
-  handler: async (ctx, { userId, orgId }) => {
-    if (!userId.startsWith("user_") || !orgId.startsWith("org_")) return null;
-    if (await getOrganizationTombstone(ctx, orgId)) return null;
-    if (!(await getActiveOrganizationByClerkId(ctx, orgId))) return null;
+  handler: async (ctx, args) => {
+    const org = await getOrganization(ctx, args.orgId);
+    if (!org || !(await isActive(ctx, org))) return null;
     const rows = await ctx.db
-      .query("keySettings")
-      .withIndex("by_owner_status", (q) =>
+      .query("apiKeys")
+      .withIndex("by_org_owner", (q) =>
         q
-          .eq("clerkOrgId", orgId)
-          .eq("ownerUserId", userId)
-          .eq("disabled", false),
+          .eq("kind", "key")
+          .eq("organizationId", org._id)
+          .eq("ownerUserId", args.userId),
       )
       .collect();
-    const current = rows.filter(
-      (row) =>
-        row.subjectUserId === userId &&
-        row.secretSha256 !== undefined &&
+    const keys: Key[] = [];
+    for (const row of rows)
+      if (
+        row.kind === "key" &&
+        currentKey(row) &&
         row.lifecycle === "active" &&
-        row.graceUntil === undefined &&
-        row.rotationRequiredAt === undefined &&
-        row.membershipRevokedAt === undefined &&
-        (row.expiresAt === undefined || row.expiresAt > Date.now()),
-    );
-    // Ambiguous/transitional rows must never silently select another budget.
-    if (current.length !== 1) return null;
-    return { orgId, keyId: current[0]!.keyId };
+        !(await membershipRemoved(
+          ctx,
+          org.clerkOrgId,
+          args.userId,
+          row.verifiedAt,
+        ))
+      )
+        keys.push(row);
+    return keys.length === 1
+      ? { orgId: org.clerkOrgId, keyId: keys[0]!.keyId }
+      : null;
   },
 });

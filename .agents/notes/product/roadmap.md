@@ -38,7 +38,7 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 1. #365 #366 Prune tooling/CI
 2. #354 Delete Convex migration/rollout code
 3. #359 #360 #361 Gateway restructure
-4. #353 Convex rebuild (carries bugs #355–#358, #334); fold in P0 #430 traceable dust-lot merge, 32-slice bound, accepted DO authority/freeze-drain, daily risk release and anonymous breakage recognition — [decisions](../sessions/2026-10-11-owner-decisions.md)
+4. #353 Convex rebuild — PR 7 root cutover implemented; local/browser/CI evidence and owner-only activation tracked in [runbook](../architecture/convex-activation.md). No shared deployment performed. Rebuild (carries bugs #355–#358, #334); fold in P0 #430 traceable dust-lot merge, 32-slice bound, accepted DO authority/freeze-drain, daily risk release and anonymous breakage recognition — [decisions](../sessions/2026-10-11-owner-decisions.md)
 5. #362 #363 #364 #367 Web fixes
 
 ## Build queue — updated 2026-10-11

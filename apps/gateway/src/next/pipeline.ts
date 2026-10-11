@@ -121,9 +121,9 @@ export function nextDeps(env: NextEnv): WorkerDeps {
   };
   return {
     searchSource:
-      env.NEXT_CONVEX_SITE_URL && env.GATEWAY_INTERNAL_SECRET
+      env.CONVEX_SITE_URL && env.GATEWAY_INTERNAL_SECRET
         ? new InternalHttpCatalogueSearch({
-            siteUrl: env.NEXT_CONVEX_SITE_URL,
+            siteUrl: env.CONVEX_SITE_URL,
             internalSecret: env.GATEWAY_INTERNAL_SECRET,
           })
         : undefined,

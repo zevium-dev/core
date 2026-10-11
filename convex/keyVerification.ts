@@ -1,78 +1,57 @@
 "use node";
-
 import { createClerkClient } from "@clerk/backend";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-
-function claimString(claims: unknown, name: string): string | undefined {
-  if (claims === null || typeof claims !== "object") return undefined;
-  const value = (claims as Record<string, unknown>)[name];
-  return typeof value === "string" ? value : undefined;
-}
-
-/** Clerk is queried at write time; browser-supplied ids never become owners. */
 export const syncVerifiedKey = action({
   args: { keyId: v.string() },
   handler: async (ctx, args): Promise<void> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (identity === null) throw new Error("Not authenticated");
-    const clerkOrgId = claimString(identity, "org_id");
-    if (clerkOrgId === undefined || args.keyId.trim() === "") {
-      throw new Error("Active organization required");
+    const owned = await ctx.runQuery(
+      internal.keyRecovery.verificationTarget,
+      args,
+    );
+    try {
+      const key = await createClerkClient({
+        secretKey: process.env.CLERK_SECRET_KEY,
+      }).apiKeys.get(args.keyId);
+      const claims = key.claims as Record<string, unknown> | null;
+      if (
+        key.revoked ||
+        key.expired ||
+        key.subject !== owned.ownerUserId ||
+        claims?.org_id !== owned.clerkOrgId
+      )
+        throw new Error("identity mismatch");
+    } catch {
+      throw new ConvexError("Provider key ownership could not be verified");
     }
-    const secretKey = process.env.CLERK_SECRET_KEY;
-    if (secretKey === undefined || secretKey.trim() === "") {
-      throw new Error("Provider key verification is not configured");
-    }
-    const key = await createClerkClient({ secretKey }).apiKeys.get(args.keyId);
-    if (
-      key.revoked ||
-      key.expired ||
-      key.subject !== identity.subject ||
-      claimString(key.claims, "org_id") !== clerkOrgId
-    ) {
-      throw new Error("Provider key ownership could not be verified");
-    }
-    await ctx.runMutation(internal.keySettings.recordProviderVerifiedKey, {
-      keyId: key.id,
-      ownerUserId: key.subject,
-      clerkOrgId,
-    });
+    // No unknown key creation: possession hash only comes from the signed issuance broker.
   },
 });
-
-/** Compensation after local revocation: never resurrect a terminal registry key. */
 export const revokeWithRetry = internalAction({
-  args: { keyId: v.string(), attempt: v.number() },
+  args: { keyId: v.string() },
   handler: async (ctx, args): Promise<void> => {
+    const attempt = await ctx.runMutation(internal.keyRecovery.claim, args);
+    if (attempt === null) return;
+    let success = false;
     try {
       const client = createClerkClient({
         secretKey: process.env.CLERK_SECRET_KEY,
       });
       const key = await client.apiKeys.get(args.keyId);
-      if (!key.revoked) {
+      if (!key.revoked)
         await client.apiKeys.revoke({
           apiKeyId: args.keyId,
           revocationReason: "Zevium key revoked",
         });
-      }
+      success = true;
     } catch {
-      if (args.attempt < 5) {
-        await ctx.scheduler.runAfter(
-          60_000 * 2 ** args.attempt,
-          internal.keyVerification.revokeWithRetry,
-          {
-            keyId: args.keyId,
-            attempt: args.attempt + 1,
-          },
-        );
-      } else {
-        // Static error only: SDK responses may contain provider internals.
-        throw new Error(
-          "Provider key cleanup exhausted retries; local revocation remains effective",
-        );
-      }
+      /* Provider ambiguity leaves durable retry state; never restore local authority. */
     }
+    await ctx.runMutation(internal.keyRecovery.finish, {
+      ...args,
+      attempt,
+      success,
+    });
   },
 });

@@ -1,18 +1,18 @@
 # Testing and verification
 
-> Updated: 2026-10-10
+> Updated: 2026-10-11
 > Code: `package.json`, `.github/workflows/ci.yml`, `e2e/`
 > Related: [dev-environment](dev-environment.md), [deploy](deploy.md)
 
 ## Commands
 
-| Command          | What                                                                                                                                               |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm test`      | Workspace Vitest/workerd suites, Convex tests, worktree env-copy tests                                                                             |
-| `pnpm typecheck` | Turbo typecheck across workspace                                                                                                                   |
-| `pnpm build`     | Turbo build                                                                                                                                        |
-| `pnpm ci:pr`     | Format, lint, actionlint, shellcheck, gitleaks, typecheck, tests, one web build with runtime security checks, codegen/route diff, whitespace check |
-| `pnpm e2e`       | Sequential auth, publisher, consumer journeys; optional preview smoke and paid consumer call                                                       |
+| Command          | What                                                                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test`      | Workspace Vitest/workerd suites, Convex tests, worktree env-copy tests                                                                                                                             |
+| `pnpm typecheck` | Turbo typecheck across workspace                                                                                                                                                                   |
+| `pnpm build`     | Turbo build                                                                                                                                                                                        |
+| `pnpm ci:pr`     | Format, lint, actionlint, shellcheck, gitleaks, typecheck, tests, root contract/schema/race/paired-Worker checks, one web build with runtime security checks, codegen/route diff, whitespace check |
+| `pnpm e2e`       | Sequential auth, publisher, consumer journeys; optional preview smoke and paid consumer call                                                                                                       |
 
 Run commands through `mise exec -- pnpm ...` when pnpm is not on PATH.
 Do not start `pnpm dev` unless requested.
@@ -61,3 +61,9 @@ HTTP contract failures still upload their response evidence.
 
 Keep tests for cross-service identity, metering, cache, and webhook boundaries.
 Run `pnpm ci:pr` before opening a PR; commit only when requested.
+
+## Root control-plane gate
+
+`VITEST_MAX_WORKERS=2 pnpm ci:control-plane` checks the frozen 221-entry completion map, offline activation configuration, guarded anonymous schema/codegen, real OCC and 10,001-bucket reconciliation, and real local Worker/Convex acceptance using production migration declarations. Local scratch belongs under ignored `.tmp/`; set `TMPDIR` there for full local checks. No shared Convex target or provider configuration is needed. `packages/control-plane-next` and `ci:next` are deleted.
+
+Optional local browser hold: `CUTOVER_BROWSER=1 NEXT_EDGE_ONLY=1 CUTOVER_CLERK_ISSUER=<existing HTTPS Clerk issuer> pnpm test:races` keeps its guarded backend and Worker on port 8787 for up to 30 minutes after HTTP acceptance. The scratch `browser-runtime.json` contains private fixture data, never an artifact; creating `browser-done` there closes both services. Run only the web package's dev server with the loopback Convex URL, localhost gateway, and existing Clerk development credentials. There is no browser auth bypass. Provider-backed payments/webhooks remain an independent owner gate: [runbook](convex-activation.md).

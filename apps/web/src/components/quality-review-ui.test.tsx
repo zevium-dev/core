@@ -70,7 +70,7 @@ vi.mock("@convex-dev/react-query", () => ({
   },
   useConvexMutation: (reference: unknown) => {
     void reference;
-    const mutations = [state.save, state.withdraw, state.report, state.respond];
+    const mutations = [state.withdraw, state.report, state.respond];
     return mutations[state.mutationInvocation++ % mutations.length];
   },
 }));
