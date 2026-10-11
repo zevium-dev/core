@@ -11,7 +11,8 @@ export async function measure<T>(
     documentWriteBytes = 0;
   const bytes = (value: unknown) =>
     new TextEncoder().encode(JSON.stringify(facts(value ?? null))).length;
-  const queryProxy = <T extends object>(query: T): T =>
+  const readRowsByIndex: Record<string, number> = {};
+  const queryProxy = <T extends object>(query: T, index = "unknown"): T =>
     new Proxy(query, {
       get(target, property) {
         const member: unknown = Reflect.get(target, property);
@@ -25,10 +26,25 @@ export async function measure<T>(
           )
             return Promise.resolve(result).then((value) => {
               readBytes += bytes(value);
+              const rows = Array.isArray(value)
+                ? value
+                : value &&
+                    typeof value === "object" &&
+                    "page" in value &&
+                    Array.isArray(value.page)
+                  ? value.page
+                  : value
+                    ? [value]
+                    : [];
+              readRowsByIndex[index] =
+                (readRowsByIndex[index] ?? 0) + rows.length;
               return value;
             });
           return typeof result === "object" && result !== null
-            ? queryProxy(result)
+            ? queryProxy(
+                result,
+                property === "withIndex" ? String(params[0]) : index,
+              )
             : result;
         };
       },
@@ -63,5 +79,12 @@ export async function measure<T>(
     },
   });
   const result = await run({ ...ctx, db });
-  return { result, writes, argumentBytes, readBytes, documentWriteBytes };
+  return {
+    result,
+    writes,
+    argumentBytes,
+    readBytes,
+    documentWriteBytes,
+    readRowsByIndex,
+  };
 }

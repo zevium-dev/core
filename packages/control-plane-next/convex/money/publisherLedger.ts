@@ -171,8 +171,12 @@ export async function restoreEarning(
       .query("publisherLedgerEntries")
       .withIndex("by_ref", (q) => q.eq("refId", refId))
       .unique()
-  )
+  ) {
+    await ctx.db.patch(entry._id, {
+      restoredAt: entry.restoredAt ?? Date.now(),
+    });
     return false;
+  }
   const e = (await ctx.db.get(entry.earningId))!;
   await holdPublisher(ctx, e.paymentId!, e.publisherOrganizationId);
   const credits = money(entry.grossReversedCredits!),
@@ -197,6 +201,7 @@ export async function restoreEarning(
     releasedAtoms: e.state === "released" ? add(e.releasedAtoms, atoms) : 0,
     updatedAt: Date.now(),
   });
+  await ctx.db.patch(entry._id, { restoredAt: Date.now() });
   await financialRollup(
     ctx,
     e,

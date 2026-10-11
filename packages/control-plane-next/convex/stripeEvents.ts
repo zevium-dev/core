@@ -26,13 +26,8 @@ import { openCase } from "./money/reconciliationCases";
 import { transferFact } from "./payouts";
 import { projectTransfer } from "./money/transfers";
 import { add } from "./money/walletLedger";
-const movement = z.object({
-  kind: z.literal("dispute_movement"),
-  disputeId: id,
-  movement: z.enum(["withdrawal", "reinstatement"]),
-  amountCents: cents,
-  currency: z.literal("usd"),
-});
+// 84 exponential attempts (1-hour cap) span more than three days.
+export const RECEIPT_MAX_ATTEMPTS = 84;
 const receiptInput = z.object({
   eventId: id,
   eventType: id,
@@ -40,9 +35,9 @@ const receiptInput = z.object({
   account: id,
   sourceTimestamp: cents,
   payloadHash: z.string(),
+  bodyHash: z.string().optional(),
   destination: z.enum(["platform", "connect", "v2"]),
   foreign: z.boolean(),
-  facts: movement.optional(),
 });
 const projection = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("paid"), paid: paidFact }),
@@ -54,6 +49,8 @@ const projection = z.discriminatedUnion("kind", [
     sourceRef: id,
     amountCents: cents,
     type: z.enum(["refund", "dispute"]),
+    fundsWithdrawn: z.boolean().optional(),
+    fundsReinstated: z.boolean().optional(),
     status: z.enum([
       "pending",
       "requires_action",
@@ -114,8 +111,14 @@ export const receive = internalMutation({
       )
       .unique();
     if (old) {
-      if (old.payloadHash !== a.payloadHash)
+      if (
+        old.eventType !== a.eventType ||
+        old.objectId !== a.objectId ||
+        old.sourceTimestamp !== a.sourceTimestamp
+      )
         throw new ConvexError("Webhook event identity conflict");
+      if (old.bodyHash && a.bodyHash && old.bodyHash !== a.bodyHash)
+        console.warn("Stripe redelivery body changed", { receiptId: old._id });
       await ctx.db.patch(old._id, { deliveries: add(old.deliveries, 1) });
       return old._id;
     }
@@ -127,13 +130,13 @@ export const receive = internalMutation({
       objectId: a.objectId,
       sourceTimestamp: a.sourceTimestamp,
       payloadHash: a.payloadHash,
+      bodyHash: a.bodyHash,
       destination: a.destination,
       receivedAt: Date.now(),
       state: a.foreign ? "needs_review" : "pending",
       attempts: 0,
       deliveries: 1,
       nextAttemptAt: a.foreign ? undefined : Date.now(),
-      facts: a.facts,
     });
     if (a.foreign)
       await openCase(
@@ -214,18 +217,13 @@ export const complete = internalMutation({
         });
       } else {
         const status = z.enum(["open", "won", "lost"]).parse(a.status);
-        const m = r.facts?.kind === "dispute_movement" ? r.facts : undefined;
-        if (
-          m &&
-          (m.disputeId !== a.sourceRef || m.amountCents !== a.amountCents)
-        )
-          throw new ConvexError("Dispute movement mismatch");
         await projectAdjustment(ctx, p._id, a.expectedRevision, {
           kind: "dispute",
           status,
           sourceRef: a.sourceRef,
           amountCents: a.amountCents,
-          movement: m?.movement,
+          fundsWithdrawn: z.boolean().parse(a.fundsWithdrawn),
+          fundsReinstated: z.boolean().parse(a.fundsReinstated),
         });
       }
       const changed = (await ctx.db.get(p._id))!;
@@ -356,7 +354,7 @@ export const fail = internalMutation({
   handler: async (ctx, a) => {
     const r = await ctx.db.get(a.id);
     if (!r || r.leaseToken !== a.token || r.state !== "processing") return;
-    const exhausted = r.attempts >= 8;
+    const exhausted = r.attempts >= RECEIPT_MAX_ATTEMPTS;
     await ctx.db.patch(r._id, {
       state: exhausted ? "needs_review" : "retry",
       leaseToken: undefined,
@@ -415,8 +413,10 @@ export async function fetchPaid(
   ctx: ActionCtx,
   stripe: Stripe,
   sessionId: string,
+  fetchedSession?: Stripe.Checkout.Session,
 ): Promise<PaidFact> {
-  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  const session =
+    fetchedSession ?? (await stripe.checkout.sessions.retrieve(sessionId));
   const intentId = session.metadata?.checkoutIntentId;
   if (!intentId) throw new Error("Unknown Checkout");
   const intent = await ctx.runQuery(internal.billing.checkoutIntent, {
@@ -476,13 +476,23 @@ export async function fetchPaid(
     })),
   });
 }
+/** Every canonical dispute carries both historical movements, regardless of which event woke us. */
+export function disputeMovements(
+  dispute: Pick<Stripe.Dispute, "balance_transactions">,
+) {
+  return {
+    fundsWithdrawn: dispute.balance_transactions.some((t) => t.amount < 0),
+    fundsReinstated: dispute.balance_transactions.some((t) => t.amount > 0),
+  };
+}
 export const processReceipt = internalAction({
   args: { id: v.id("webhookReceipts") },
   handler: async (ctx, args) => {
     const r = await ctx.runMutation(internal.stripeEvents.claim, args);
     if (!r) return;
     try {
-      const stripe = await verifiedStripe();
+      const stripe =
+        r.destination === "v2" ? undefined : await verifiedStripe();
       let result: z.infer<typeof projection> = { kind: "ignored" };
       if (r.destination === "v2") {
         const found = await ctx.runAction(internal.connect.refresh, {
@@ -494,6 +504,8 @@ export const processReceipt = internalAction({
             reason: "Unknown connected account",
             objectId: r.objectId,
           };
+      } else if (!stripe) {
+        throw new Error("Missing verified Stripe client");
       } else if (
         r.destination === "connect" &&
         r.eventType.startsWith("payout.")
@@ -529,7 +541,7 @@ export const processReceipt = internalAction({
         if (session.payment_status === "paid")
           result = {
             kind: "paid",
-            paid: await fetchPaid(ctx, stripe, r.objectId),
+            paid: await fetchPaid(ctx, stripe, r.objectId, session),
           };
       } else if (
         ["charge.refunded", "charge.updated", "charge.succeeded"].includes(
@@ -603,6 +615,9 @@ export const processReceipt = internalAction({
           sourceRef: canonical.id,
           amountCents: canonical.amount,
           type: isRefund ? "refund" : "dispute",
+          ...("balance_transactions" in canonical
+            ? disputeMovements(canonical)
+            : {}),
           status: isRefund
             ? z
                 .enum([
@@ -730,12 +745,6 @@ export function stripeWebhook(kind: "platform" | "connect" | "v2") {
         envelope.livemode === true ||
         (kind === "platform" && account !== config.account) ||
         (kind === "connect" && !envelope.account);
-      const movementType =
-        envelope.type === "charge.dispute.funds_withdrawn"
-          ? "withdrawal"
-          : envelope.type === "charge.dispute.funds_reinstated"
-            ? "reinstatement"
-            : undefined;
       data = receiptInput.parse({
         eventId: envelope.id,
         eventType: envelope.type,
@@ -745,18 +754,18 @@ export function stripeWebhook(kind: "platform" | "connect" | "v2") {
           typeof envelope.created === "number"
             ? envelope.created * 1000
             : Date.parse(envelope.created),
-        payloadHash: await sha256Hex(raw),
+        payloadHash: await sha256Hex(
+          JSON.stringify({
+            id: envelope.id,
+            type: envelope.type,
+            created: envelope.created,
+            account,
+            objectId,
+          }),
+        ),
+        bodyHash: await sha256Hex(raw),
         destination: kind,
         foreign,
-        facts: movementType
-          ? {
-              kind: "dispute_movement",
-              disputeId: objectId,
-              movement: movementType,
-              amountCents: envelope.data?.object.amount,
-              currency: envelope.data?.object.currency,
-            }
-          : undefined,
       });
     } catch {
       return new Response("Invalid event", { status: 400 });

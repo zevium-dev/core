@@ -22,6 +22,8 @@ export type AdjustmentFact =
       sourceRef: string;
       amountCents: number;
       movement?: "withdrawal" | "reinstatement";
+      fundsWithdrawn?: boolean;
+      fundsReinstated?: boolean;
     };
 export function principalForCumulative(
   cents: number,
@@ -43,8 +45,7 @@ export async function projectAdjustment(
   fact: AdjustmentFact,
 ) {
   const p = await ctx.db.get(paymentId);
-  if (!p || p.revision !== expectedRevision)
-    throw new ConvexError("Payment changed; refetch provider facts");
+  if (!p) throw new ConvexError("Payment not found");
   if (
     !fact.sourceRef ||
     fact.sourceRef.length > 200 ||
@@ -66,10 +67,12 @@ export async function projectAdjustment(
     throw new ConvexError("Adjustment identity conflict");
   const fundsWithdrawn =
     old?.fundsWithdrawn === true ||
-    (fact.kind === "dispute" && fact.movement === "withdrawal");
+    (fact.kind === "dispute" &&
+      (fact.fundsWithdrawn === true || fact.movement === "withdrawal"));
   const fundsReinstated =
     old?.fundsReinstated === true ||
-    (fact.kind === "dispute" && fact.movement === "reinstatement");
+    (fact.kind === "dispute" &&
+      (fact.fundsReinstated === true || fact.movement === "reinstatement"));
   if (
     old &&
     old.status === fact.status &&
@@ -77,16 +80,31 @@ export async function projectAdjustment(
     old.fundsReinstated === fundsReinstated
   )
     return old._id;
+  if (p.revision !== expectedRevision)
+    throw new ConvexError("Payment changed; refetch provider facts");
+  const active = (a: {
+    kind: "refund" | "dispute";
+    status: string;
+    fundsWithdrawn: boolean;
+    fundsReinstated: boolean;
+  }) =>
+    a.kind === "refund"
+      ? !["failed", "canceled"].includes(a.status)
+      : a.fundsWithdrawn && !a.fundsReinstated;
+  // Source identity and amount are immutable. Only membership in the active set can change exposure.
+  const exposureChanged =
+    (old ? active(old) : false) !==
+    active({ ...fact, fundsWithdrawn, fundsReinstated });
   const row = {
     paymentId,
     providerSourceRef: fact.sourceRef,
     amountCents: fact.amountCents,
     kind: fact.kind,
     status: fact.status,
-    principalCents: 0,
-    feeCents: 0,
-    requestedCredits: 0,
-    effectiveCredits: 0,
+    principalCents: old?.principalCents ?? 0,
+    feeCents: old?.feeCents ?? 0,
+    requestedCredits: old?.requestedCredits ?? 0,
+    effectiveCredits: old?.effectiveCredits ?? 0,
     fundsWithdrawn,
     fundsReinstated,
     revision: add(old?.revision ?? 0, 1),
@@ -105,6 +123,13 @@ export async function projectAdjustment(
   };
   const id = old ? old._id : await ctx.db.insert("paymentAdjustments", value);
   if (old) await ctx.db.patch(id, value);
+  if (!exposureChanged) {
+    await ctx.db.patch(paymentId, {
+      revision: add(p.revision, 1),
+      updatedAt: Date.now(),
+    });
+    return id;
+  }
   const generation = add(p.reconciliation.generation, 1);
   const closeId =
     p.reconciliation.state !== "complete" && p.reconciliation.closeId
@@ -115,6 +140,7 @@ export async function projectAdjustment(
     updatedAt: Date.now(),
     reconciliation: {
       state: "pending",
+      attempts: 0,
       generation,
       closeId,
       phase: "restore_publisher",
@@ -211,43 +237,42 @@ export async function reconcilePaymentPage(
     return "done";
   }
   if (phase === "restore_publisher") {
-    const page = await ctx.db
+    const rows = await ctx.db
       .query("publisherLedgerEntries")
-      .withIndex("by_payment_kind", (q) =>
-        q.eq("paymentId", paymentId).eq("kind", "reversal"),
+      .withIndex("by_unrestored", (q) =>
+        q
+          .eq("paymentId", paymentId)
+          .eq("kind", "reversal")
+          .eq("restoredAt", undefined),
       )
-      .paginate({ numItems: FINANCE_PAGE_SIZE, cursor: job.cursor ?? null });
-    for (const entry of page.page) await restoreEarning(ctx, entry);
+      .take(FINANCE_PAGE_SIZE);
+    for (const entry of rows) await restoreEarning(ctx, entry);
     return advance({
-      phase: page.isDone ? "restore_wallet" : phase,
-      cursor: page.isDone ? undefined : page.continueCursor,
+      phase: rows.length < FINANCE_PAGE_SIZE ? "restore_wallet" : phase,
     });
   }
   if (phase === "restore_wallet") {
-    const page = await ctx.db
+    const rows = await ctx.db
       .query("walletEntries")
-      .withIndex("by_payment_kind", (q) =>
-        q.eq("paymentId", paymentId).eq("kind", "reversal"),
+      .withIndex("by_unrestored", (q) =>
+        q
+          .eq("paymentId", paymentId)
+          .eq("kind", "reversal")
+          .eq("restoredAt", undefined),
       )
-      .paginate({ numItems: FINANCE_PAGE_SIZE, cursor: job.cursor ?? null });
-    for (const entry of page.page) {
+      .take(FINANCE_PAGE_SIZE);
+    for (const entry of rows) {
       if (entry.kind !== "reversal" || entry.adjustment.kind !== "payment")
-        continue;
+        throw new ConvexError("Invalid payment reversal");
       // A later generation may restore an earlier journal, but only under its own drained close.
       await ctx.db.patch(entry.adjustment.id, {
         closeId,
         closeGeneration: generation,
       });
-      const restored = await ctx.db
-        .query("walletEntries")
-        .withIndex("by_ref", (q) => q.eq("refId", `restore:${entry.refId}`))
-        .unique();
-      if (!restored)
-        await restoreSource(ctx, entry, `restore:${entry.refId}`, closeId);
+      await restoreSource(ctx, entry, `restore:${entry.refId}`, closeId);
     }
     return advance({
-      phase: page.isDone ? "targets" : phase,
-      cursor: page.isDone ? undefined : page.continueCursor,
+      phase: rows.length < FINANCE_PAGE_SIZE ? "targets" : phase,
     });
   }
   if (phase === "targets") {
@@ -311,6 +336,7 @@ export async function reconcilePaymentPage(
       cursor: page.continueCursor,
       adjustmentId: a._id,
       sourceCursor: undefined,
+      earningsState: "pending",
       remainingCredits: effective,
       targetCredits: add(job.targetCredits, effective),
       refundedCents: refunded,
@@ -370,9 +396,13 @@ export async function reconcilePaymentPage(
         remaining === 0 || page.isDone ? undefined : page.continueCursor,
     });
   }
+  const earningsState = job.earningsState ?? "pending";
   const page = await ctx.db
     .query("publisherEarnings")
-    .withIndex("by_payment", (q) => q.eq("paymentId", paymentId))
+    .withIndex("by_payment_state_day", (q) =>
+      q.eq("paymentId", paymentId).eq("state", earningsState),
+    )
+    .order("desc")
     .paginate({
       numItems: FINANCE_PAGE_SIZE,
       cursor: job.sourceCursor ?? null,
@@ -397,7 +427,7 @@ export async function reconcilePaymentPage(
   await ctx.db.patch(a._id, {
     appliedPublisherCredits: add(a.appliedPublisherCredits, applied),
   });
-  if (page.isDone && remaining) {
+  if (page.isDone && remaining && earningsState === "released") {
     await openCase(
       ctx,
       {
@@ -423,6 +453,8 @@ export async function reconcilePaymentPage(
     remainingCredits: remaining,
     publisherTargetCredits: add(job.publisherTargetCredits, applied),
     phase: remaining === 0 ? "targets" : "earnings",
-    sourceCursor: remaining === 0 ? undefined : page.continueCursor,
+    earningsState: page.isDone ? "released" : earningsState,
+    sourceCursor:
+      remaining === 0 || page.isDone ? undefined : page.continueCursor,
   });
 }

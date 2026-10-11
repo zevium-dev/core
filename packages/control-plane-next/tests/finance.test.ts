@@ -479,6 +479,210 @@ describe("verified payment accounting", () => {
     );
   });
 });
+describe("PR 4 review regressions", () => {
+  it("preserves generation and projections for status-only changes, with stale-revision no-op before CAS", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx));
+    const fact = {
+      kind: "refund",
+      status: "pending",
+      sourceRef: "re_status",
+      amountCents: 510,
+    } as const;
+    const generation = await adjust(t, f.paymentId, fact);
+    await complete(t, f.paymentId);
+    const before = (await t.run((ctx) => ctx.db.get(f.walletId)))!;
+    expect(await adjust(t, f.paymentId, { ...fact, status: "succeeded" })).toBe(
+      generation,
+    );
+    const rows = await t.run((ctx) =>
+      ctx.db.query("paymentAdjustments").collect(),
+    );
+    expect(rows[0].effectiveCredits).toBe(50000);
+    expect(rows[0].appliedWalletCredits).toBe(50000);
+    await t.run((ctx) =>
+      projectAdjustment(ctx, f.paymentId, 0, { ...fact, status: "succeeded" }),
+    );
+    await expect(
+      t.run((ctx) =>
+        projectAdjustment(ctx, f.paymentId, 0, { ...fact, status: "failed" }),
+      ),
+    ).rejects.toThrow("refetch");
+    expect(await t.run((ctx) => ctx.db.get(f.walletId))).toEqual(before);
+  });
+  it("bounds restoration reads by open reversals after repeated exposure generations", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx, "restore-bounds", 20000));
+    await spend(t, f);
+    let totalScanned = 0;
+    for (let cycle = 0; cycle < 12; cycle++) {
+      for (const status of ["pending", "failed"] as const) {
+        const generation = await adjust(t, f.paymentId, {
+          kind: "refund",
+          sourceRef: "re_cycles",
+          amountCents: 1020,
+          status,
+        });
+        await t.run((ctx) => drain(ctx, f.walletId));
+        let scanned = 0;
+        for (let page = 0; page < 50; page++) {
+          const measured = await t.run((ctx) =>
+            measure(ctx, (ctx) =>
+              reconcilePaymentPage(ctx, f.paymentId, generation),
+            ),
+          );
+          scanned += measured.readRowsByIndex.by_unrestored ?? 0;
+          if (measured.result === "done") break;
+          expect(page).toBeLessThan(49);
+        }
+        expect(scanned).toBe(status === "pending" ? 0 : 2);
+        totalScanned += scanned;
+        await t.run((ctx) => assertWallet(ctx, f.walletId));
+        await auditPublisher(t);
+      }
+    }
+    expect(totalScanned).toBe(24);
+    const reversals = await t.run((ctx) =>
+      ctx.db.query("walletEntries").collect(),
+    );
+    expect(
+      reversals.filter(
+        (e) => e.kind === "reversal" && e.restoredAt !== undefined,
+      ),
+    ).toHaveLength(12);
+  });
+  it("escalates repeated reconciliation errors once and keeps the wallet frozen", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx));
+    const generation = await adjust(t, f.paymentId, {
+      kind: "refund",
+      sourceRef: "re_error",
+      amountCents: 1020,
+      status: "pending",
+    });
+    await t.mutation(internal.billing.reconcileFailure, {
+      paymentId: f.paymentId,
+      generation: generation - 1,
+    });
+    for (let i = 0; i < 10; i++)
+      await t.mutation(internal.billing.reconcileFailure, {
+        paymentId: f.paymentId,
+        generation,
+      });
+    const p = (await t.run((ctx) => ctx.db.get(f.paymentId)))!;
+    expect(p.reconciliation).toMatchObject({
+      attempts: 8,
+      state: "needs_review",
+    });
+    expect(p.reconciliation.nextAttemptAt).toBeUndefined();
+    const cases = await t.run((ctx) =>
+      ctx.db.query("financeReconciliationCases").collect(),
+    );
+    expect(
+      cases.filter((c) => c.rowKind === "case" && c.kind === "payment"),
+    ).toHaveLength(1);
+    expect((await t.run((ctx) => ctx.db.get(f.walletId)))!.gateState).toBe(
+      "closing",
+    );
+  });
+  it("conserves two payments across two publishers with newest pending then newest released clawbacks", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx, "multi-a", 20000));
+    const other = await t.run((ctx) =>
+      prepareFinanceFixture(ctx, "multi-b", 20000),
+    );
+    const secondPayment = await t.run(async (ctx) => {
+      const id = ctx.db.normalizeId("checkoutIntents", other.paid.intentId)!;
+      await ctx.db.patch(id, {
+        organizationId: f.consumer,
+        stripeCustomerId: f.paid.customerId,
+      });
+      return projectPaid(ctx, { ...other.paid, customerId: f.paid.customerId });
+    });
+    const secondPublisher = {
+      ...f,
+      publisher: other.publisher,
+      project: other.project,
+      version: other.version,
+      specDigest: other.specDigest,
+    };
+    for (const [i, day] of [0, 1, 9, 10, 11, 12].entries()) {
+      vi.setSystemTime(NOW + day * 86400000);
+      await spend(t, i % 2 ? secondPublisher : f, i + 1);
+      if (i === 2) {
+        const earnings = await t.run((ctx) =>
+          ctx.db.query("publisherEarnings").collect(),
+        );
+        for (const e of earnings)
+          await t.run((ctx) => releaseEarning(ctx, e._id));
+      }
+    }
+    const ordered = (
+      await t.run((ctx) => ctx.db.query("publisherEarnings").collect())
+    ).sort((a, b) => a.day.localeCompare(b.day));
+    expect(ordered).toHaveLength(6);
+    expect(ordered.map((e) => e.state)).toEqual([
+      "released",
+      "released",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    async function check(expected: number[], targetA: number, targetB: number) {
+      const rows = await t.run((ctx) =>
+        Promise.all(ordered.map((e) => ctx.db.get(e._id))),
+      );
+      expect(rows.map((e) => e!.clawedBackGrossCredits)).toEqual(expected);
+      expect(
+        (await t.run((ctx) => assertWallet(ctx, f.walletId))).balance,
+      ).toBe(80000 - Math.min(80000, targetB));
+      expect(
+        rows
+          .filter((e) => e!.paymentId === f.paymentId)
+          .reduce((n, e) => n + e!.clawedBackGrossCredits, 0),
+      ).toBe(targetA);
+      expect(
+        rows
+          .filter((e) => e!.paymentId === secondPayment)
+          .reduce((n, e) => n + e!.clawedBackGrossCredits, 0),
+      ).toBe(Math.max(0, targetB - 80000));
+      await auditPublisher(t);
+    }
+    await adjust(t, f.paymentId, {
+      kind: "refund",
+      sourceRef: "re_newest",
+      amountCents: 306,
+      status: "pending",
+    });
+    await complete(t, f.paymentId);
+    await check([0, 0, 0, 10000, 20000, 0], 30000, 0);
+    await adjust(t, f.paymentId, {
+      kind: "refund",
+      sourceRef: "re_more",
+      amountCents: 612,
+      status: "pending",
+    });
+    await complete(t, f.paymentId);
+    await check([10000, 20000, 20000, 20000, 20000, 0], 90000, 0);
+    await adjust(t, secondPayment, {
+      kind: "refund",
+      sourceRef: "re_second",
+      amountCents: 1020,
+      status: "succeeded",
+    });
+    await complete(t, secondPayment);
+    await check([10000, 20000, 20000, 20000, 20000, 20000], 90000, 100000);
+    await adjust(t, f.paymentId, {
+      kind: "refund",
+      sourceRef: "re_more",
+      amountCents: 612,
+      status: "failed",
+    });
+    await complete(t, f.paymentId);
+    await check([0, 0, 0, 10000, 20000, 20000], 30000, 100000);
+  });
+});
 describe("provider receipts", () => {
   it("verifies exact signed bytes, separates destinations, dedupes and fences expired leases", async () => {
     const t = harness();
@@ -526,6 +730,31 @@ describe("provider receipts", () => {
       await t.run((ctx) => ctx.db.query("webhookReceipts").collect())
     )[0];
     expect(receipt.deliveries).toBe(2);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const [patch, expected] of [
+      [{ pending_webhooks: 0, request: { id: "req_new" } }, 200],
+      [{ type: "checkout.session.expired" }, 503],
+    ] as const) {
+      const redelivery = JSON.stringify({ ...JSON.parse(body), ...patch });
+      const sig = Stripe.webhooks.generateTestHeaderString({
+        payload: redelivery,
+        secret: "fixture-signing-secret",
+        timestamp: Math.floor(NOW / 1000),
+      });
+      expect(
+        (
+          await t.fetch("/stripe-webhook", {
+            method: "POST",
+            body: redelivery,
+            headers: { "stripe-signature": sig },
+          })
+        ).status,
+      ).toBe(expected);
+    }
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+    expect((await t.run((ctx) => ctx.db.get(receipt._id)))!.deliveries).toBe(3);
+
     const first = (await t.mutation(internal.stripeEvents.claim, {
       id: receipt._id,
     }))!;
@@ -975,7 +1204,7 @@ describe("canonical Stripe processor with network fakes", () => {
       await t.run((ctx) => ctx.db.query("webhookReceipts").collect())
     )[0];
     await t.action(internal.stripeEvents.processReceipt, { id: receipt._id });
-    return { f, receipt };
+    return { f, receipt, responses };
   }
   it("projects signed Checkout only after canonical verification and atomically completes receipt", async () => {
     const t = harness(),
@@ -1017,6 +1246,157 @@ describe("canonical Stripe processor with network fakes", () => {
     expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
       0,
     );
+  });
+  it("recovers dispute movements from every event and freezes only when exposure changes", async () => {
+    const t = harness(),
+      { f, responses } = await fixture(t);
+    const p = (await t.run((ctx) => ctx.db.query("payments").collect()))[0];
+    const tx = (amount: number) => ({
+      id: `txn_${amount}`,
+      amount,
+      net: amount - 1500,
+      currency: "usd",
+    });
+    let generation = 0;
+    let freezes = 0;
+    const gates: number[] = [];
+    for (const [i, [eventType, status, transactions, expectedGeneration]] of [
+      ["charge.dispute.created", "needs_response", [], 0],
+      ["charge.dispute.funds_withdrawn", "needs_response", [tx(-1020)], 1],
+      ["charge.dispute.updated", "under_review", [tx(-1020)], 1],
+      ["charge.dispute.closed", "lost", [tx(-1020)], 1],
+      // Reinstatement receipt never arrives: a later updated receipt carries both movements.
+      ["charge.dispute.updated", "won", [tx(-1020), tx(1020)], 2],
+      // Delayed withdrawal receipt must not reapply the now-reinstated exposure.
+      ["charge.dispute.funds_withdrawn", "won", [tx(-1020), tx(1020)], 2],
+    ].entries()) {
+      responses["/v1/disputes/dp_lifecycle"] = {
+        id: "dp_lifecycle",
+        charge: "ch_provider",
+        amount: 1020,
+        currency: "usd",
+        livemode: false,
+        status,
+        balance_transactions: transactions,
+      };
+      const receipt = await t.mutation(internal.stripeEvents.receive, {
+        json: JSON.stringify({
+          eventId: `evt_lifecycle_${i}`,
+          eventType,
+          objectId: "dp_lifecycle",
+          account: PLATFORM,
+          sourceTimestamp: NOW,
+          payloadHash: `hash_${i}`,
+          destination: "platform",
+          foreign: false,
+        }),
+      });
+      await t.action(internal.stripeEvents.processReceipt, { id: receipt });
+      expect((await t.run((ctx) => ctx.db.get(receipt)))!.state).toBe(
+        "complete",
+      );
+      const changed = (await t.run((ctx) => ctx.db.get(p._id)))!;
+      expect(changed.reconciliation.generation).toBe(expectedGeneration);
+      if (generation !== changed.reconciliation.generation) freezes++;
+      generation = changed.reconciliation.generation;
+      await complete(t, p._id);
+      gates.push((await t.run((ctx) => ctx.db.get(f.walletId)))!.gateRevision);
+    }
+    expect(freezes).toBe(2);
+    expect(gates[2]).toBe(gates[1]);
+    expect(gates[3]).toBe(gates[1]);
+    expect(gates[5]).toBe(gates[4]);
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      100000,
+    );
+    // A later closed event alone also recovers a missing funds_withdrawn receipt.
+    responses["/v1/disputes/dp_missing"] = {
+      id: "dp_missing",
+      charge: "ch_provider",
+      amount: 510,
+      currency: "usd",
+      livemode: false,
+      status: "lost",
+      balance_transactions: [tx(-510)],
+    };
+    const receipt = await t.mutation(internal.stripeEvents.receive, {
+      json: JSON.stringify({
+        eventId: "evt_missing",
+        eventType: "charge.dispute.closed",
+        objectId: "dp_missing",
+        account: PLATFORM,
+        sourceTimestamp: NOW,
+        payloadHash: "missing",
+        destination: "platform",
+        foreign: false,
+      }),
+    });
+    await t.action(internal.stripeEvents.processReceipt, { id: receipt });
+    await complete(t, p._id);
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      50000,
+    );
+  });
+  it("retries a nine-minute outage and escalates only after more than three days", async () => {
+    const t = harness(),
+      { receipt, responses } = await fixture(t, {
+        target: "/v1/account",
+        field: "id",
+        value: "acct_outage",
+      });
+    let row = (await t.run((ctx) => ctx.db.get(receipt._id)))!;
+    while (row.attempts < 10) {
+      vi.setSystemTime(row.nextAttemptAt!);
+      await t.action(internal.stripeEvents.processReceipt, { id: receipt._id });
+      row = (await t.run((ctx) => ctx.db.get(receipt._id)))!;
+    }
+    expect(row.state).toBe("retry");
+    expect(Date.now() - NOW).toBeGreaterThan(9 * 60_000);
+    responses["/v1/account"].id = PLATFORM;
+    vi.setSystemTime(row.nextAttemptAt!);
+    await t.action(internal.stripeEvents.processReceipt, { id: receipt._id });
+    expect((await t.run((ctx) => ctx.db.get(receipt._id)))!.state).toBe(
+      "complete",
+    );
+    const id = await t.mutation(internal.stripeEvents.receive, {
+      json: JSON.stringify({
+        eventId: "evt_exhaust",
+        eventType: "charge.dispute.closed",
+        objectId: "dp_outage",
+        account: PLATFORM,
+        sourceTimestamp: NOW,
+        payloadHash: "exhaust",
+        destination: "platform",
+        foreign: false,
+      }),
+    });
+    const started = Date.now();
+    for (let i = 0; i < 84; i++) {
+      const claimed = (await t.mutation(internal.stripeEvents.claim, { id }))!;
+      await t.mutation(internal.stripeEvents.fail, {
+        id,
+        token: claimed.leaseToken!,
+      });
+      const failed = (await t.run((ctx) => ctx.db.get(id)))!;
+      if (i < 83) {
+        expect(failed.state).toBe("retry");
+        expect(failed.nextAttemptAt! - Date.now()).toBeLessThanOrEqual(3600000);
+        vi.setSystemTime(failed.nextAttemptAt!);
+      } else {
+        expect(failed.state).toBe("needs_review");
+        expect(failed.nextAttemptAt).toBeUndefined();
+      }
+    }
+    expect(Date.now() - started).toBeGreaterThan(3 * 86400000);
+    expect(await t.mutation(internal.stripeEvents.claim, { id })).toBeNull();
+    const cases = await t.run((ctx) =>
+      ctx.db.query("financeReconciliationCases").collect(),
+    );
+    expect(
+      cases.filter(
+        (c) => c.rowKind === "case" && c.operationId === `receipt:${id}`,
+      ),
+    ).toHaveLength(1);
   });
   it("payout projections use revision fences and never touch publisher money", async () => {
     const t = harness(),

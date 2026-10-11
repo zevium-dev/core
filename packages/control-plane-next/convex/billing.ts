@@ -19,6 +19,7 @@ import {
 } from "./lib/stripe";
 import { grantLot } from "./money/lots";
 import { ensureWallet } from "./money/walletLedger";
+import { openCase } from "./money/reconciliationCases";
 import { reconcilePaymentPage } from "./money/adjustments";
 const pack = v.union(
   v.literal("pack_10"),
@@ -336,15 +337,29 @@ export const reconcileFailure = internalMutation({
   handler: async (ctx, args) => {
     const p = await ctx.db.get(args.paymentId);
     if (
-      p?.reconciliation.generation === args.generation &&
-      p.reconciliation.state !== "complete"
+      !p ||
+      p.reconciliation.generation !== args.generation ||
+      p.reconciliation.state === "complete" ||
+      p.reconciliation.state === "needs_review"
     )
-      await ctx.db.patch(p._id, {
-        reconciliation: {
-          ...p.reconciliation,
-          state: "retry",
-          nextAttemptAt: Date.now() + 60000,
-        },
+      return;
+    const attempts = (p.reconciliation.attempts ?? 0) + 1;
+    const exhausted = attempts >= 8;
+    await ctx.db.patch(p._id, {
+      reconciliation: {
+        ...p.reconciliation,
+        attempts,
+        state: exhausted ? "needs_review" : "retry",
+        nextAttemptAt: exhausted ? undefined : Date.now() + 60_000,
+      },
+    });
+    if (exhausted)
+      await openCase(ctx, {
+        kind: "payment",
+        paymentId: p._id,
+        operationId: `payment-reconcile:${p._id}:${args.generation}`,
+        reason:
+          "Payment reconciliation exhausted page retries; wallet remains frozen",
       });
   },
 });

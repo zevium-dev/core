@@ -100,6 +100,7 @@ export const walletTables = {
         lotId: v.id("fundingLots"),
         originLotId: v.id("fundingLots"),
         paymentId: v.optional(v.id("payments")),
+        restoredAt: v.optional(v.number()),
         requestFingerprint: v.optional(v.string()),
         closeId: v.optional(v.string()),
         adjustment: v.union(
@@ -138,6 +139,7 @@ export const walletTables = {
     .index("by_wallet_sequence", ["walletId", "sequence"])
     .index("by_payment", ["paymentId", "sequence"])
     .index("by_payment_kind", ["paymentId", "kind", "sequence"])
+    .index("by_unrestored", ["paymentId", "kind", "restoredAt", "sequence"])
     .index("by_move_source", ["originLotId", "sequence"])
     .index("by_merge", ["mergeId", "sequence"])
     .index("by_admin_adjustment", [
@@ -286,6 +288,10 @@ export const walletTables = {
     updatedAt: v.number(),
     reconciliation: v.object({
       state: jobState,
+      attempts: v.optional(v.number()),
+      earningsState: v.optional(
+        v.union(v.literal("pending"), v.literal("released")),
+      ),
       targetCredits: v.number(),
       walletReversedCredits: v.number(),
       publisherTargetCredits: v.number(),
@@ -345,6 +351,7 @@ export const walletTables = {
     account: v.string(),
     eventId: v.string(),
     payloadHash: v.optional(v.string()),
+    bodyHash: v.optional(v.string()),
     destination: v.optional(
       v.union(v.literal("platform"), v.literal("connect"), v.literal("v2")),
     ),
