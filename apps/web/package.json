@@ -71,6 +71,6 @@
     "wrangler": "^4.146.0"
   },
   "optionalDependencies": {
-    "utf-8-validate": "5.0.10"
+    "utf-8-validate": "6.0.6"
   }
 }
