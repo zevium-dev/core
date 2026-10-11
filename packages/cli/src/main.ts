@@ -1,4 +1,5 @@
 import { runCli } from "./run.js";
+import { terminalText } from "./terminal.js";
 
 export async function main() {
   try {
@@ -6,7 +7,9 @@ export async function main() {
       gatewayUrl: process.env.ZEVIUM_GATEWAY_URL,
       apiKey: process.env.ZEVIUM_API_KEY,
     });
-    process.stdout.write(result + (result.endsWith("\n") ? "" : "\n"));
+    process.stdout.write(
+      terminalText(result) + (result.endsWith("\n") ? "" : "\n"),
+    );
   } catch (error) {
     // Native fetch errors can contain network internals; expose only curated messages.
     const message =
@@ -15,7 +18,7 @@ export async function main() {
       error.name !== "TimeoutError"
         ? error.message
         : "Gateway unavailable; check configuration and retry";
-    process.stderr.write(`zevium: ${message}\n`);
+    process.stderr.write(`zevium: ${terminalText(message)}\n`);
     process.exitCode = 1;
   }
 }

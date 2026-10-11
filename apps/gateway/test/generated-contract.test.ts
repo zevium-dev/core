@@ -56,6 +56,51 @@ describe("generated listing reference", () => {
       (await handleListingDocs(request, source, "missing", "demo")).status,
     ).toBe(404);
   });
+  it("reports and caches reference amplification failures on anonymous docs requests", async () => {
+    const amplified = {
+      ...published,
+      spec: JSON.stringify({
+        openapi: "3.1.0",
+        components: {
+          parameters: {
+            P: {
+              name: "q",
+              in: "query",
+              schema: { type: "string" },
+              ...Object.fromEntries(
+                Array.from({ length: 6_000 }, (_, i) => [`x-${i}`, i]),
+              ),
+            },
+          },
+        },
+        paths: {
+          "/echo": {
+            get: {
+              "x-zevium-cost": 0,
+              parameters: Array.from({ length: 4_500 }, () => ({
+                $ref: "#/components/parameters/P",
+                description: "sibling",
+              })),
+            },
+          },
+        },
+      }),
+    };
+    const source = new FixtureSpecSource({ "acme/demo": amplified });
+    const request = new Request("https://gateway.test/docs/acme/demo");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await handleListingDocs(request, source, "acme", "demo");
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: "generation_unavailable",
+        reason: "complexity_limit",
+      });
+    }
+    source.set("acme", "demo", { ...amplified, visibility: "private" });
+    expect(
+      (await handleListingDocs(request, source, "acme", "demo")).status,
+    ).toBe(404);
+  });
   it("exposes safe failure codes for oversized generation", async () => {
     const source = new FixtureSpecSource({
       "acme/demo": { ...published, spec: "not json" },

@@ -5,6 +5,7 @@ import {
   isValidSlug,
 } from "@zevium/shared";
 import { z } from "zod";
+import { terminalText } from "./terminal.js";
 
 const LIMIT = 1024 * 1024;
 const jsonSchema = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
@@ -127,6 +128,13 @@ export type CliOptions = {
 export async function runCli(
   argv: readonly string[],
   options: CliOptions = {},
+): Promise<string> {
+  return terminalText(await run(argv, options));
+}
+
+async function run(
+  argv: readonly string[],
+  options: CliOptions,
 ): Promise<string> {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === "--help"))
     return "Usage: zevium <publisher> <project> [command] [--help | generated flags]\nOmit command for generated docs. Set ZEVIUM_API_KEY for execution; ZEVIUM_GATEWAY_URL selects the gateway.\n";

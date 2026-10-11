@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateSpecContract } from "@zevium/shared";
 import { representativeSpec } from "../../shared/src/spec-generation/fixture.js";
 import { runCli } from "./run.js";
+import { main } from "./main.js";
+import { terminalText } from "./terminal.js";
+const terminalPayload =
+  "before\u001b[2J\u001b]52;c;Y2xpcGJvYXJk\u0007\u009b31m\u009d52;c;eA==\u009c\u001b]8;;https://evil.invalid\u001b\\link\u001b]8;;\u001b\\\u202ereversed\u202c\u2066isolate\u2069\rafter\b\u0000";
 
 const contract = generateSpecContract({
   spec: JSON.stringify(representativeSpec),
@@ -18,6 +22,74 @@ const docs = () =>
 const opts = { gatewayUrl: "http://localhost:8787", apiKey: "zev_fixture" };
 
 describe("zevium CLI", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+  it.each(["docs", "help", "response"])(
+    "escapes terminal injection in %s",
+    async (surface) => {
+      const generated = structuredClone(contract);
+      generated.markdown += terminalPayload;
+      generated.operations[0]!.tool.description += terminalPayload;
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          toolResult(JSON.stringify({ publisherData: { generated } })),
+        )
+        .mockResolvedValueOnce(toolResult(terminalPayload));
+      const argv =
+        surface === "docs"
+          ? ["acme", "pets"]
+          : surface === "help"
+            ? ["acme", "pets", "getpet_1", "--help"]
+            : ["acme", "pets", "get_ping_3"];
+      const result = await runCli(argv, { ...opts, fetchImpl });
+      expect(result).toContain(terminalText(terminalPayload));
+      expect(result).not.toContain("\u001b");
+      expect(result).not.toContain("\u202e");
+    },
+  );
+  it.each([false, true])(
+    "protects actual process output (stderr=%s)",
+    async (failure) => {
+      vi.spyOn(process, "argv", "get").mockReturnValue([
+        "node",
+        "zevium",
+        "acme",
+        "pets",
+      ]);
+      vi.stubEnv("ZEVIUM_GATEWAY_URL", "http://localhost:8787");
+      const previousExitCode = process.exitCode;
+      const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      vi.stubGlobal(
+        "fetch",
+        failure
+          ? vi.fn().mockRejectedValue(new Error(terminalPayload))
+          : vi.fn().mockResolvedValue(
+              toolResult(
+                JSON.stringify({
+                  publisherData: {
+                    generated: { ...contract, markdown: terminalPayload },
+                  },
+                }),
+              ),
+            ),
+      );
+      try {
+        await main();
+        expect(failure ? stderr : stdout).toHaveBeenCalledWith(
+          `${failure ? "zevium: " : ""}${terminalText(terminalPayload)}\n`,
+        );
+        expect(failure ? stdout : stderr).not.toHaveBeenCalled();
+        if (failure) expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = previousExitCode;
+      }
+    },
+  );
   it("loads docs and help without executing or requiring a key", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
