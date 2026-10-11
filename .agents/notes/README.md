@@ -14,17 +14,18 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 
 ## Map
 
-| Dir                               | Holds                                                                                                     |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| [product/](product/)              | Overview (what, personas, revenue model, positioning, golden paths, non-goals) and roadmap/backlog        |
-| [features/](features/)            | One file per feature: Product / Flow / Tech / Decisions / Open questions. Status + code pointers on top   |
-| [architecture/](architecture/)    | Cross-cutting tech: overview, web app, dev environment, testing, deploy, registry v2, security/compliance |
-| [design/](design/)                | Design system (visual + motion) and cross-cutting UI shell                                                |
-| [decisions/](decisions/README.md) | Dated decision log (`YYYY-MM-DD-slug.md`), with index                                                     |
-| [research/](research/)            | Market and vendor research. Input to decisions, never itself a decision                                   |
-| [sessions/](sessions/)            | Dated logs of substantial user ↔ agent discussions: asked, found, decided, proposed                       |
-| [findings/](findings/)            | Lessons and review findings. `values.md` = standing lessons                                               |
-| [history/](history/)              | Read-only archive: build plan and wave prompts from the greenfield build. Do not update                   |
+| Dir                                                           | Holds                                                                                                     |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [product/](product/)                                          | Overview (what, personas, revenue model, positioning, golden paths, non-goals) and roadmap/backlog        |
+| [features/](features/)                                        | One file per feature: Product / Flow / Tech / Decisions / Open questions. Status + code pointers on top   |
+| [architecture/](architecture/)                                | Cross-cutting tech: overview, web app, dev environment, testing, deploy, registry v2, security/compliance |
+| [design/](design/)                                            | Design system (visual + motion) and cross-cutting UI shell                                                |
+| [decisions/](decisions/README.md)                             | Dated decision log (`YYYY-MM-DD-slug.md`), with index                                                     |
+| [research/](research/)                                        | Market and vendor research. Input to decisions, never itself a decision                                   |
+| [sessions/](sessions/)                                        | Dated logs of substantial user ↔ agent discussions: asked, found, decided, proposed                       |
+| [findings/](findings/)                                        | Lessons and review findings. `values.md` = standing lessons                                               |
+| [history/](history/)                                          | Read-only archive: build plan and wave prompts from the greenfield build. Do not update                   |
+| [x402 re-enable runbook](architecture/x402-enable-runbook.md) | Disabled rail activation, secrets, facilitator/network constraints, settlement and smoke tests            |
 
 ## Current owner decisions
 
@@ -48,7 +49,7 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 | [api-keys](features/api-keys.md)                             | Keys, per-key caps, rotation                                             |
 | [agent-surface](features/agent-surface.md)                   | MCP endpoint, discovery index, connect-your-agent, agent distribution    |
 | [capability-routing](features/capability-routing.md)         | Route by job across interchangeable providers, fallback, max cost        |
-| [machine-payments](features/machine-payments.md)             | x402 / keyless wallet sessions (configuration gated), 402 envelopes      |
+| [machine-payments](features/machine-payments.md)             | x402 / keyless wallet sessions (disabled by default), 402 envelopes      |
 | [mock-sandbox](features/mock-sandbox.md)                     | Keyless spec-generated mocks, playground                                 |
 | [publisher-analytics](features/publisher-analytics.md)       | Calls, latency, errors, revenue per endpoint                             |
 | [earnings-payouts](features/earnings-payouts.md)             | 95% earnings, Stripe Connect onboarding, transfers, payouts              |

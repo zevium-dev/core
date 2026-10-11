@@ -11,6 +11,8 @@
   // the production route above. Override --host too when changing --port.
   "dev": { "host": "localhost:8787" },
   "vars": {
+    // Explicit opt-in only; secrets alone never enable the anonymous rail.
+    "X402_ENABLED": "false",
     // Override with the paired web origin for preview deployments.
     "APP_ORIGIN": "https://zevium.dev",
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify

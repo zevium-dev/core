@@ -1,7 +1,7 @@
 # Machine payments (x402)
 
-> Status: built behind configuration (#109); #396/#417 recovery parity fixed; real sandbox settlement blocked by owner setup; x402 off by decision; enforcement #424 pending; activation P2 · Updated: 2026-10-11
-> Code: `apps/gateway/src/machine-payments.ts`, `machine-facilitator.ts`, `wallet-session.ts`, `wallet.ts`, `convex/machinePayments.ts`, `convex/lib/funding.ts`, `packages/shared/src/machine-payments.ts`
+> Status: DISABLED by default (owner decision 2026-10-11); implementation and tests retained; real sandbox settlement still blocked · Updated: 2026-10-11
+> Code: `apps/gateway/src/machine-payments.ts`, `machine-facilitator.ts`, `wallet-session.ts`, `wallet.ts`, `convex/machinePayments.ts`, `convex/lib/funding.ts`, `packages/shared/src/machine-payments.ts`, `apps/gateway/src/x402-config.ts`, `apps/gateway/src/index.ts`, `apps/gateway/wrangler.jsonc`, `apps/gateway/test/x402-disabled.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [agent-surface](agent-surface.md), [dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md)
 
 ## Product
@@ -9,12 +9,15 @@
 Deferred product flow below is retained for future activation. Owner decision is feature off; implementation #424 is pending.
 
 Individuals and agents can fund a wallet without an account or API key. One $1 payment buys 10,000 credits. Calls spend those credits at the published spec price, with the existing 95% publisher / 5% platform split. There is no anonymous signup credit. Zero spendable balance blocks even free endpoints.
+Keyless payments are disabled for now. Consumers use API keys or MCP OAuth. The retained rail, when explicitly re-enabled, lets individuals and agents fund a wallet without an account or API key. One $1 payment buys 10,000 credits. Calls spend those credits at the published spec price, with the existing 95% publisher / 5% platform split. There is no anonymous signup credit. Zero spendable balance blocks even free endpoints.
 
-Each top-up expires one calendar year after funding. Spending uses the oldest unexpired top-ups first; a later top-up does not extend earlier funds. Organizations using API keys retain their existing non-expiring wallets.
+Each top-up expires one calendar year after funding. Spending uses the oldest unexpired top-ups first; a later top-up does not extend earlier funds. Expired unused anonymous money is Zevium revenue. Balance/MCP responses show no top-up expiry or expiry warnings. Organizations using API keys retain their existing non-expiring wallets.
 
 ## Flow
 
-1. Call `/gateway/:publisher/:project/*` without credentials. When configured, the 402 includes a $1 x402 offer and existing create-key, top-up, and docs actions.
+Current behavior: keyless paid calls receive normal auth-required recovery, without a machine payment offer. The following flow is retained for re-enablement only.
+
+1. Call `/gateway/:publisher/:project/*` without credentials. When explicitly enabled and configured, the 402 includes a $1 x402 offer and existing create-key, top-up, and docs actions.
 2. Retry with the signed payment proof. Confirmed settlement funds the payer's wallet; the same request runs through the normal metered pipeline.
 3. Save the returned wallet session and send it as a Bearer credential on later HTTP calls or MCP `call_api` calls. The session lasts 24 hours and accesses public APIs only.
 4. Empty wallets receive another payable 402. Another payment from the same payer restores access to all remaining unexpired funds. A repeated payment cannot fund twice and does not issue another session.
@@ -27,6 +30,9 @@ Feature-off enforcement remains P1 #424. Current `index.ts` enables the rail whe
 
 ### Current implementation
 
+- **Disabled by default**: only gateway `X402_ENABLED="true"` activates the rail, with all required bindings and a >=32-character session secret. `x402-config.ts` supplies the same check to dependency construction and proof settlement in the DO. The dependency fingerprint includes the flag. Disabled requests cannot get offers, fund, issue sessions, or authenticate old sessions. Normal API-key/OAuth recovery remains; discovery/web docs do not advertise x402, and MCP recovery text only mentions sessions when active. Tests explicitly opt in.
+- No funding-expiry display exists in balance/MCP responses; the old enabled-offer expiry warning is removed. Internal lot timestamps and expiry enforcement remain.
+
 - **Recovery parity (#396, #417)**: x402 offers retain the shared safe 402 envelope on direct HTTP and MCP, with recovery links derived from `APP_ORIGIN`. Invalid payment proofs use that same configured origin and safe recovery text. The direct/MCP origin matrix lives in `apps/gateway/test/payment-recovery.test.ts`; anonymous wallet admission still never fetches Convex. See [agent surface](agent-surface.md#tech).
 
 - x402 sessions share the SQLite request bucket by stable `x402:<network>:<lowercase payer>` identity (60 burst, one token/second); renewing a session or funding again does not reset it. Exhaustion returns `429` with `Retry-After`, without Clerk/Convex admission calls. Signed admission proofs bind to that wallet identity and immutable route; delayed usage can settle after deprecation while preserving exact funding lots and token charges. Gateway and Convex machine-payment tests cover payer isolation, session renewal, eviction, proof identity rejection and delayed settlement.
@@ -36,7 +42,7 @@ Feature-off enforcement remains P1 #424. Current `index.ts` enables the rail whe
 - `MachineFacilitator` isolates that integration. The default adapter uses a configured private V2 facilitator proxy (CDP authentication stays at the proxy), validates the server-owned requirements, verifies payer identity, checks settlement network/transaction, and records Stripe with a transaction-derived idempotency key. No chain SDK enters the gateway bundle.
 - A proof-scoped Durable Object serializes payment attempts and persists the settlement receipt before recording Stripe. Retries after Stripe failure reuse that receipt. If Stripe replays an initial `processing` create response, the adapter retrieves the current PaymentIntent before deciding whether credits can be granted. Convex deduplicates both Stripe payment ID and `(network, transaction)`. Duplicate funding returns 409; projection retry can repair a missing edge grant without issuing a new session or adding funds twice.
 - Accounting owner: `organizations.walletKind = anonymous`, with namespaced `clerkOrgId = x402:<network>:<lowercase payer>`. This is an internal accounting container, not a Clerk organization: no members, public handle, customer creation, or signup grant. Reusing the existing org foreign keys preserves settlement, funding allocation, publisher earnings and Connect behavior.
-- Each payment creates a `machine_payment` funding lot with `expiresAt`. These lots never compact together. Expired unused lots remain in the audit ledger; the raw ledger balance includes that inventory, while the edge's **spendable** balance excludes it. This avoids recognizing accounting breakage prematurely or discarding valid late usage. No expiry grant or signup credit can extend a lot.
+- Each payment creates a `machine_payment` funding lot with `expiresAt`. These lots never compact together. Expired unused lots remain in the audit ledger; the raw ledger balance includes that inventory, while the edge's **spendable** balance excludes it. The owner classifies expired unused funds as Zevium revenue; no automatic breakage posting is added here, and retained audit inventory preserves valid late usage. No expiry grant or signup credit can extend a lot.
 - Edge reservations record exact lot slices and admission time, persisted with holds and settlements. Convex validates wallet ownership, admission before expiry, remaining lot inventory and amount totals before committing the standard ledger entry and earnings. Out-of-order delivery cannot switch funding sources. A reservation admitted before expiry may complete afterward. Refunded/expired holds do not revive expired funds. At most 24 lots fund one call, matching the existing transaction budget; larger fragmentation fails closed.
 - Token-priced calls reserve oldest lots at the estimated maximum, consume only the oldest reserved slices needed for actual usage, and release the rest with their original expiry. The in-flight token budget excludes expired inventory. Free and refunded calls carry empty lot allocations so their usage remains auditable.
 - Session: HMAC-SHA256, versioned `zev_ws_` credential, payer/network subject, gateway-origin audience, `gateway:public` scope, issuance and expiry timestamps. Local verification only. Anonymous key controls and grants never fetch Convex/Clerk on admission, including a cold DO. Paid usage still flushes asynchronously. Payment proofs and session headers are stripped before upstream forwarding; CORS exposes payment/session response headers.
@@ -52,12 +58,14 @@ Current configuration gate (not an explicit off switch): the rail is disabled un
 3. Supply the bindings as gateway secrets and deploy Convex schema/functions before gateway. Use an independent random signing secret of at least 32 characters.
 4. Complete a **real sandbox** offer → pay → session → calls → exhaustion journey, verify the Stripe PaymentIntent and Convex lot/earnings, then replay the proof and verify no second grant. This has not been completed. Test-double contract coverage is not a real Stripe settlement.
 5. If choosing MPP instead, first create a sandbox business profile and implement a payer-address-bearing adapter; an SPT alone is not a wallet address. Do not advertise MPP support until that wire protocol is implemented and tested.
+   Follow the [re-enable runbook](../architecture/x402-enable-runbook.md) for the explicit switch, secret names, Coinbase CDP facilitator, Base / Base Sepolia limitations, settlement finality, payer normalization, session TTL, migrations, and smoke tests. Secrets alone no longer enable the rail. No full sandbox journey has been completed.
 
 Observed 2026-10-10: the configured test account initially accepted Base deposit-address creation (HTTP 200); MPP business-profile lookup returned 404 `not_found`. A later test-only transaction-verification probe returned 401 `api_key_expired`. No live keys or live money were used. No full sandbox journey is claimed.
 
 ### Operational limits
 
 - Breakage revenue/no-notice policy is decided 2026-10-11; implementation is pending (#353). Anonymous refund mechanics remain unresolved. Anonymous lots are classified non-refundable in the current automatic allocation path; no automatic machine-payment refund/reversal projection is advertised.
+- Expired unused anonymous funds are Zevium revenue (owner decision 2026-10-11). Anonymous lots are classified non-refundable in the current automatic allocation path; no automatic machine-payment refund/reversal projection is advertised.
 - A lost successful HTTP response also loses its bearer session. Replaying the payment remains refused; a fresh top-up from the same payer can access existing unexpired funds. Wallet-signature session recovery is not built.
 - A crash between external on-chain settlement and durable receipt persistence requires facilitator transaction recovery/manual reconciliation. Never tell an operator to pay a second time to repair that gap.
 
@@ -81,10 +89,14 @@ Source: [landscape](../research/agent-api-marketplace-landscape.md), raw notes [
 ## Decisions
 
 - 2026-10-11 — ACCEPTED: x402 disabled by policy; P1 #424 enforces feature off; #109 activation moves to P2. [Decision](../decisions/2026-10-11-x402-disabled.md).
+- 2026-10-11 — Owner: disable x402 for now, retain code for re-enablement; expired unused anonymous funds are Zevium revenue; omit top-up expiry display and warnings from balance/MCP responses. Decision records are maintained in parallel.
 - 2026-10-11 — ACCEPTED: Expired anonymous funds are Zevium revenue; no expiry warnings or expiry display in balance responses. #353/#424. [Decision](../decisions/2026-10-11-breakage-revenue.md).
+- 2026-10-11 — Owner: disable x402 for now, retain code for re-enablement; expired unused anonymous funds are Zevium revenue; omit top-up expiry display and warnings from balance/MCP responses. Decision records are maintained in parallel.
 - 2026-10-11 — ACCEPTED: Rebuild #353/#430 accepts 32 slices and traceable dust merges with identical expiry rules. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
+- 2026-10-11 — Owner: disable x402 for now, retain code for re-enablement; expired unused anonymous funds are Zevium revenue; omit top-up expiry display and warnings from balance/MCP responses. Decision records are maintained in parallel.
 
 - 2026-10-10 — BUILT behind configuration: payer-bound wallet sessions, zero-balance gate, 95/5 split, $1 top-up default, anonymous accounting organizations. [Dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md). (Historical; scope superseded 2026-10-11 above.)
+- 2026-10-10 — BUILT behind configuration: payer-bound wallet sessions, zero-balance gate, 95/5 split, $1 top-up default, anonymous accounting organizations. [Dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md).
 - 2026-10-10 — BUILT: per-top-up one-year expiry, oldest-first admission. [Expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md).
 - 2026-10-10 — Historical P0 priority, superseded by P2 activation on 2026-10-11. [Agent bet](../decisions/2026-10-10-p0-agent-bet.md).
 
@@ -92,3 +104,5 @@ Source: [landscape](../research/agent-api-marketplace-landscape.md), raw notes [
 
 - Activation is P2. Complete runbook prerequisites and real sandbox settlement evidence before enabling.
 - Before future activation: implement decided breakage policy (#353), resolve anonymous refunds, sanctions screening and session recovery. Follow the [enablement runbook](../architecture/x402-enablement.md).
+- Complete owner setup and the real sandbox settlement evidence before enabling production.
+- Accounting posting mechanics for expired-funds revenue, anonymous refunds, sanctions screening and session recovery before launch.

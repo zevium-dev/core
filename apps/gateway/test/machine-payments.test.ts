@@ -127,7 +127,7 @@ async function call(headers: HeadersInit = {}, target = url) {
   const ctx = createExecutionContext();
   const response = await worker.fetch(
     new Request(target, { headers }),
-    env as unknown as Env,
+    { ...env, X402_ENABLED: "true" } as unknown as Env,
     ctx,
   );
   await waitOnExecutionContext(ctx);
@@ -218,6 +218,9 @@ describe("anonymous x402 wallet rail", () => {
     expect(
       JSON.parse(atob(challenge.headers.get("PAYMENT-REQUIRED")!)),
     ).toMatchObject({ x402Version: 2, accepts: [requirements] });
+    expect(atob(challenge.headers.get("PAYMENT-REQUIRED")!)).not.toMatch(
+      /expir/i,
+    );
     expect(await challenge.json()).toMatchObject({
       actions: { createKey: expect.any(String), topUp: expect.any(String) },
     });
@@ -416,7 +419,7 @@ describe("anonymous x402 wallet rail", () => {
           },
           body: JSON.stringify({ messages: [], max_tokens: 100 }),
         }),
-        env as unknown as Env,
+        { ...env, X402_ENABLED: "true" } as unknown as Env,
         ctx,
       );
       await response.text();
@@ -495,6 +498,7 @@ describe("anonymous x402 wallet rail", () => {
         }),
         {
           ...env,
+          X402_ENABLED: "true",
           ...(oauth
             ? {
                 MCP_OAUTH_ISSUER: "https://clerk.oauth.test",
