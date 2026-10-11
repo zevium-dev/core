@@ -136,7 +136,7 @@ export async function verifySnapshot(
     s.scope !== expected.scope ||
     s.nonce !== expected.nonce ||
     s.revision < expected.minimumRevision ||
-    s.generatedAt > expected.now ||
+    s.generatedAt > expected.now + 1000 ||
     s.expiresAt <= expected.now
   )
     throw new Error("Snapshot authority rejected");

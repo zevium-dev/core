@@ -200,6 +200,7 @@ for (const path of ["/edge-snapshot", "/wallet-grants"])
         const scope = text.parse(params.get("scope")),
           nonce = text.parse(params.get("nonce"));
         const result = await ctx.runQuery(internal.edgeSnapshots.read, {
+          now: Date.now(),
           kind,
           scope,
           ...(params.has("cursor")

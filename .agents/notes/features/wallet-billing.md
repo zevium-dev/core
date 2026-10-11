@@ -63,6 +63,8 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 `wallets.edgeBootstrapId` fences the durable edge owner before admission; cold wallets can drain before their first call. Negative closes enqueue authenticated wake delivery through `NEXT_GATEWAY_URL`, with cron retry until an actual drain ACK. A wake receipt never grants permission to reclaim.
 
+PR #441 review hardening adds a bounded single-flight cold checkpoint fill, five-minute idle polling stop, unchanged-generation expiry renewal without source rewrites, and alarm cleanup of old counters/resolved failures. Rejected finals log structured alerts; internal `wallets.recoverRejectedSettlement` provides exact-evidence, watermark-pinned zero-debit recovery. [Cold-fill/skew decision](../decisions/2026-10-11-edge-cold-fill-and-clock-skew.md).
+
 Next Wallet DO reserves at most 32 original sources, persists keyed signed admissions/finals and reconciles pinned inventory without restoring outstanding holds. Real drain ACKs gate PR 4 refunds; exceptions and unknown restart outcomes advance the final watermark with zero debit and an operator case. Closed-wallet maintenance never exposes transient inventory. Default live wallet stays unchanged. [Protocol, bounds, configuration and acceptance evidence](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11). Code: `apps/gateway/src/next/wallet.ts`; Worker/backend acceptance: `apps/gateway/scripts/next-acceptance.mjs`.
 
 ### Isolated rebuild PR 4 — 2026-10-11

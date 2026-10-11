@@ -67,14 +67,14 @@ export async function openProjection(
 ): Promise<Projection> {
   const p = projection.parse(input),
     { signature, ...facts } = p;
-  // No positive skew allowance extends the 30s authority. Clock ahead/behind fails closed.
+  // Tolerate 1s of issuance clock skew only. Expiry remains exact.
   if (
     p.deploymentId !== expected.deploymentId ||
     p.kind !== expected.kind ||
     p.scope !== expected.scope ||
     p.nonce !== expected.nonce ||
     p.revision < expected.minimumRevision ||
-    p.generatedAt > expected.now ||
+    p.generatedAt > expected.now + 1000 ||
     p.expiresAt <= expected.now ||
     p.expiresAt <= p.generatedAt ||
     p.expiresAt - p.generatedAt > (p.kind === "catalogue" ? 60_000 : 30_000) ||

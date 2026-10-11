@@ -1,5 +1,5 @@
 import { nextDeps } from "./next/pipeline";
-import { wakeWallet } from "./next/wake";
+import { wakeWallet, readWalletFailure } from "./next/wake";
 import type { NextEnv } from "./next/snapshots";
 export { EdgeOAuthDO } from "./next/oauth";
 export { EdgeSnapshotDO } from "./next/snapshots";
@@ -371,6 +371,8 @@ async function dispatchRequest(
     return corsPreflight();
   }
   if (url.pathname === "/internal/next-wake") return wakeWallet(request, env);
+  if (url.pathname === "/internal/next-failure")
+    return readWalletFailure(request, env);
 
   if (url.pathname === "/" || url.pathname === "/health") {
     const testMode = env.GATEWAY_TEST_MODE === "1";

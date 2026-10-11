@@ -7,6 +7,12 @@ import {
   type Projection,
 } from "@zevium/shared/edge/replication";
 import { canonical, fingerprint } from "@zevium/shared/edge/transport";
+import {
+  coldRefreshBudget,
+  COLD_FILL_MS,
+  NEGATIVE_TTL_MS,
+  waitForColdFill,
+} from "./cold-refresh";
 import type { EdgeOAuthDO } from "./oauth";
 import type { NextWalletDO } from "./wallet";
 export interface NextEnv {
@@ -30,6 +36,7 @@ export async function pull(
   scope: string,
   cursor?: string,
   minimumRevision = 0,
+  signal: AbortSignal = AbortSignal.timeout(5000),
 ) {
   const nonce = crypto.randomUUID(),
     url = new URL(
@@ -43,9 +50,10 @@ export async function pull(
     ...(cursor ? { cursor } : {}),
   }))
     url.searchParams.set(name, value);
+  signal.throwIfAborted();
   const res = await fetch(url, {
     headers: { "x-internal-secret": env.GATEWAY_INTERNAL_SECRET ?? "" },
-    signal: AbortSignal.timeout(5000),
+    signal,
   });
   if (!res.ok) throw new Error("Snapshot unavailable");
   return openProjection(await res.json(), {
@@ -58,12 +66,12 @@ export async function pull(
     keys: readRing(env.NEXT_SNAPSHOT_KEYS).keys,
   });
 }
-/** Private, deployment-scoped SQLite coordinator. Only alarms contact Convex;
- * read() schedules a cold refresh and returns unavailable immediately. */
+/** Private deployment-scoped coordinator. Warm reads stay local; a cold miss
+ * shares one bounded fill. Missing scopes retain only a short-lived negative. */
+type Negative = { projection: Projection; expiresAt: number };
 export class EdgeSnapshotDO extends DurableObject<NextEnv> {
-  constructor(ctx: DurableObjectState, env: NextEnv) {
-    super(ctx, env);
-  }
+  private pending?: Promise<void>;
+  private retryAt = 0;
   async read(kind: Projection["kind"], scope: string): Promise<string | null> {
     const identity = await this.ctx.storage.get<{
       kind: Projection["kind"];
@@ -71,32 +79,78 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
     }>("identity");
     if (identity && (identity.kind !== kind || identity.scope !== scope))
       throw new Error("Scope mismatch");
-    if (!identity) await this.ctx.storage.put("identity", { kind, scope });
+    let current = await this.ctx.storage.get<Projection>("current");
+    const negative = await this.ctx.storage.get<Negative>("negative");
+    if (
+      negative &&
+      negative.projection.kind === kind &&
+      negative.projection.scope === scope &&
+      negative.expiresAt > Date.now()
+    )
+      return JSON.stringify(negative.projection);
+    if (!this.fresh(current)) {
+      await waitForColdFill(this.refreshAuthority(kind, scope, true));
+      current = await this.ctx.storage.get<Projection>("current");
+      const missing = await this.ctx.storage.get<Negative>("negative");
+      if (missing && missing.expiresAt > Date.now())
+        return JSON.stringify(missing.projection);
+    }
+    if (!this.fresh(current)) return null;
     const touched = (await this.ctx.storage.get<number>("lastRead")) ?? 0;
     if (Date.now() - touched > 15_000)
       await this.ctx.storage.put("lastRead", Date.now());
     if ((await this.ctx.storage.getAlarm()) === null)
-      await this.ctx.storage.setAlarm(Date.now() + 1);
-    const current = await this.ctx.storage.get<Projection>("current");
-    return current &&
-      current.deploymentId === this.env.NEXT_DEPLOYMENT_ID &&
-      current.expiresAt > Date.now() &&
-      current.generatedAt <= Date.now()
-      ? JSON.stringify(current)
-      : null;
+      await this.ctx.storage.setAlarm(Date.now() + 15_000);
+    return JSON.stringify(current);
+  }
+  private fresh(p: Projection | undefined) {
+    return (
+      p &&
+      p.deploymentId === this.env.NEXT_DEPLOYMENT_ID &&
+      p.expiresAt > Date.now() &&
+      p.generatedAt <= Date.now() + 1000
+    );
+  }
+  private async refreshAuthority(
+    kind: Projection["kind"],
+    scope: string,
+    cold: boolean,
+  ) {
+    if (this.pending) return this.pending;
+    if (cold && (Date.now() < this.retryAt || !coldRefreshBudget.take()))
+      return;
+    this.retryAt = Date.now() + 5000;
+    this.pending = this.fill(
+      { kind, scope },
+      AbortSignal.timeout(cold ? COLD_FILL_MS : 10_000),
+    );
+    try {
+      await this.pending;
+    } finally {
+      this.pending = undefined;
+    }
   }
   async alarm() {
-    if (
-      Date.now() - ((await this.ctx.storage.get<number>("lastRead")) ?? 0) >
-      60_000
-    )
-      return;
-    await this.ctx.storage.setAlarm(Date.now() + 15_000);
     const identity = await this.ctx.storage.get<{
       kind: Projection["kind"];
       scope: string;
     }>("identity");
-    if (!identity) return;
+    if (
+      !identity ||
+      Date.now() - ((await this.ctx.storage.get<number>("lastRead")) ?? 0) >
+        60_000
+    ) {
+      await this.ctx.storage.deleteAll();
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Date.now() + 15_000);
+    await this.refreshAuthority(identity.kind, identity.scope, false);
+  }
+  private async fill(
+    identity: { kind: Projection["kind"]; scope: string },
+    signal: AbortSignal,
+  ) {
     try {
       const old = await this.ctx.storage.get<Projection>("current");
       let candidate = await pull(
@@ -105,6 +159,7 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
         identity.scope,
         undefined,
         old?.revision ?? 0,
+        signal,
       );
       // Catalogue manifests are built twice with identical page content/cursors.
       // Any publish/revoke changing a page aborts installation; only a complete
@@ -124,6 +179,8 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
                   "catalogue",
                   identity.scope,
                   pages.at(-1)!.nextCursor!,
+                  0,
+                  signal,
                 )
               ).payload as (typeof pages)[number],
             );
@@ -132,7 +189,14 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
         };
         const pages = await collect(candidate),
           check = await collect(
-            await pull(this.env, "catalogue", identity.scope),
+            await pull(
+              this.env,
+              "catalogue",
+              identity.scope,
+              undefined,
+              0,
+              signal,
+            ),
           );
         if (canonical(pages) !== canonical(check))
           throw new Error("Generation changed");
@@ -152,8 +216,21 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
           readRing(this.env.NEXT_SNAPSHOT_KEYS),
         );
       }
+      signal.throwIfAborted();
       if (candidate.expiresAt <= Date.now())
         throw new Error("Expired generation");
+      if (candidate.payload === null) {
+        await this.ctx.storage.deleteAll();
+        await this.ctx.storage.put("negative", {
+          projection: candidate,
+          expiresAt: Math.min(
+            candidate.expiresAt,
+            Date.now() + NEGATIVE_TTL_MS,
+          ),
+        });
+        await this.ctx.storage.setAlarm(Date.now() + NEGATIVE_TTL_MS);
+        return;
+      }
       await this.ctx.storage.transaction(async (tx) => {
         const latest = await tx.get<Projection>("current");
         if (
@@ -165,8 +242,15 @@ export class EdgeSnapshotDO extends DurableObject<NextEnv> {
           throw new Error("Stale generation");
         const nonce = await tx.get<string>("consumedNonce");
         if (nonce === candidate.nonce) throw new Error("Nonce replay");
-        await tx.put({ current: candidate, consumedNonce: candidate.nonce });
+        await tx.delete("negative");
+        await tx.put({
+          identity,
+          current: candidate,
+          consumedNonce: candidate.nonce,
+        });
       });
+      this.retryAt = 0;
+      await this.ctx.storage.setAlarm(Date.now() + 15_000);
     } catch {
       /* Retain prior generation only until its original expiry. */
     }

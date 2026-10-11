@@ -56,18 +56,6 @@ export async function settleOne(
     return reject(event.settleRefId, "Admission evidence rejected");
   if (event.admissionKeyId && !ring)
     return reject(event.settleRefId, "Settlement unavailable", true);
-  if (ring) {
-    const { finalFingerprint, ...final } = event;
-    if (
-      !finalFingerprint ||
-      !(await verify(
-        { purpose: "final:v2", facts: final },
-        finalFingerprint,
-        secret,
-      ))
-    )
-      return reject(event.settleRefId, "Final evidence rejected");
-  }
   const immutableFingerprint = await fingerprint(facts(event));
   const prior = await ctx.db
     .query("usageEvents")
@@ -83,6 +71,18 @@ export async function settleOne(
               : "already_applied",
         }
       : reject(event.settleRefId, "Settlement facts changed");
+  if (ring) {
+    const { finalFingerprint, ...final } = event;
+    if (
+      !finalFingerprint ||
+      !(await verify(
+        { purpose: "final:v2", facts: final },
+        finalFingerprint,
+        secret,
+      ))
+    )
+      return reject(event.settleRefId, "Final evidence rejected");
+  }
   const walletId = ctx.db.normalizeId("wallets", event.walletId);
   if (!walletId) return reject(event.settleRefId, "Wallet identity rejected");
   const wallet = await getWallet(ctx, walletId);
@@ -91,18 +91,26 @@ export async function settleOne(
     wallet.owner.clerkOrgId !== event.consumerClerkOrgId
   )
     return reject(event.settleRefId, "Wallet identity rejected");
-  if (
-    wallet.epoch !== event.epoch ||
-    wallet.gateState === "closed" ||
-    wallet.gateState === "maintenance" ||
-    (wallet.close?.ackAt !== undefined && wallet.gateState === "closing")
-  )
+  if (wallet.epoch !== event.epoch)
     return reject(event.settleRefId, "Stale wallet epoch");
   if (event.edgeSequence !== wallet.settledThroughEdgeSequence + 1)
     return reject(
       event.settleRefId,
       "Finalization sequence gap",
       event.edgeSequence > wallet.settledThroughEdgeSequence + 1,
+    );
+  if (
+    wallet.gateState === "closed" ||
+    wallet.gateState === "maintenance" ||
+    (wallet.close?.ackAt !== undefined && wallet.gateState === "closing")
+  )
+    return recordException(
+      ctx,
+      event,
+      wallet,
+      immutableFingerprint,
+      now,
+      "Authentic final arrived after wallet gate closed",
     );
   if (event.recoveryUnknown)
     return recordException(
@@ -336,4 +344,72 @@ async function recordException(
     settledThroughEdgeSequence: event.edgeSequence,
   });
   return { refId: event.settleRefId, status: "exception" };
+}
+
+/** Internal operator recovery only. Pins the exact failed final and current
+ * watermark; requires authentic admission, never guesses an upstream outcome.
+ * The resulting canonical exception ACK is returned by ordinary ingest retries. */
+export async function recoverRejectedFinal(
+  ctx: MutationCtx,
+  args: {
+    eventJson: string;
+    expectedFingerprint: string;
+    expectedWatermark: number;
+    reason: string;
+  },
+): Promise<Outcome> {
+  if (
+    args.eventJson.length > 1_048_576 ||
+    args.reason.trim().length < 8 ||
+    args.reason.length > 512
+  )
+    throw new ConvexError("Invalid recovery evidence");
+  const event = settlement.parse(JSON.parse(args.eventJson));
+  const digest = await fingerprint(facts(event));
+  if (digest !== args.expectedFingerprint)
+    throw new ConvexError("Recovery evidence changed");
+  const ring = process.env.NEXT_ADMISSION_KEYS
+    ? readRing(process.env.NEXT_ADMISSION_KEYS)
+    : null;
+  const secret = ring
+    ? event.admissionKeyId && Object.hasOwn(ring.keys, event.admissionKeyId)
+      ? ring.keys[event.admissionKeyId]
+      : undefined
+    : process.env.NEXT_ADMISSION_SECRET;
+  if (
+    !secret ||
+    event.deploymentId !== process.env.NEXT_DEPLOYMENT_ID ||
+    !(await verifyAdmission(event, secret))
+  )
+    throw new ConvexError("Admission evidence rejected");
+  const prior = await ctx.db
+    .query("usageEvents")
+    .withIndex("by_ref", (q) => q.eq("settleRefId", event.settleRefId))
+    .unique();
+  if (prior) {
+    if (prior.immutableFingerprint !== digest)
+      throw new ConvexError("Recovery evidence changed");
+    return {
+      refId: event.settleRefId,
+      status:
+        prior.billingOutcome === "exception" ? "exception" : "already_applied",
+    };
+  }
+  const wallet = await getWallet(ctx, id(ctx, "wallets", event.walletId));
+  if (
+    wallet.ownerKey !== event.ownerKey ||
+    wallet.owner.clerkOrgId !== event.consumerClerkOrgId ||
+    wallet.epoch !== event.epoch ||
+    wallet.settledThroughEdgeSequence !== args.expectedWatermark ||
+    event.edgeSequence !== args.expectedWatermark + 1
+  )
+    throw new ConvexError("Recovery wallet or watermark changed");
+  return recordException(
+    ctx,
+    event,
+    wallet,
+    digest,
+    Date.now(),
+    `Operator recovery: ${args.reason}`,
+  );
 }

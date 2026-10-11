@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { unstable_dev } from "wrangler";
+import { unstable_dev, unstable_readConfig } from "wrangler";
 const scratch = process.env.NEXT_TEST_SCRATCH;
 assert.ok(scratch && scratch.includes("/.tmp/"));
 const config = readFileSync(`${scratch}/.env.local`, "utf8");
@@ -28,6 +28,8 @@ const ring = JSON.stringify({
   current: "k1",
   keys: { k1: "test-only-secret-never-use-in-production" },
 });
+const oauthTokens = new Map();
+let oauthReads = 0;
 let calls = 0,
   release,
   entered;
@@ -44,6 +46,38 @@ function waitForUpstream() {
   });
 }
 const server = createServer(async (req, res) => {
+  if (req.url === "/v1/oauth_applications/access_tokens/verify") {
+    oauthReads++;
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const identity = oauthTokens.get(JSON.parse(body).access_token);
+    res.writeHead(identity ? 200 : 400, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify(
+        identity
+          ? {
+              subject: identity.ownerUserId,
+              revoked: false,
+              expired: false,
+              expiration: Math.floor(Date.now() / 1000) + 3600,
+              scopes: ["user:org:read", "zevium:mcp:execute"],
+              aud: ["https://gateway.test/mcp"],
+            }
+          : {},
+      ),
+    );
+    return;
+  }
+  if (req.url === "/oauth/userinfo") {
+    const identity = oauthTokens.get(req.headers.authorization?.slice(7));
+    res.writeHead(identity ? 200 : 401, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify(
+        identity ? { sub: identity.ownerUserId, org_id: identity.orgId } : {},
+      ),
+    );
+    return;
+  }
   calls++;
   if (req.url.includes("slow")) {
     entered?.();
@@ -56,25 +90,18 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const upstream = `http://127.0.0.1:${server.address().port}`;
+const productionConfig = unstable_readConfig({
+  config: fileURLToPath(new URL("../wrangler.jsonc", import.meta.url)),
+});
+assert.ok(productionConfig.migrations.some((m) => m.tag === "v5-next-edge"));
 const workerConfig = {
   name: "next-edge-acceptance",
   main: fileURLToPath(
     new URL("../test/fixtures/next-worker.ts", import.meta.url),
   ),
   compatibility_date: "2025-04-01",
-  durable_objects: {
-    bindings: [
-      { name: "WALLET", class_name: "WalletSqliteDO" },
-      { name: "EDGE_SNAPSHOTS", class_name: "EdgeSnapshotDO" },
-      { name: "NEXT_WALLET", class_name: "NextWalletDO" },
-    ],
-  },
-  migrations: [
-    {
-      tag: "test-v1",
-      new_sqlite_classes: ["WalletSqliteDO", "EdgeSnapshotDO", "NextWalletDO"],
-    },
-  ],
+  durable_objects: productionConfig.durable_objects,
+  migrations: productionConfig.migrations,
 };
 writeFileSync(`${scratch}/worker.json`, JSON.stringify(workerConfig));
 const persistPath = mkdtempSync(`${scratch}/worker-state-`);
@@ -126,6 +153,9 @@ async function start() {
       NEXT_TRANSPORT_KEYS: ring,
       GATEWAY_INTERNAL_SECRET: "test-only-internal-secret-never-production",
       TEST_ORIGIN: upstream,
+      CLERK_SECRET_KEY: "test-only-clerk-secret",
+      MCP_OAUTH_ISSUER: "https://clerk.invalid",
+      MCP_OAUTH_RESOURCE: "https://gateway.test/mcp",
     },
     experimental: {
       disableExperimentalWarning: true,
@@ -144,16 +174,6 @@ const post = async (path, body) => {
   return r.json();
 };
 const keyScope = (f) => createHash("sha256").update(f.secret).digest("hex");
-async function warm(f) {
-  for (const [kind, scope] of [
-    ["keys", keyScope(f)],
-    ["org", f.orgId],
-    ["org", f.publisherOrgId],
-    ["route", JSON.stringify([f.handle, "echo", f.orgId])],
-  ])
-    await post("/test/snapshot", { kind, scope });
-  await post("/test/wallet", { orgId: f.orgId, action: "refresh" });
-}
 const call = (f) =>
   fetch(`http://127.0.0.1:${worker.port}/gateway/${f.handle}/echo/echo`, {
     method: "POST",
@@ -203,14 +223,6 @@ try {
     1,
   );
   const f = await convex("seed", { run: `edge-normal-${run}` });
-  assert.equal(
-    (await call(f)).status,
-    503,
-    "cold authority refuses before upstream",
-  );
-  assert.equal(calls, 0);
-  await warm(f);
-
   let r = await call(f);
   assert.equal(r.status, 200, await r.text());
   await flush(f);
@@ -224,10 +236,53 @@ try {
       .reduce((n, e) => n + e.netAtoms + e.platformFeeAtoms, 0),
     50_000,
   );
+  // Actual OAuth DO binding, provider HTTP seam, Convex identity and metered MCP call.
+  const oauth = await convex("seed", { run: `edge-oauth-${run}` });
+  const bearer = `oat_${createHash("sha256").update(oauth.secret).digest("hex")}`;
+  oauthTokens.set(bearer, oauth);
+  const mcp = (token) =>
+    fetch(`http://127.0.0.1:${worker.port}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "call_api",
+          arguments: {
+            org: oauth.handle,
+            project: "echo",
+            method: "POST",
+            path: "/echo",
+          },
+        },
+      }),
+    });
+  let oauthResponse = await mcp(bearer);
+  assert.equal(oauthResponse.status, 200, await oauthResponse.clone().text());
+  assert.equal((await oauthResponse.json()).result.isError, undefined);
+  await flush(oauth);
+  assert.equal(
+    (await convex("inspect", { walletId: oauth.walletId })).wallet.balance,
+    95,
+  );
+  const verifiedReads = oauthReads;
+  oauthResponse = await mcp(bearer);
+  assert.equal(oauthResponse.status, 200);
+  assert.equal(oauthReads, verifiedReads, "Warm OAuth does not contact Clerk");
+  const invalid = `oat_${"z".repeat(32)}`;
+  assert.equal((await mcp(invalid)).status, 401);
+  const negativeReads = oauthReads;
+  assert.equal((await mcp(invalid)).status, 401);
+  assert.equal(oauthReads, negativeReads, "Invalid opaque token is cached");
+  await flush(oauth);
   // Freeze while a real upstream request is in flight. No ACK before its final.
   console.log("normal conservation passed");
   const slow = await convex("seed", { run: `edge-slow-${run}` });
-  await warm(slow);
   const inFlight = waitForUpstream();
   const pending = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${slow.handle}/echo/echo?slow`,
@@ -253,22 +308,21 @@ try {
   assert.equal((await call(slow)).status, 200);
   await flush(slow);
   console.log("inflight drain passed");
-  // Stale authority cannot execute or synchronously refresh.
+  // Expired authority fails closed when the bounded cold refresh fails.
   await post("/test/snapshot", {
     kind: "keys",
     scope: keyScope(f),
     expire: true,
   });
   const before = calls;
+  await post("/test/fault", { path: "/edge-snapshot", count: 1 });
   assert.equal((await call(f)).status, 503);
   assert.equal(calls, before);
-  await warm(f);
   await convex("revoke", { keyId: f.keyId });
   await post("/test/snapshot", { kind: "keys", scope: keyScope(f) });
   assert.equal((await call(f)).status, 402);
   // Authentic admission with immutable evidence changed produces terminal exception.
   const bad = await convex("seed", { run: `edge-exception-${run}` });
-  await warm(bad);
   const wait = waitForUpstream();
   const pendingBad = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${bad.handle}/echo/echo?slow`,
@@ -287,7 +341,6 @@ try {
   console.log("exceptions passed");
   // Kill workerd after durable admission, while upstream has not returned.
   const crash = await convex("seed", { run: `edge-crash-${run}` });
-  await warm(crash);
   const crashWait = waitForUpstream();
   const lost = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${crash.handle}/echo/echo?slow`,
@@ -309,7 +362,6 @@ try {
   state = await convex("inspect", { walletId: crash.walletId });
   assert.ok(state.wallet.close.ackAt);
   const depleted = await convex("seed", { run: `edge-depleted-${run}` });
-  await warm(depleted);
   const depletedWait = waitForUpstream();
   const depletedCall = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${depleted.handle}/echo/echo?slow`,
@@ -331,7 +383,6 @@ try {
       .ackAt,
   );
   const replay = await convex("seed", { run: `edge-replay-${run}` });
-  await warm(replay);
   await post("/test/fault", { path: "/ingest-usage", count: 1 });
   assert.equal((await call(replay)).status, 200);
   await flush(replay);
@@ -363,7 +414,6 @@ try {
     run: `edge-queued-${run}`,
     paid: true,
   });
-  await warm(queued);
   const queuedWait = waitForUpstream();
   const queuedCall = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${queued.handle}/echo/echo?slow`,
@@ -406,7 +456,6 @@ try {
     run: `edge-closed-${run}`,
     paid: true,
   });
-  await warm(closed);
   await convex("archive", { walletId: closed.walletId });
   await flush(closed);
   await convex("finish", {
@@ -433,7 +482,7 @@ try {
   });
   assert.equal(JSON.parse(local.state[0].data).checkpoint.gateState, "closed");
   console.log(
-    "PR5 real Worker + anonymous Convex acceptance passed: conservation, in-flight drain, stale/revoked key, exception, restart/drain.",
+    "PR5 real Worker + anonymous Convex acceptance passed: cold key/wallet/OAuth, production migrations, conservation, in-flight drain, stale/revoked key, exception, restart/drain.",
   );
 } finally {
   release?.();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { harness } from "./helpers";
 import { moneyFixture, eventFor, assertWallet } from "./moneyFixtures";
-import { sign } from "../contracts/transport";
+import { sign, fingerprint } from "../contracts/transport";
 import { requestClose } from "../convex/money/barrier";
 import { headerBundle } from "../contracts/snapshots";
 import { internal } from "../convex/_generated/api";
@@ -141,12 +141,13 @@ it("binds nonce, scope, deployment, lifetime, digest and rotated signing identit
   const p = await sealProjection(facts, ring),
     expected = { ...facts, minimumRevision: 1, now: NOW, keys: ring.keys };
   expect(await openProjection(p, expected)).toEqual(p);
+  expect(await openProjection(p, { ...expected, now: NOW - 1000 })).toEqual(p);
   for (const change of [
     { nonce: "replay" },
     { deploymentId: "foreign" },
     { scope: "foreign" },
     { now: NOW + 30_000 },
-    { now: NOW - 1 },
+    { now: NOW - 1001 },
     { minimumRevision: 2 },
   ])
     await expect(openProjection(p, { ...expected, ...change })).rejects.toThrow(
@@ -189,6 +190,7 @@ it("pins every wallet inventory page and rejects a concurrent grant before insta
   const first = walletPage.parse(
     (
       await t.query(internal.edgeSnapshots.read, {
+        now: Date.now(),
         kind: "wallet",
         scope: owner,
       })
@@ -199,6 +201,7 @@ it("pins every wallet inventory page and rejects a concurrent grant before insta
   const second = walletPage.parse(
     (
       await t.query(internal.edgeSnapshots.read, {
+        now: Date.now(),
         kind: "wallet",
         scope: owner,
         cursor: first.checkpoint.nextCursor,
@@ -217,6 +220,7 @@ it("pins every wallet inventory page and rejects a concurrent grant before insta
   );
   await expect(
     t.query(internal.edgeSnapshots.read, {
+      now: Date.now(),
       kind: "wallet",
       scope: owner,
       cursor: first.checkpoint.nextCursor,
@@ -228,7 +232,11 @@ it("membership receipts and user deletion revoke snapshots before paged cleanup"
     f = await t.run((ctx) => moneyFixture(ctx, "revocation"));
   const scope = await sha256Hex("revocation");
   const read = () =>
-    t.query(internal.edgeSnapshots.read, { kind: "keys", scope });
+    t.query(internal.edgeSnapshots.read, {
+      now: Date.now(),
+      kind: "keys",
+      scope,
+    });
   expect((await read()).payload).toMatchObject({ keys: [{ keyId: f.keyId }] });
   await t.run(async (ctx) => {
     const w = (await ctx.db.get(f.walletId))!;
@@ -257,6 +265,7 @@ it("membership receipts and user deletion revoke snapshots before paged cleanup"
   expect(
     (
       await t.query(internal.edgeSnapshots.read, {
+        now: Date.now(),
         kind: "keys",
         scope: await sha256Hex("user-delete"),
       })
@@ -287,6 +296,7 @@ it("private routes remain hidden and retired public routes retain 410 evidence",
   });
   const read = (consumer: string) =>
     t.query(internal.edgeSnapshots.read, {
+      now: Date.now(),
       kind: "route",
       scope: JSON.stringify([org!.publicHandle, "echo", consumer]),
     });
@@ -314,4 +324,93 @@ it("private routes remain hidden and retired public routes retain 410 evidence",
     visibility: "public",
     retired: true,
   });
+});
+
+it("recovers an exact rejected final through an audited zero-debit operator exception", async () => {
+  vi.stubEnv("NEXT_ADMISSION_KEYS", JSON.stringify(ring));
+  const t = harness(),
+    f = await t.run((ctx) => moneyFixture(ctx, "operator-final"));
+  const event = await t.run((ctx) =>
+    eventFor(ctx, f, 1, { admissionKeyId: "one" }),
+  );
+  // Authentic durable admission, but lost/corrupt final proof cannot auto-settle.
+  const eventJson = JSON.stringify(event);
+  expect(
+    await t.mutation(internal.wallets.settleEvent, { eventJson }),
+  ).toMatchObject({ status: "rejected", retryable: false });
+  const args = {
+    eventJson,
+    expectedFingerprint: await fingerprint(event),
+    expectedWatermark: 0,
+    reason: "Verified durable admission; final proof lost",
+  };
+  await expect(
+    t.mutation(internal.wallets.recoverRejectedSettlement, {
+      ...args,
+      expectedWatermark: 1,
+    }),
+  ).rejects.toThrow("watermark changed");
+  await expect(
+    t.mutation(internal.wallets.recoverRejectedSettlement, {
+      ...args,
+      expectedFingerprint: "wrong",
+    }),
+  ).rejects.toThrow("evidence changed");
+  expect(
+    await t.mutation(internal.wallets.recoverRejectedSettlement, args),
+  ).toMatchObject({ status: "exception" });
+  expect(
+    await t.mutation(internal.wallets.recoverRejectedSettlement, args),
+  ).toMatchObject({ status: "exception" });
+  expect(
+    await t.mutation(internal.wallets.settleEvent, { eventJson }),
+  ).toMatchObject({ status: "exception" });
+  const wallet = await t.run((ctx) => ctx.db.get(f.walletId));
+  expect(wallet).toMatchObject({ balance: 100, settledThroughEdgeSequence: 1 });
+  expect(
+    await t.run((ctx) => ctx.db.query("usageEvents").collect()),
+  ).toHaveLength(1);
+  expect(
+    await t.run((ctx) => ctx.db.query("publisherEarnings").collect()),
+  ).toHaveLength(0);
+  expect(
+    await t.run((ctx) => ctx.db.query("financeReconciliationCases").collect()),
+  ).toHaveLength(2);
+});
+it("records authentic contiguous finals after a closed gate as zero-debit exceptions", async () => {
+  vi.stubEnv("NEXT_ADMISSION_KEYS", JSON.stringify(ring));
+  const t = harness(),
+    f = await t.run((ctx) => moneyFixture(ctx, "closed-final"));
+  const event = await t.run((ctx) =>
+    eventFor(ctx, f, 1, { admissionKeyId: "one" }),
+  );
+  event.finalFingerprint = await sign(
+    { purpose: "final:v2", facts: event },
+    SECRET,
+  );
+  await t.run((ctx) => ctx.db.patch(f.walletId, { gateState: "closed" }));
+  expect(
+    await t.mutation(internal.wallets.settleEvent, {
+      eventJson: JSON.stringify(event),
+    }),
+  ).toMatchObject({ status: "exception" });
+  expect(await t.run((ctx) => ctx.db.get(f.walletId))).toMatchObject({
+    balance: 100,
+    settledThroughEdgeSequence: 1,
+  });
+});
+it("uses the HTTP action's supplied clock for query projection freshness", async () => {
+  const t = harness();
+  const first = await t.query(internal.edgeSnapshots.read, {
+    kind: "keys",
+    scope: "missing",
+    now: NOW,
+  });
+  const second = await t.query(internal.edgeSnapshots.read, {
+    kind: "keys",
+    scope: "missing",
+    now: NOW + 5000,
+  });
+  expect(second.generatedAt).toBe(first.generatedAt + 5000);
+  expect(second.expiresAt).toBe(first.expiresAt + 5000);
 });

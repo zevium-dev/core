@@ -3,6 +3,7 @@ import worker, { WalletSqliteDO, type Env } from "../../src/index";
 import { EdgeSnapshotDO as SnapshotBase } from "../../src/next/snapshots";
 import { NextWalletDO as WalletBase } from "../../src/next/wallet";
 export { WalletSqliteDO };
+export { EdgeOAuthDO } from "../../src/next/oauth";
 export class EdgeSnapshotDO extends SnapshotBase {
   async refresh() {
     await this.alarm();
@@ -39,7 +40,7 @@ const faults = new Map<string, number>();
 const lost = new Map<string, number>();
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
-  if (url.hostname === "example.com")
+  if (["example.com", "clerk.invalid", "api.clerk.com"].includes(url.hostname))
     return originalFetch(new URL(url.pathname + url.search, origin), init);
   return originalFetch(input, init).then((response) => {
     const remaining = faults.get(url.pathname) ?? 0;
@@ -74,7 +75,7 @@ export default {
       await stub.read(kind, scope);
       if (expire) await stub.expire();
       else await stub.refresh();
-      return Response.json(await stub.read(kind, scope));
+      return Response.json({ ok: true });
     }
     if (url.pathname === "/test/wallet") {
       const { orgId, action } = (await request.json()) as {

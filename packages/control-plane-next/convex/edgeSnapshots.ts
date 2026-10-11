@@ -51,18 +51,22 @@ export const activate = internalMutation({
 /** All joins for an executable projection occur at one database snapshot. Key
  * scopes are possession hashes (one key), avoiding changing org-key page walks. */
 export const read = internalQuery({
-  args: { kind: v.string(), scope: v.string(), cursor: v.optional(v.string()) },
+  args: {
+    kind: v.string(),
+    scope: v.string(),
+    cursor: v.optional(v.string()),
+    now: v.number(),
+  },
   handler: async (
     ctx,
-    { kind, scope, cursor },
+    { kind, scope, cursor, now },
   ): Promise<{
     payload: unknown;
     generationId: string;
     generatedAt: number;
     expiresAt: number;
   }> => {
-    const now = Date.now(),
-      deploymentId = process.env.NEXT_DEPLOYMENT_ID!;
+    const deploymentId = process.env.NEXT_DEPLOYMENT_ID!;
     let payload: unknown = null;
     if (kind === "keys") {
       const row = scope.startsWith("key:")

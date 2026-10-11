@@ -132,7 +132,7 @@ export function nextDeps(env: NextEnv): WorkerDeps {
     catalogueSource: {
       listPublic: async (args) => {
         const p = await readSnapshot(env, "catalogue", "public");
-        if (!p) return { items: [], nextCursor: null };
+        if (!p) throw new SpecSourceUnavailableError();
         const items = z
           .object({ items: z.array(catalogueListing) })
           .parse(p.payload).items;
@@ -146,22 +146,7 @@ export function nextDeps(env: NextEnv): WorkerDeps {
               .includes(args.search.toLowerCase())
           )
             continue;
-          try {
-            const route = await routeEvidence(
-              env,
-              item.publisherHandle,
-              item.slug,
-            );
-            if (
-              route &&
-              !route.payload.retired &&
-              route.payload.visibility === "public" &&
-              route.payload.specDigest === item.specDigest
-            )
-              visible.push({ ...item, description: item.description });
-          } catch {
-            /* Cold kill-state is not permission to display. */
-          }
+          visible.push({ ...item, description: item.description });
         }
         return { items: visible, nextCursor: null };
       },

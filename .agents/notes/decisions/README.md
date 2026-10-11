@@ -66,3 +66,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-11 | [Convex rebuild: preserve durable facts](2026-10-11-convex-rebuild-durable-facts.md)                 | accepted; isolated schema built        |
 | 2026-10-11 | [Promo self-consumption protection](2026-10-11-promo-self-consumption.md)                            | proposed; guard built                  |
 | 2026-10-11 | [PR 4 payment review defaults](2026-10-11-payment-review-defaults.md)                                | proposed; pending owner sign-off       |
+| 2026-10-11 | [Edge cold fills and issuance clock skew](2026-10-11-edge-cold-fill-and-clock-skew.md)               | accepted (built in PR #441)            |

@@ -6,7 +6,17 @@ import {
 import type { NextEnv } from "./snapshots";
 
 /** Control-plane retries wake cold wallets. This receipt is never a drain ACK. */
-export async function wakeWallet(request: Request, env: NextEnv) {
+export function wakeWallet(request: Request, env: NextEnv) {
+  return walletControl(request, env, "wake");
+}
+export function readWalletFailure(request: Request, env: NextEnv) {
+  return walletControl(request, env, "failure");
+}
+async function walletControl(
+  request: Request,
+  env: NextEnv,
+  action: "wake" | "failure",
+) {
   if (request.method !== "POST") return new Response(null, { status: 405 });
   if (
     !(await validInternalSecret(
@@ -21,6 +31,9 @@ export async function wakeWallet(request: Request, env: NextEnv) {
       z.strictObject({
         clerkOrgId: z.string().min(1).max(256),
         deploymentId: z.string().min(1).max(512),
+        ...(action === "failure"
+          ? { settleRefId: z.string().min(1).max(512) }
+          : {}),
       }),
       4096,
     );
@@ -29,14 +42,24 @@ export async function wakeWallet(request: Request, env: NextEnv) {
       !env.NEXT_WALLET ||
       body.deploymentId !== env.NEXT_DEPLOYMENT_ID
     )
-      return new Response("Wake unavailable", { status: 503 });
-    await env.NEXT_WALLET.get(
+      return new Response("Wallet control unavailable", { status: 503 });
+    const wallet = env.NEXT_WALLET.get(
       env.NEXT_WALLET.idFromName(
         JSON.stringify([env.NEXT_DEPLOYMENT_ID, body.clerkOrgId]),
       ),
-    ).wake(body.clerkOrgId);
+    );
+    if (action === "failure") {
+      const evidence = await wallet.failureEvidence(
+        z.string().parse(body.settleRefId),
+      );
+      return Response.json(evidence, {
+        status: evidence ? 200 : 404,
+        headers: { "cache-control": "no-store" },
+      });
+    }
+    await wallet.wake(body.clerkOrgId);
     return new Response(null, { status: 202 });
   } catch {
-    return new Response("Invalid wake request", { status: 400 });
+    return new Response("Invalid wallet control request", { status: 400 });
   }
 }

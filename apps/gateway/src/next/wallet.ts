@@ -8,7 +8,11 @@ import {
   type Admission,
   type Settlement,
 } from "@zevium/shared/edge/settlement";
-import { admissionFingerprint, sign } from "@zevium/shared/edge/transport";
+import {
+  admissionFingerprint,
+  fingerprint,
+  sign,
+} from "@zevium/shared/edge/transport";
 import {
   walletPage,
   readRing,
@@ -17,6 +21,11 @@ import {
   type WalletPage,
 } from "@zevium/shared/edge/replication";
 import { keyPolicy } from "@zevium/shared/edge/snapshots";
+import {
+  coldRefreshBudget,
+  COLD_FILL_MS,
+  waitForColdFill,
+} from "./cold-refresh";
 import { pull, type NextEnv } from "./snapshots";
 
 type RecordRow = {
@@ -32,6 +41,7 @@ type State = {
   freeze?: WalletPage["freeze"];
   ack?: unknown;
   sealed: boolean;
+  lastAdmit?: number;
 };
 const admissionInput = admission.omit({
   walletId: true,
@@ -63,6 +73,8 @@ export type AdmissionResult =
       available?: number;
     };
 export class NextWalletDO extends DurableObject<NextEnv> {
+  private checkpointPending?: Promise<void>;
+  private coldRetryAt = 0;
   constructor(ctx: DurableObjectState, env: NextEnv) {
     super(ctx, env);
     ctx.storage.sql.exec(
@@ -121,7 +133,24 @@ export class NextWalletDO extends DurableObject<NextEnv> {
       )
       .toArray();
   }
-  async wake(clerkOrgId: string) {
+  /** Exact private evidence for internal operator recovery; never an ACK. */
+  async failureEvidence(settleRefId: string) {
+    z.string().min(1).max(512).parse(settleRefId);
+    const row = this.ctx.storage.sql
+      .exec<{ evidence: string; reason: string }>(
+        "SELECT f.evidence,f.reason FROM next_failures f JOIN next_calls c ON json_extract(c.data, '$.settleRefId')=f.ref WHERE f.ref=? AND c.ack IS NULL",
+        settleRefId,
+      )
+      .toArray()[0];
+    if (!row) return null;
+    return {
+      eventJson: row.evidence,
+      expectedFingerprint: await fingerprint(JSON.parse(row.evidence)),
+      expectedWatermark: this.state()?.checkpoint.settledThroughEdgeSequence,
+      reason: row.reason,
+    };
+  }
+  async wake(clerkOrgId: string, maintenance = true) {
     await this.ctx.blockConcurrencyWhile(async () => {
       const old = await this.ctx.storage.get<string>("owner");
       if (old && old !== clerkOrgId)
@@ -130,8 +159,10 @@ export class NextWalletDO extends DurableObject<NextEnv> {
         await this.ctx.storage.put({
           owner: clerkOrgId,
           bootstrapId: crypto.randomUUID(),
+          lastWake: Date.now(),
         });
-      if ((await this.ctx.storage.getAlarm()) === null)
+      if (maintenance) await this.ctx.storage.put("lastWake", Date.now());
+      if (maintenance && (await this.ctx.storage.getAlarm()) === null)
         await this.ctx.storage.setAlarm(Date.now() + 1);
     });
   }
@@ -144,7 +175,21 @@ export class NextWalletDO extends DurableObject<NextEnv> {
     key = keyPolicy.parse(key);
     if (!Number.isSafeInteger(validUntil))
       throw new Error("Invalid authority deadline");
-    await this.wake(input.consumerClerkOrgId);
+    await this.wake(input.consumerClerkOrgId, false);
+    const current = this.state();
+    if (!current || current.checkpoint.validUntil <= Date.now()) {
+      if (this.checkpointPending)
+        await waitForColdFill(this.checkpointPending).catch(() => {});
+      else if (Date.now() >= this.coldRetryAt && coldRefreshBudget.take()) {
+        this.coldRetryAt = Date.now() + 5000;
+        await waitForColdFill(
+          this.refreshCheckpoint(
+            input.consumerClerkOrgId,
+            AbortSignal.timeout(COLD_FILL_MS),
+          ),
+        ).catch(() => {});
+      }
+    }
     return this.ctx.blockConcurrencyWhile(async () => {
       const s = this.state(),
         now = Date.now();
@@ -325,8 +370,10 @@ export class NextWalletDO extends DurableObject<NextEnv> {
             JSON.stringify([slice.lotId, slice.originLotId]),
           );
         if (free) this.setCounter(freeId, freeUsed + 1);
-        this.save({ ...s, nextSequence: a.edgeSequence });
+        this.save({ ...s, nextSequence: a.edgeSequence, lastAdmit: now });
       });
+      if ((await this.ctx.storage.getAlarm()) === null)
+        await this.ctx.storage.setAlarm(Date.now() + 15_000);
       return { ok: true, admission: a };
     });
   }
@@ -447,6 +494,13 @@ export class NextWalletDO extends DurableObject<NextEnv> {
         cp.settledThroughEdgeSequence !== 0)
     )
       throw new Error("Lost wallet requires operator recovery");
+    if (old?.checkpoint.generationId === cp.generationId) {
+      this.save({
+        ...old,
+        checkpoint: { ...old.checkpoint, validUntil: cp.validUntil },
+      });
+      return;
+    }
     const sources = pages.flatMap((p) => p.checkpoint.sources),
       lots = new Map(
         pages.flatMap((p) => p.checkpoint.lots).map((l) => [l.lotId, l]),
@@ -515,6 +569,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
         );
       this.save({
         checkpoint: cp,
+        lastAdmit: old?.lastAdmit,
         nextSequence:
           old && old.checkpoint.epoch === cp.epoch ? old.nextSequence : 0,
         freeze: pages[0]!.freeze,
@@ -528,33 +583,105 @@ export class NextWalletDO extends DurableObject<NextEnv> {
       });
     });
   }
+  private async refreshCheckpoint(owner: string, signal: AbortSignal) {
+    if (this.checkpointPending) return this.checkpointPending;
+    this.checkpointPending = this.fillCheckpoint(owner, signal);
+    try {
+      await this.checkpointPending;
+    } finally {
+      this.checkpointPending = undefined;
+    }
+  }
+  private async fillCheckpoint(owner: string, signal: AbortSignal) {
+    const bootstrapId = await this.ctx.storage.get<string>("bootstrapId");
+    if (!bootstrapId) throw new Error("Wallet recovery required");
+    if (!(await this.ctx.storage.get<boolean>("activated"))) {
+      const response = await fetch(
+        new URL("/wallet-activate", this.env.NEXT_CONVEX_SITE_URL),
+        {
+          method: "POST",
+          headers: {
+            "x-internal-secret": this.env.GATEWAY_INTERNAL_SECRET!,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            clerkOrgId: owner,
+            deploymentId: this.env.NEXT_DEPLOYMENT_ID,
+            bootstrapId,
+          }),
+          signal,
+        },
+      );
+      if (!response.ok) throw new Error("Wallet activation unavailable");
+      await this.ctx.storage.put("activated", true);
+    }
+    const pages: WalletPage[] = [];
+    let cursor: string | undefined;
+    do {
+      const p = walletPage.parse(
+        (await pull(this.env, "wallet", owner, cursor, 0, signal)).payload,
+      );
+      if (
+        pages.length &&
+        (p.checkpoint.generationId !== pages[0]!.checkpoint.generationId ||
+          p.checkpoint.page !== pages.length)
+      )
+        throw new Error("Mixed checkpoint generation");
+      pages.push(p);
+      if (
+        pages.length === 1 &&
+        p.checkpoint.generationId === this.state()?.checkpoint.generationId
+      )
+        break;
+      cursor = p.checkpoint.nextCursor;
+      if (pages.length > 1000) throw new Error("Checkpoint capacity exceeded");
+    } while (cursor);
+    signal.throwIfAborted();
+    await this.ctx.blockConcurrencyWhile(async () =>
+      this.install(pages, bootstrapId),
+    );
+  }
+  private prune() {
+    const now = Date.now(),
+      day = new Date(now).toISOString().slice(0, 10),
+      month = day.slice(0, 7);
+    this.ctx.storage.sql.exec(
+      "DELETE FROM next_counters WHERE (id LIKE 'rate:%' AND value + (? - at) / 1000.0 >= 60) OR (id LIKE 'free:%' AND substr(id,-10) < ?) OR (id LIKE 'budget:%' AND substr(id,-7) < ?)",
+      now,
+      day,
+      month,
+    );
+    this.ctx.storage.sql.exec(
+      "DELETE FROM next_failures WHERE NOT EXISTS (SELECT 1 FROM next_calls WHERE next_failures.ref = 'proof:' || next_calls.ref OR next_failures.ref = json_extract(next_calls.data, '$.settleRefId'))",
+    );
+  }
+  private failure(ref: string, evidence: string, reason: string) {
+    const prior = this.ctx.storage.sql
+      .exec<{ reason: string }>(
+        "SELECT reason FROM next_failures WHERE ref=?",
+        ref,
+      )
+      .toArray()[0];
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO next_failures VALUES(?,?,?)",
+      ref,
+      evidence,
+      reason,
+    );
+    if (prior?.reason !== reason)
+      console.error(
+        JSON.stringify({
+          event: "next_settlement_failure",
+          deploymentId: this.env.NEXT_DEPLOYMENT_ID,
+          refId: ref,
+          reason,
+        }),
+      );
+  }
   async alarm() {
-    await this.ctx.storage.setAlarm(Date.now() + 15_000);
     const owner = await this.ctx.storage.get<string>("owner");
     if (!owner) return;
     try {
-      const bootstrapId = await this.ctx.storage.get<string>("bootstrapId");
-      if (!bootstrapId) throw new Error("Wallet recovery required");
-      if (!(await this.ctx.storage.get<boolean>("activated"))) {
-        const response = await fetch(
-          new URL("/wallet-activate", this.env.NEXT_CONVEX_SITE_URL),
-          {
-            method: "POST",
-            headers: {
-              "x-internal-secret": this.env.GATEWAY_INTERNAL_SECRET!,
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              clerkOrgId: owner,
-              deploymentId: this.env.NEXT_DEPLOYMENT_ID,
-              bootstrapId,
-            }),
-            signal: AbortSignal.timeout(5000),
-          },
-        );
-        if (!response.ok) throw new Error("Wallet activation unavailable");
-        await this.ctx.storage.put("activated", true);
-      }
       for (const row of this.calls())
         if (!row.final && row.deadline <= Date.now()) {
           const a = JSON.parse(row.data) as Admission;
@@ -608,12 +735,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
             if (!current || current.ack) continue;
             if (result.status === "rejected") {
               if (!result.retryable)
-                this.ctx.storage.sql.exec(
-                  "INSERT OR REPLACE INTO next_failures VALUES(?,?,?)",
-                  result.refId,
-                  row.final!,
-                  result.reason,
-                );
+                this.failure(result.refId, row.final!, result.reason);
             } else {
               this.ctx.storage.sql.exec(
                 "UPDATE next_calls SET ack=? WHERE seq=? AND ref=?",
@@ -622,12 +744,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
                 admitted.reservationId,
               );
               if (result.status === "exception") {
-                this.ctx.storage.sql.exec(
-                  "INSERT OR REPLACE INTO next_failures VALUES(?,?,?)",
-                  result.refId,
-                  row.final!,
-                  "settlement_exception",
-                );
+                this.failure(result.refId, row.final!, "settlement_exception");
                 const a = JSON.parse(row.data) as Admission,
                   f = JSON.parse(row.final!) as Settlement,
                   id = `budget:${a.keyFamilyId}:${a.budgetPeriod}`;
@@ -640,26 +757,7 @@ export class NextWalletDO extends DurableObject<NextEnv> {
           }
         });
       }
-      const pages: WalletPage[] = [];
-      let cursor: string | undefined;
-      do {
-        const p = walletPage.parse(
-          (await pull(this.env, "wallet", owner, cursor)).payload,
-        );
-        if (
-          pages.length &&
-          (p.checkpoint.generationId !== pages[0]!.checkpoint.generationId ||
-            p.checkpoint.page !== pages.length)
-        )
-          throw new Error("Mixed checkpoint generation");
-        pages.push(p);
-        cursor = p.checkpoint.nextCursor;
-        if (pages.length > 1000)
-          throw new Error("Checkpoint capacity exceeded");
-      } while (cursor);
-      await this.ctx.blockConcurrencyWhile(async () =>
-        this.install(pages, bootstrapId),
-      );
+      await this.refreshCheckpoint(owner, AbortSignal.timeout(10_000));
       let s = this.state()!;
       if (s.freeze && !this.calls().length) {
         if (!s.ack) {
@@ -690,6 +788,22 @@ export class NextWalletDO extends DurableObject<NextEnv> {
       }
     } catch {
       /* Durable calls, finals and close state survive; no timeout ACK. */
+    } finally {
+      this.prune();
+      const state = this.state(),
+        now = Date.now();
+      const lastActivity = Math.max(
+        state?.lastAdmit ?? 0,
+        (await this.ctx.storage.get<number>("lastWake")) ?? 0,
+      );
+      if (
+        this.calls().length ||
+        state?.freeze ||
+        state?.checkpoint.gateState === "closing" ||
+        now - lastActivity < 5 * 60_000
+      )
+        await this.ctx.storage.setAlarm(now + 15_000);
+      else await this.ctx.storage.deleteAlarm();
     }
   }
 }
