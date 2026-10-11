@@ -11,7 +11,8 @@ type Keyring = {
 };
 
 export type SecretBinding = {
-  purpose: "upstream-credential" | "webhook-signing-secret";
+  purpose:
+    "upstream-credential" | "webhook-signing-secret" | "oauth-connection";
   resource: string;
 };
 
@@ -244,6 +245,14 @@ export function credentialBinding(
     purpose: "upstream-credential",
     resource: `${projectId}:${name}`,
   };
+}
+
+/** Connection secrets, bound to the connection and field (no swapping). */
+export function connectionSecretBinding(
+  connectionId: string,
+  field: "access" | "refresh" | "verifier",
+): SecretBinding {
+  return { purpose: "oauth-connection", resource: `${connectionId}:${field}` };
 }
 
 export function webhookBinding(

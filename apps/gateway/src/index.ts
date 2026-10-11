@@ -53,6 +53,10 @@ import {
 import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight } from "./cors";
+import {
+  InternalHttpConnections,
+  handleConnectionsRequest,
+} from "./connections";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
 import { applyGatewaySecurityHeaders } from "./security-headers";
@@ -285,6 +289,13 @@ function buildDeps(env: Env): WorkerDeps {
           })
         : undefined,
     specSource: new CachedSpecSource({ inner: innerSpec }),
+    connections:
+      siteUrl && env.GATEWAY_INTERNAL_SECRET
+        ? new InternalHttpConnections({
+            siteUrl,
+            internalSecret: env.GATEWAY_INTERNAL_SECRET,
+          })
+        : undefined,
     publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
     catalogueSource: new CachedCatalogueSource({
       inner: innerCatalogue,
@@ -301,6 +312,7 @@ function pipelineOnly(deps: WorkerDeps): PipelineDeps {
     machinePayments: deps.machinePayments,
     keyVerifier: deps.keyVerifier,
     specSource: deps.specSource,
+    connections: deps.connections,
     fetchImpl: deps.fetchImpl,
     idGenerator: deps.idGenerator,
     now: deps.now,
@@ -354,6 +366,7 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
+ * - /connections — connected-account management + provider callback
  * - /internal/grant — control-plane grant projection (shared secret)
  * - /internal/sync — control-plane checkpoint refresh (shared secret)
  * - /health
@@ -523,6 +536,15 @@ async function dispatchRequest(
       ctx,
       route,
     );
+  }
+
+  if (parts[0] === "connections") {
+    const response = await handleConnectionsRequest(
+      request,
+      env,
+      buildDeps(env),
+    );
+    if (response) return response;
   }
 
   const mockRoute = parseMockPath(url.pathname);

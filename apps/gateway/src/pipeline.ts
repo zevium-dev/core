@@ -8,6 +8,8 @@ import type { WalletDO } from "./wallet";
 import type { KeyVerifier, VerifiedKey } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { admit } from "./admit";
+import type { ConnectionsBackend } from "./connections";
+import { CONNECTION_USED_HEADER } from "@zevium/shared";
 import { forward } from "./forward";
 import { finalize } from "./finalize";
 
@@ -33,6 +35,8 @@ export type PipelineDeps = {
   /** Trusted MCP OAuth identity; never populated from request parameters. */
   authenticatedKey?: VerifiedKey;
   specSource: SpecSource;
+  /** Connected-account tokens for OAuth-secured operations. */
+  connections?: ConnectionsBackend;
   /** Upstream fetch — inject mock in tests. */
   fetchImpl?: typeof fetch;
   /** Id generator for request/reservation ids. */
@@ -108,6 +112,9 @@ export async function handleGatewayRequest(
           deps.now,
           _ctx,
         );
+  if (!(admission instanceof Response) && admission.connection) {
+    response.headers.set(CONNECTION_USED_HEADER, admission.connection.id);
+  }
   if (paid) {
     response.headers.set("X-Zevium-Wallet-Session", paid.token);
     response.headers.set(

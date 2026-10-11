@@ -10,6 +10,7 @@ export async function forward(
   request: Request,
   admission: Pick<Admission, "published" | "verified" | "upstreamUrl"> & {
     tokenRequest?: Admission["tokenRequest"];
+    connection?: Admission["connection"];
   },
   fetchImpl: typeof fetch = fetch,
   prepareResponse?: (response: Response) => Promise<Response>,
@@ -18,6 +19,13 @@ export async function forward(
   const upstreamHeaders = filterRequestHeaders(request.headers);
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
     upstreamHeaders.set(name, value);
+  }
+  // The caller's connected account wins over any publisher Authorization.
+  if (admission.connection) {
+    upstreamHeaders.set(
+      "authorization",
+      `Bearer ${admission.connection.accessToken}`,
+    );
   }
   const idempotencyKey = upstreamHeaders.get("idempotency-key");
   if (idempotencyKey !== null) {

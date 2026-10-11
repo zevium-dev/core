@@ -2,7 +2,12 @@ import { InternalHttpCatalogueSearch } from "../catalogue-search";
 import { nextOAuth } from "./oauth";
 import type { AdmissionInput } from "./wallet";
 import { z } from "zod";
-import { sha256Hex, matchOperation, joinUpstreamUrl } from "@zevium/shared";
+import {
+  sha256Hex,
+  matchOperation,
+  joinUpstreamUrl,
+  operationConnection,
+} from "@zevium/shared";
 import {
   snapshot,
   keyPolicy,
@@ -277,6 +282,15 @@ async function execute(
         404,
         "no_upstream",
         "Publisher has not configured an upstream URL",
+        id,
+      );
+    // Connected accounts aren't on this control plane yet: refuse at 0
+    // credits rather than charge for a call the upstream must reject.
+    if (operationConnection(getParsedSpec(p), matched.operation)?.required)
+      return jsonError(
+        503,
+        "connections_unavailable",
+        "Connected accounts are temporarily unavailable",
         id,
       );
   } catch {

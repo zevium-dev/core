@@ -1,7 +1,12 @@
 import { isWalletSession, verifyWalletSession } from "./wallet-session";
 import {
+  CONNECTION_HEADER,
+  getOAuthProvider,
+  isConnectionId,
+  isProviderApiHost,
   joinUpstreamUrl,
   matchOperation,
+  operationConnection,
   signAdmissionProof,
 } from "@zevium/shared";
 import type { KeyBudgetSnapshot } from "./wallet";
@@ -11,6 +16,7 @@ import { jsonError } from "./errors";
 import { paymentRequiredResponse } from "./payment-required";
 import { assertSafeUpstreamTarget } from "./upstream-safety";
 import { applyDeprecationHeaders } from "./deprecation";
+import { connectionErrorResponse } from "./connections";
 import type { GatewayRoute, PipelineDeps, PipelineEnv } from "./pipeline";
 
 import { prepareTokenRequest } from "./token-metering";
@@ -268,6 +274,50 @@ export async function admit(
   }
   const incoming = new URL(request.url);
   upstreamUrl.search = incoming.search;
+
+  // Operations secured by a provider-bound OAuth scheme run with the
+  // caller's connected account. Resolved before any reservation: cost 0.
+  const requirement = operationConnection(parsed, matched.operation);
+  const selectedConnection = request.headers.get(CONNECTION_HEADER);
+  let connection: { id: string; accessToken: string } | undefined;
+  if (requirement) {
+    const provider = getOAuthProvider(requirement.provider)!;
+    const connectionError = (
+      failure: Parameters<typeof connectionErrorResponse>[0],
+    ) =>
+      connectionErrorResponse(failure, {
+        scheme: requirement.scheme,
+        providerName: provider.name,
+        api: `${route.publisherHandle}/${route.projectSlug}`,
+        origin: incoming.origin,
+        requestId,
+      });
+    // A connected token only ever goes to the provider's own API.
+    if (!isProviderApiHost(provider, upstreamUrl.hostname)) {
+      return connectionError("upstream_not_allowed");
+    }
+    if (selectedConnection !== null && !isConnectionId(selectedConnection)) {
+      return connectionError("invalid");
+    }
+    const outcome = deps.connections
+      ? await deps.connections.token({
+          orgId: verified.orgId,
+          projectId: published.projectId,
+          scheme: requirement.scheme,
+          ...(selectedConnection === null
+            ? {}
+            : { connectionId: selectedConnection }),
+        })
+      : ({ status: "unavailable" } as const);
+    if (outcome.status === "ok") {
+      connection = {
+        id: outcome.connectionId,
+        accessToken: outcome.accessToken,
+      };
+    } else if (requirement.required || selectedConnection !== null) {
+      return connectionError(outcome.status);
+    }
+  }
 
   let tokenRequest: Awaited<ReturnType<typeof prepareTokenRequest>> | undefined;
   if (matched.pricing.token && matched.pricing.cost > 0) {
@@ -528,6 +578,7 @@ export async function admit(
     immutableUsageIdentity,
     releaseChallenge,
     gatewayRelease,
+    connection,
   };
 }
 export type Admission = Exclude<Awaited<ReturnType<typeof admit>>, Response>;

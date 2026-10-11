@@ -169,3 +169,40 @@ export {
   verifyAdmissionProof,
   type AdmissionClaims,
 } from "./admission-proof.js";
+
+export {
+  CONNECTION_CALLBACK_PATH,
+  CONNECTION_HEADER,
+  CONNECTION_PENDING_TTL_MS,
+  CONNECTION_USED_HEADER,
+  MAX_CONNECTION_LABEL_LENGTH,
+  OAUTH_PROVIDER_EXTENSION,
+  buildAuthorizationUrl,
+  collectConnectionUpstreamIssues,
+  collectOAuthSchemes,
+  findOAuthScheme,
+  isConnectionId,
+  isSafeReturnUrl,
+  isSchemeName,
+  normalizeConnectionLabel,
+  operationConnection,
+  parseTokenResponse,
+  requestedScopes,
+  type ConnectedAccountScheme,
+  type ConnectionRequirement,
+  type ConnectionStatus,
+  type ConnectionTokenFailure,
+  type ConnectionView,
+  type OAuthTokenError,
+  type OAuthTokenSet,
+} from "./connections.js";
+
+export {
+  OAUTH_PROVIDERS,
+  getOAuthProvider,
+  isOAuthProviderId,
+  isProviderApiHost,
+  type OAuthProvider,
+  type OAuthProviderId,
+  type OAuthTokenStyle,
+} from "./oauth-providers.js";

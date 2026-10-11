@@ -5,6 +5,11 @@ import {
   parseTokenPricing,
   MAX_ENDPOINT_COST_CREDITS,
 } from "./pricing.js";
+import {
+  collectConnectionUpstreamIssues,
+  collectOAuthSchemes,
+  collectOperationConnectionIssues,
+} from "./connections.js";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_OPENAPI_SPEC_BYTES = 393_216;
@@ -142,6 +147,20 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
     }
   }
 
+  const securitySpec = {
+    components: isRecord(raw.components) ? raw.components : undefined,
+    security: Array.isArray(raw.security) ? raw.security : undefined,
+  };
+  for (const issue of [
+    ...collectOAuthSchemes(securitySpec).issues,
+    ...collectConnectionUpstreamIssues({
+      ...securitySpec,
+      servers: raw.servers,
+    }),
+  ]) {
+    issues.push({ level: "error", ...issue });
+  }
+
   if (!isRecord(raw.paths)) {
     issues.push({
       level: "warning",
@@ -171,6 +190,14 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
           message: "Operation must be an object",
         });
         continue;
+      }
+
+      for (const issue of collectOperationConnectionIssues(
+        securitySpec,
+        opVal,
+        `$.paths["${pathKey}"].${lower}`,
+      )) {
+        issues.push({ level: "error", ...issue });
       }
 
       const cost = opVal["x-zevium-cost"];

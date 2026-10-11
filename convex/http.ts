@@ -12,6 +12,7 @@ import { httpAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { stripeClient } from "./billing";
 import { notificationMailer } from "./lib/notificationEmail";
+import { registerConnectionRoutes } from "./connectionsHttp";
 
 const http = httpRouter();
 
@@ -1000,6 +1001,8 @@ http.route({
     );
   }),
 });
+
+registerConnectionRoutes(http);
 
 export default http;
 

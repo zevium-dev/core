@@ -57,6 +57,8 @@ export type ParsedOpenApiSpec = {
    * to resolve `$ref: "#/components/schemas/..."` one level. Optional / sparse.
    */
   components?: Record<string, unknown>;
+  /** Raw root `security` requirements; operations may override them. */
+  security?: unknown[];
 };
 
 export type MatchedOperation = {
@@ -149,6 +151,7 @@ export function parseSpec(json: string): ParsedOpenApiSpec {
     servers,
     paths,
     components,
+    ...(Array.isArray(raw.security) ? { security: raw.security } : {}),
   };
 }
 
