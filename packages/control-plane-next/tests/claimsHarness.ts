@@ -176,7 +176,9 @@ export const claim = internalMutation({
         return ctx.db.insert("walletEntries", {
           walletId: a.wallet,
           refId: ref,
-          kind: "usage",
+          kind: "promo",
+          lotId: a.lot,
+          originLotId: a.lot,
           amount: 0,
           sequence: 1,
           balanceAfter: 0,

@@ -7,6 +7,7 @@ import {
   ingestUsage,
   fundingSlices,
   lotMove,
+  lotCompatibility,
   compatibleLots,
   feeFacts,
   refundFacts,
@@ -174,6 +175,8 @@ describe("owner decisions", () => {
       priority: 1,
     };
     expect(compatibleLots(a, { ...a })).toBe(true);
+    const storedLot = { ...a, remainingCredits: 10, _id: "lot" };
+    expect(compatibleLots(storedLot, storedLot)).toBe(true);
     for (const patch of [
       { expiresAt: NOW },
       { sourceKind: "promo" as const },
@@ -184,10 +187,46 @@ describe("owner decisions", () => {
       expect(compatibleLots(a, { ...a, ...patch })).toBe(false);
     expect(
       compatibleLots(
-        { ...a, expiryClass: "annual", expiresAt: NOW },
-        { ...a, expiryClass: "annual", expiresAt: NOW + 1 },
+        { ...a, expiryClass: `at:${NOW}`, expiresAt: NOW },
+        { ...a, expiryClass: `at:${NOW}`, expiresAt: NOW + 1 },
       ),
     ).toBe(false);
+  });
+  it("enforces canonical expiry classes before indexed merge lookup", () => {
+    const lot = {
+      walletId: "w",
+      expiryClass: "never",
+      sourceKind: "payment",
+      refundable: true,
+      priority: 1,
+    };
+    expect(lotCompatibility.safeParse(lot).success).toBe(true);
+    expect(
+      lotCompatibility.safeParse({
+        ...lot,
+        expiryClass: `at:${NOW}`,
+        expiresAt: NOW,
+      }).success,
+    ).toBe(true);
+    expect(
+      lotCompatibility.safeParse({ ...lot, expiryClass: "at:0", expiresAt: 0 })
+        .success,
+    ).toBe(true);
+    for (const patch of [
+      { expiresAt: NOW },
+      { expiryClass: `at:${NOW}` },
+      { expiryClass: `at:${NOW}`, expiresAt: NOW + 1 },
+      { expiryClass: `at:0${NOW}`, expiresAt: NOW },
+      { expiryClass: "annual", expiresAt: NOW },
+      { expiryClass: "at:1.5", expiresAt: 1.5 },
+      {
+        expiryClass: "at:9007199254740992",
+        expiresAt: Number.MAX_SAFE_INTEGER + 1,
+      },
+    ])
+      expect(lotCompatibility.safeParse({ ...lot, ...patch }).success).toBe(
+        false,
+      );
   });
   it("binds signup ref to user and personal org and never mints credits for fees", () => {
     const grant = {

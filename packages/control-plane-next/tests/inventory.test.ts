@@ -1,3 +1,4 @@
+import { inventoryDrift } from "../scripts/inventory-drift";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,5 +84,71 @@ describe("contract inventory coverage and isolation", () => {
         tables.components[name as keyof typeof tables.components],
       );
     }
+  });
+});
+
+describe("inventory CI boundary", () => {
+  const baseline = {
+    functions: [
+      {
+        name: "wallets:get",
+        kind: "query",
+        status: "changed",
+        inferredReturn: "Old",
+        callers: ["old.ts"],
+      },
+    ],
+    routes: [{ route: "/usage", method: "POST", status: "retained" }],
+  };
+  it("reports caller and inferred return changes without requiring a refresh", () => {
+    const current = {
+      ...baseline,
+      functions: [
+        {
+          ...baseline.functions[0],
+          inferredReturn: "New",
+          callers: ["new.ts"],
+        },
+      ],
+    };
+    expect(inventoryDrift(baseline, current)).toEqual({
+      blocking: false,
+      advisory: true,
+    });
+  });
+  it("blocks missing/new functions and kind/status changes", () => {
+    for (const functions of [
+      [],
+      [
+        ...baseline.functions,
+        {
+          name: "wallets:new",
+          kind: "query",
+          status: "changed",
+          inferredReturn: "New",
+          callers: [],
+        },
+      ],
+      [{ ...baseline.functions[0], kind: "mutation" }],
+      [{ ...baseline.functions[0], status: "retired" }],
+    ])
+      expect(
+        inventoryDrift(baseline, { ...baseline, functions }).blocking,
+      ).toBe(true);
+  });
+  it("ignores ordering but blocks HTTP classification changes", () => {
+    const other = { ...baseline.functions[0], name: "wallets:other" };
+    expect(
+      inventoryDrift(
+        { ...baseline, functions: [...baseline.functions, other] },
+        { ...baseline, functions: [other, ...baseline.functions] },
+      ).blocking,
+    ).toBe(false);
+    expect(
+      inventoryDrift(baseline, {
+        ...baseline,
+        routes: [{ ...baseline.routes[0], status: "retired" }],
+      }).blocking,
+    ).toBe(true);
   });
 });

@@ -42,19 +42,38 @@ export const fundingSlices = z
         message: "Funding total exceeds safe integer range",
       });
   });
-export const lotCompatibility = z.strictObject({
-  walletId: identity,
-  expiryClass: identity,
-  expiresAt: integer.optional(),
-  sourceKind: z.enum(["payment", "promo", "admin"]),
-  refundable: z.boolean(),
-  priority: integer,
-});
+export const lotCompatibility = z
+  .strictObject({
+    walletId: identity,
+    expiryClass: z.string().regex(/^(never|at:(0|[1-9][0-9]*))$/),
+    expiresAt: integer.optional(),
+    sourceKind: z.enum(["payment", "promo", "admin"]),
+    refundable: z.boolean(),
+    priority: integer,
+  })
+  .refine(
+    (lot) =>
+      lot.expiryClass ===
+      (lot.expiresAt === undefined ? "never" : `at:${lot.expiresAt}`),
+    "Expiry class must encode the exact deadline",
+  );
 export function compatibleLots(
   a: z.infer<typeof lotCompatibility>,
   b: z.infer<typeof lotCompatibility>,
 ): boolean {
+  // Stored lots may carry accounting fields; validate only the compatibility projection.
+  const valid = (lot: z.infer<typeof lotCompatibility>) =>
+    lotCompatibility.safeParse({
+      walletId: lot.walletId,
+      expiryClass: lot.expiryClass,
+      expiresAt: lot.expiresAt,
+      sourceKind: lot.sourceKind,
+      refundable: lot.refundable,
+      priority: lot.priority,
+    }).success;
   return (
+    valid(a) &&
+    valid(b) &&
     a.walletId === b.walletId &&
     a.expiryClass === b.expiryClass &&
     a.expiresAt === b.expiresAt &&

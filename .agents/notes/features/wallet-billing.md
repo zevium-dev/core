@@ -60,6 +60,10 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## Tech
 
+### Isolated rebuild foundation — 2026-10-11
+
+PR #436 review fixes are implemented only in `packages/control-plane-next/convex/schema/wallet.ts` and `contracts/money.ts`: required ledger variant references; canonical negative admin facts in immutable per-source reversals; payment/admin adjustment union; refund/dispute status separation; canonical exact-deadline expiry classes. The 32-slice cap counts original sources inside merged lots. Live wallet behavior is unchanged; PR 3 owns transactions. [Rebuild schema and handoff](../architecture/convex-rebuild.md#pr-1-implementation-and-handoff--2026-10-11).
+
 ### Accepted changes — implementation pending (2026-10-11)
 
 Accepted rebuild targets are owned by the linked decisions; they are not shipped in this docs-only change. #353/#430 replace the allocator/authority model, #426 narrows signup eligibility, and #318 changes card fee/refund treatment. Existing raw expired inventory is not yet booked as revenue (#353); machine activation is deferred (#424, P2 #109). Current token code remains until #425. Keep the observed code facts below distinct from these pending changes.
@@ -158,6 +162,8 @@ Key-verification bullet lives in [api-keys](api-keys.md).
   - Also verify keyless mock and MCP calls against same listing.
 
 ## Decisions
+
+- 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 
 - 2026-10-11 — ACCEPTED: DO spend authority, 30s snapshots, freeze/drain, no fixed-price debt; bounded lots and dust merge #353/#430. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
 - 2026-10-11 — ACCEPTED: grant once per Clerk user via their first signed organization creation; automatic creation supplies the signup personal org. First-processed delivery wins if creation webhooks race. Joined orgs never claim for the joining user; anonymous wallets receive nothing. [Decision](../decisions/2026-10-11-signup-credit-first-created-org.md).

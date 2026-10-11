@@ -32,6 +32,10 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 
 ## Tech
 
+### Isolated rebuild foundation — 2026-10-11
+
+PR #436 adds `financeReconciliationCases` in `packages/control-plane-next/convex/schema/read.ts` for foreign Stripe events, orphan transfers and account-creation quarantine, including facts without an owned organization. `rowKind:case` owns state/cursors/counts; candidate/provider-request evidence is indexed child rows in the same table, never growing arrays. This isolated schema raises the application count to 34; PR 4 owns worker behavior and live settlement is unchanged. [Rebuild schema and handoff](../architecture/convex-rebuild.md#pr-1-implementation-and-handoff--2026-10-11).
+
 ### Accepted changes — implementation pending (2026-10-11)
 
 Rebuild #353 may release source-aware daily earning buckets up to ~24h after the seven-day hold; never earlier. This is an accepted target, not a change to current release code. House publisher delivery #314 uses the ordinary publisher ledger; optional total subsidy cap #429 must not create a second earnings ledger.
@@ -70,6 +74,8 @@ Connect webhook subscriptions (`/stripe-connect-webhook` payout events, `/stripe
 - Transfers are org-admin-initiated (`payouts.initiatePublisherTransfer` from `/app/earnings`), not scheduled; onboarding via `payouts.startOnboarding` / `refreshOnboarding` / `replaceClosedAccount`
 
 ## Decisions
+
+- 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 
 - 2026-10-11 — ACCEPTED: Daily buckets may release up to ~24h after the seven-day hold; rebuild #353. [Decision](../decisions/2026-10-11-publisher-risk-release.md).
 - 2026-10-11 — ACCEPTED: House org uses ordinary 95/5 ledger (#314); optional total subsidy cap is P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).

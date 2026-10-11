@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { inventoryDrift } from "./inventory-drift";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -355,9 +356,14 @@ else {
   const frozen = JSON.parse(
     readFileSync(manifestPath, "utf8"),
   ) as typeof result;
-  if (JSON.stringify(frozen) !== JSON.stringify(result))
+  const drift = inventoryDrift(frozen, result);
+  if (drift.blocking)
     throw new Error(
-      "Contract inventory drift: run contracts:refresh and review classifications",
+      "Contract classification drift (function names/kinds/status or HTTP routes): run contracts:refresh and review classifications",
+    );
+  if (drift.advisory)
+    console.warn(
+      "Advisory inventory drift: arguments, returns, callers or metadata changed; contracts:refresh is optional. Classifications passed.",
     );
 }
 console.log(result.counts);

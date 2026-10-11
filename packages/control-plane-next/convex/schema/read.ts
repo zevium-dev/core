@@ -244,6 +244,63 @@ export const readTables = {
     .index("by_project_time", ["projectId", "createdAt"])
     .index("by_due", ["state", "nextAttemptAt"])
     .index("by_lease", ["state", "leaseUntil"]),
+  notificationPreferences: defineTable({
+    clerkOrgId: v.string(),
+    clerkUserId: v.string(),
+    emailOptOut: v.boolean(),
+  }).index("by_org_user", ["clerkOrgId", "clerkUserId"]),
+  // Permanent receipts outlive provider retention and notification revisions.
+  notificationEmailDeliveries: defineTable({
+    notificationId: v.id("notifications"),
+    revision: v.number(),
+    clerkUserId: v.string(),
+    emailId: v.string(),
+  }).index("by_notification_revision_user", [
+    "notificationId",
+    "revision",
+    "clerkUserId",
+  ]),
+  // Evidence is paginated child rows, never arrays growing on a case document.
+  financeReconciliationCases: defineTable(
+    v.union(
+      v.object({
+        rowKind: v.literal("case"),
+        kind: v.union(
+          v.literal("transfer"),
+          v.literal("transfer_orphan"),
+          v.literal("account_create"),
+          v.literal("foreign_stripe_event"),
+          v.literal("foreign_test_payout"),
+        ),
+        status: v.union(
+          v.literal("open"),
+          v.literal("adopted"),
+          v.literal("quarantined"),
+          v.literal("resolved"),
+        ),
+        reason: v.string(),
+        organizationId: v.optional(v.id("organizations")),
+        transferId: v.optional(v.id("publisherTransfers")),
+        operationId: v.optional(v.string()),
+        candidateCount: v.number(),
+        providerCursor: v.optional(v.string()),
+        attempts: v.number(),
+        resolution: v.optional(v.string()),
+        createdAt: v.number(),
+        updatedAt: v.number(),
+      }),
+      v.object({
+        rowKind: v.union(v.literal("candidate"), v.literal("provider_request")),
+        caseId: v.id("financeReconciliationCases"),
+        value: v.string(),
+        createdAt: v.number(),
+      }),
+    ),
+  )
+    .index("by_status_updated", ["rowKind", "status", "updatedAt"])
+    .index("by_transfer", ["rowKind", "transferId"])
+    .index("by_operation", ["rowKind", "operationId"])
+    .index("by_case_evidence", ["caseId", "rowKind", "value"]),
   notifications: defineTable({
     organizationId: v.id("organizations"),
     refId: v.string(),
@@ -257,11 +314,13 @@ export const readTables = {
     emailState: v.optional(
       v.union(
         v.literal("pending"),
-        v.literal("sent"),
+        v.literal("queued"),
         v.literal("skipped"),
         v.literal("failed"),
       ),
     ),
+    emailRevision: v.optional(v.number()),
+    emailOffset: v.optional(v.number()),
     emailAttempts: v.optional(v.number()),
     emailNextAttemptAt: v.optional(v.number()),
   })

@@ -1,6 +1,30 @@
 import { defineTable } from "convex/server";
 import { v } from "convex/values";
 import { jobState, lotState, sourceKind } from "./common";
+const walletEntryFields = {
+  walletId: v.id("wallets"),
+  refId: v.string(),
+  sequence: v.number(),
+  balanceAfter: v.number(),
+  createdAt: v.number(),
+  immutableFingerprint: v.string(),
+};
+const paymentAdjustmentFields = {
+  paymentId: v.id("payments"),
+  providerSourceRef: v.string(),
+  principalCents: v.number(),
+  feeCents: v.number(),
+  requestedCredits: v.number(),
+  effectiveCredits: v.number(),
+  fundsWithdrawn: v.boolean(),
+  fundsReinstated: v.boolean(),
+  revision: v.number(),
+  appliedWalletCredits: v.number(),
+  appliedPublisherCredits: v.number(),
+  cursor: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+};
 export const walletTables = {
   wallets: defineTable({
     ownerKey: v.string(),
@@ -45,59 +69,53 @@ export const walletTables = {
   walletEntries: defineTable(
     v.union(
       v.object({
-        walletId: v.id("wallets"),
-        refId: v.string(),
-        sequence: v.number(),
-        balanceAfter: v.number(),
-        createdAt: v.number(),
-        immutableFingerprint: v.string(),
-        paymentId: v.optional(v.id("payments")),
-        usageEventId: v.optional(v.id("usageEvents")),
-        lotId: v.optional(v.id("fundingLots")),
-        adjustmentId: v.optional(v.id("paymentAdjustments")),
-        kind: v.union(
-          v.literal("grant"),
-          v.literal("promo"),
-          v.literal("usage"),
-          v.literal("reversal"),
-          v.literal("restoration"),
-        ),
+        ...walletEntryFields,
+        kind: v.union(v.literal("grant"), v.literal("promo")),
         amount: v.number(),
-        originLotId: v.optional(v.id("fundingLots")),
+        lotId: v.id("fundingLots"),
+        originLotId: v.id("fundingLots"),
+        paymentId: v.optional(v.id("payments")),
       }),
       v.object({
-        walletId: v.id("wallets"),
-        refId: v.string(),
-        sequence: v.number(),
-        balanceAfter: v.number(),
-        createdAt: v.number(),
-        immutableFingerprint: v.string(),
+        ...walletEntryFields,
+        kind: v.literal("usage"),
+        amount: v.number(),
+        usageEventId: v.id("usageEvents"),
+      }),
+      v.object({
+        ...walletEntryFields,
+        kind: v.union(v.literal("reversal"), v.literal("restoration")),
+        amount: v.number(),
+        lotId: v.id("fundingLots"),
+        originLotId: v.id("fundingLots"),
         paymentId: v.optional(v.id("payments")),
-        usageEventId: v.optional(v.id("usageEvents")),
-        lotId: v.optional(v.id("fundingLots")),
-        adjustmentId: v.optional(v.id("paymentAdjustments")),
+        adjustment: v.union(
+          v.object({
+            kind: v.literal("payment"),
+            id: v.id("paymentAdjustments"),
+          }),
+          // Admin adjustments are canonical immutable per-source journal facts.
+          v.object({ kind: v.literal("admin"), ref: v.string() }),
+        ),
+      }),
+      v.object({
+        ...walletEntryFields,
         kind: v.literal("lot_move"),
         fromLotId: v.id("fundingLots"),
         toLotId: v.id("fundingLots"),
         originLotId: v.id("fundingLots"),
+        sourceRef: v.string(),
+        paymentId: v.optional(v.id("payments")),
         movedCredits: v.number(),
         reason: v.literal("dust_merge"),
         mergeId: v.string(),
         amount: v.literal(0),
       }),
       v.object({
-        walletId: v.id("wallets"),
-        refId: v.string(),
-        sequence: v.number(),
-        balanceAfter: v.number(),
-        createdAt: v.number(),
-        immutableFingerprint: v.string(),
-        paymentId: v.optional(v.id("payments")),
-        usageEventId: v.optional(v.id("usageEvents")),
-        lotId: v.optional(v.id("fundingLots")),
-        adjustmentId: v.optional(v.id("paymentAdjustments")),
+        ...walletEntryFields,
         kind: v.literal("expiry"),
         amount: v.number(),
+        lotId: v.id("fundingLots"),
         originLotId: v.id("fundingLots"),
         breakageCredits: v.number(),
       }),
@@ -107,7 +125,13 @@ export const walletTables = {
     .index("by_wallet_sequence", ["walletId", "sequence"])
     .index("by_payment", ["paymentId", "sequence"])
     .index("by_move_source", ["originLotId", "sequence"])
-    .index("by_merge", ["mergeId", "sequence"]),
+    .index("by_merge", ["mergeId", "sequence"])
+    .index("by_admin_adjustment", [
+      "walletId",
+      "adjustment.kind",
+      "adjustment.ref",
+      "sequence",
+    ]),
   fundingLots: defineTable({
     walletId: v.id("wallets"),
     sourceRef: v.string(),
@@ -123,6 +147,7 @@ export const walletTables = {
     refundable: v.boolean(),
     priority: v.number(),
     createdAt: v.number(),
+    // Writers must parse lotCompatibility: "never" or `at:${expiresAt}`.
     expiryClass: v.string(),
     expiresAt: v.optional(v.number()),
     state: lotState,
@@ -252,33 +277,26 @@ export const walletTables = {
       "reconciliation.state",
       "reconciliation.nextAttemptAt",
     ]),
-  paymentAdjustments: defineTable({
-    paymentId: v.id("payments"),
-    providerSourceRef: v.string(),
-    kind: v.union(v.literal("refund"), v.literal("dispute")),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("requires_action"),
-      v.literal("succeeded"),
-      v.literal("failed"),
-      v.literal("canceled"),
-      v.literal("open"),
-      v.literal("won"),
-      v.literal("lost"),
+  paymentAdjustments: defineTable(
+    v.union(
+      v.object({
+        ...paymentAdjustmentFields,
+        kind: v.literal("refund"),
+        status: v.union(
+          v.literal("pending"),
+          v.literal("requires_action"),
+          v.literal("succeeded"),
+          v.literal("failed"),
+          v.literal("canceled"),
+        ),
+      }),
+      v.object({
+        ...paymentAdjustmentFields,
+        kind: v.literal("dispute"),
+        status: v.union(v.literal("open"), v.literal("won"), v.literal("lost")),
+      }),
     ),
-    principalCents: v.number(),
-    feeCents: v.number(),
-    requestedCredits: v.number(),
-    effectiveCredits: v.number(),
-    fundsWithdrawn: v.boolean(),
-    fundsReinstated: v.boolean(),
-    revision: v.number(),
-    appliedWalletCredits: v.number(),
-    appliedPublisherCredits: v.number(),
-    cursor: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
+  )
     .index("by_source", ["kind", "providerSourceRef"])
     .index("by_payment", ["paymentId", "createdAt"]),
   webhookReceipts: defineTable({

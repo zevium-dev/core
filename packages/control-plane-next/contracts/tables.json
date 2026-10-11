@@ -30,7 +30,10 @@
     "reviewEvents",
     "webhookDeliveries",
     "notifications",
-    "specImportLeases"
+    "specImportLeases",
+    "notificationPreferences",
+    "notificationEmailDeliveries",
+    "financeReconciliationCases"
   ],
   "components": {
     "rateLimiter": ["rateLimits", "pendingUpdates"],

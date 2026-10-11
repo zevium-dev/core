@@ -112,7 +112,7 @@ export const settlementTables = {
         kind: v.literal("lifetime"),
       }),
       v.object({
-        kind: v.literal("lifetime"),
+        kind: v.literal("lifetime_consumer_project"),
         consumerOrganizationId: v.id("organizations"),
         projectId: v.id("projects"),
         firstSuccessAt: v.number(),
