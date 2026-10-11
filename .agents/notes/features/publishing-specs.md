@@ -1,8 +1,8 @@
 # Publishing specs
 
 > Status: built (editor/settings correctness #362 and heading hierarchy #397 fixed; P2 rollback not built); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
-> Rebuild status: Isolated rebuild PR 2 publishing implemented; production still uses existing control plane.
-> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`, `packages/shared/src/pricing-policy.ts`
+> Rebuild status: PR #437 review fixes implemented (2026-10-11). Isolated rebuild PR 2 publishing implemented; production still uses existing control plane.
+> Code: `packages/control-plane-next/convex/{specs,projects,publishReadiness}.ts`, `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`, `apps/web/src/components/project-settings-panel.test.tsx`, `packages/shared/src/pricing-policy.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -58,6 +58,8 @@ Sign up → Create org → Create project
 ## Tech
 
 ### Isolated rebuild PR 2 — 2026-10-11
+
+PR #437 review fixes: `projectDrafts.by_project` owns draft text/hash/revision/savedAt. Project rows retain small draft metadata and readiness; save updates both atomically and identical retries write neither. `projects.list` now requires `paginationOpts`, returns a page DTO and caps reads at 50 small rows. `specs.publish` requires `draftHash` and returns the same conflict DTO as save on mismatch, before reserving routes or inserting versions. Readiness reads the body only for target extraction. Tests cover 55 near-limit drafts through list/archive/sunset and publication after a collaborator refreshes readiness. Code: `packages/control-plane-next/convex/{specs,projects,publishReadiness}.ts`, `lib/drafts.ts`, `schema/identity.ts`, `tests/publishing.test.ts`.
 
 Next embeds draft/readiness on projects, keeps immutable `specVersions`, reserves routes inside publication, and returns explicit DTO allowlists. Draft CAS, credential-fingerprint/TTL readiness, scalar-only pricing, at most 256 operations and one root upstream are enforced. Unpriced operations remain absent from derived prices/counts. Member draft edits remain allowed; live metadata and publication require admin. Code: `packages/control-plane-next/convex/{projects,specs,publishReadiness}.ts`, `lib/{dto,specPolicy,publicRoutes}.ts`, `tests/publishing.test.ts`. PR 6 must pair the probe fingerprint and wire catalogue, quality and notification side effects before cutover; see [handoff](../architecture/convex-rebuild.md#pr-2-implementation-and-handoff--2026-10-11).
 

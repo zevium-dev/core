@@ -17,6 +17,7 @@ import type * as keySettings from "../keySettings.js";
 import type * as keyVerification from "../keyVerification.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_credentialCrypto from "../lib/credentialCrypto.js";
+import type * as lib_drafts from "../lib/drafts.js";
 import type * as lib_dto from "../lib/dto.js";
 import type * as lib_identity from "../lib/identity.js";
 import type * as lib_keyProjection from "../lib/keyProjection.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   keyVerification: typeof keyVerification;
   "lib/auth": typeof lib_auth;
   "lib/credentialCrypto": typeof lib_credentialCrypto;
+  "lib/drafts": typeof lib_drafts;
   "lib/dto": typeof lib_dto;
   "lib/identity": typeof lib_identity;
   "lib/keyProjection": typeof lib_keyProjection;

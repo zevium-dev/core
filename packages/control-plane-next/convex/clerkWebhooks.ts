@@ -5,7 +5,7 @@ import {
   availableHandle,
   claimSignupOrganization,
   getOrganization,
-  trustedSlug,
+  organizationSlug,
 } from "./lib/identity";
 import { revokeKey } from "./lib/keys";
 /** Receipt and mirror transition commit together; exceptions leave delivery retryable. */
@@ -80,7 +80,7 @@ export const apply = internalMutation({
         }
       } else if (!tomb && org?.archivedAt === undefined) {
         if (!org) {
-          const slug = trustedSlug(args.slug);
+          const slug = await organizationSlug(args.slug, args.objectId);
           if (!args.name)
             throw new ConvexError("Incomplete Clerk organization");
           const id = await ctx.db.insert("organizations", {
@@ -98,7 +98,7 @@ export const apply = internalMutation({
             throw new ConvexError("Incomplete Clerk organization");
           await ctx.db.patch(org._id, {
             name: args.name,
-            slug: trustedSlug(args.slug),
+            slug: await organizationSlug(args.slug, args.objectId),
             imageUrl: args.imageUrl,
             lastClerkEventAt: args.sourceTimestamp,
             revision: org.revision + 1,
@@ -133,6 +133,10 @@ export const apply = internalMutation({
             deletedAt: now,
             lastClerkEventAt: args.sourceTimestamp,
           });
+        await ctx.scheduler.runAfter(0, internal.clerkWebhooks.userKeysPage, {
+          userId: args.objectId,
+          cursor: null,
+        });
       } else if (!user)
         await ctx.db.insert("users", {
           clerkUserId: args.objectId,
@@ -176,6 +180,30 @@ export const apply = internalMutation({
       payloadHash: args.fingerprint,
     });
     return { status: "processed" };
+  },
+});
+/** Terminal user deletion revokes keys across every organization, including grace keys. */
+export const userKeysPage = internalMutation({
+  args: { userId: v.string(), cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk", (q) => q.eq("clerkUserId", args.userId))
+      .unique();
+    if (user?.deletedAt === undefined) return;
+    const page = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_owner", (q) =>
+        q.eq("kind", "key").eq("ownerUserId", args.userId),
+      )
+      .paginate({ cursor: args.cursor, numItems: 50 });
+    for (const row of page.page)
+      if (row.kind === "key") await revokeKey(ctx, row);
+    if (!page.isDone)
+      await ctx.scheduler.runAfter(0, internal.clerkWebhooks.userKeysPage, {
+        ...args,
+        cursor: page.continueCursor,
+      });
   },
 });
 export const membershipPage = internalMutation({

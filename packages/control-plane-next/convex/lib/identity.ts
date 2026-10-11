@@ -28,6 +28,15 @@ export function trustedSlug(slug: string | undefined) {
     throw new ConvexError("Organization slug is unavailable");
   return slug;
 }
+/** Clerk instances may disable slugs; provider identity still has a stable handle. */
+export async function organizationSlug(
+  slug: string | undefined,
+  clerkOrgId: string,
+) {
+  return slug && isValidSlug(slug) && slug.length <= 120
+    ? slug
+    : `org-${(await sha256Hex(clerkOrgId)).slice(0, 32)}`;
+}
 export async function handleAvailable(
   ctx: Pick<QueryCtx, "db">,
   handle: string,

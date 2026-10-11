@@ -1,3 +1,4 @@
+import { getProjectDraft } from "./lib/drafts";
 import { v } from "convex/values";
 import {
   extractHealthCheckTarget,
@@ -69,8 +70,9 @@ export const getTarget = internalQuery({
       !(await isActive(ctx, org))
     )
       throw new Error("Project not found");
-    const target = project.draft?.text
-      ? extractHealthCheckTarget(parseSpec(project.draft.text))
+    const draft = await getProjectDraft(ctx, project._id);
+    const target = draft?.text
+      ? extractHealthCheckTarget(parseSpec(draft.text))
       : null;
     return {
       url: target?.url ?? null,
@@ -101,7 +103,9 @@ export const recordPassingTest = internalMutation({
         (await credentialSetFingerprint(ctx, project._id))
     )
       return false;
-    const target = extractHealthCheckTarget(parseSpec(project.draft.text));
+    const draft = await getProjectDraft(ctx, project._id);
+    if (!draft || draft.hash !== args.draftHash) return false;
+    const target = extractHealthCheckTarget(parseSpec(draft.text));
     if (
       !target ||
       target.url !== args.healthCheckUrl ||

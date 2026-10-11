@@ -118,6 +118,12 @@ export async function insertKey(
     (await membershipRemoved(ctx, p.clerkOrgId, p.ownerUserId, verifiedAt))
   )
     throw new ConvexError("Verified key is no longer active");
+  const cleanup = await ctx.db
+    .query("apiKeys")
+    .withIndex("by_new_key", (q) => q.eq("newKeyId", p.clerkKeyId))
+    .first();
+  if (cleanup?.kind === "rotation" && cleanup.state === "failed")
+    throw new ConvexError("Verified key is no longer active");
   for (const [index, field, value] of [
     ["by_key", "keyId", p.clerkKeyId],
     ["by_hash", "secretSha256", p.secretSha256],

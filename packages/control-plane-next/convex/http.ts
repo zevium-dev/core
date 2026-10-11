@@ -92,8 +92,9 @@ router.route({
     const parsed = payload.safeParse(verified);
     if (!parsed.success) return new Response("Invalid event", { status: 400 });
     const { type, data, timestamp: eventAt } = parsed.data;
-    const sourceTimestamp =
-      data.deleted_at ?? data.updated_at ?? eventAt ?? Number(signedAt) * 1000;
+    const sourceTimestamp = type.endsWith(".deleted")
+      ? (eventAt ?? Number(signedAt) * 1000)
+      : (data.updated_at ?? eventAt ?? Number(signedAt) * 1000);
     const creatorClerkUserId =
       type === "organization.created"
         ? (data.created_by ?? undefined)

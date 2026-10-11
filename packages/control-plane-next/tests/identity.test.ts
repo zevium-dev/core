@@ -1,3 +1,4 @@
+import { sha256Hex } from "@zevium/shared";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { harness, seed, identity, webhook, webhookSecret } from "./helpers";
 import { api } from "../convex/_generated/api";
@@ -228,7 +229,10 @@ describe("signed Clerk identity boundary", () => {
       created("org_one", { updated_at: 3000 }),
     );
     await expect(
-      t.withIdentity(identity()).query(api.projects.list, { orgSlug: "one" }),
+      t.withIdentity(identity()).query(api.projects.list, {
+        orgSlug: "one",
+        paginationOpts: { cursor: null, numItems: 50 },
+      }),
     ).rejects.toThrow("Organization not found");
     expect(
       (
@@ -334,3 +338,58 @@ it("archives access immediately while retaining wallet and immutable publication
     await t.query(api.organizations.getByPublicHandle, { handle: "one" }),
   ).toBeNull();
 });
+
+it.each([null, undefined, "Invalid slug!", "x".repeat(121)])(
+  "mirrors slug-disabled or invalid-slug organizations (%s) with a stable handle and creator claim",
+  async (slug) => {
+    const t = harness();
+    const handle = `org-${(await sha256Hex("org_one")).slice(0, 32)}`;
+    const admin = t.withIdentity({
+      subject: "user_one",
+      org_id: "org_one",
+      org_role: "org:admin",
+    });
+    const ensured = await admin.mutation(api.organizations.ensureOrganization, {
+      clerkOrgId: "org_one",
+    });
+    expect(ensured.publicHandle).toBe(handle);
+    expect(
+      (
+        await webhook(
+          t,
+          "slug",
+          "organization.created",
+          created("org_one", { slug }),
+        )
+      ).status,
+    ).toBe(200);
+    const org = await t.run((ctx) => ctx.db.get(ensured._id));
+    expect(org).toMatchObject({
+      slug: handle,
+      publicHandle: handle,
+      personalForClerkUserId: "user_one",
+    });
+    expect(
+      (
+        await webhook(
+          t,
+          "other-slug",
+          "organization.created",
+          created("org_two", { slug, created_by: "user_two" }),
+        )
+      ).status,
+    ).toBe(200);
+    const other = await t.run((ctx) =>
+      ctx.db
+        .query("organizations")
+        .withIndex("by_clerk", (q) => q.eq("clerkOrgId", "org_two"))
+        .unique(),
+    );
+    expect(other?.publicHandle).not.toBe(handle);
+    await expect(
+      admin.mutation(api.organizations.setPublicHandle, {
+        handle: "Invalid slug!",
+      }),
+    ).rejects.toThrow("slug");
+  },
+);

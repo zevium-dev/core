@@ -1,5 +1,16 @@
+import { sha256Hex } from "@zevium/shared";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
-import { harness, seed, identity, draftProject, pass, spec } from "./helpers";
+import {
+  harness,
+  seed,
+  identity,
+  draftProject,
+  pass,
+  spec,
+  webhook,
+  webhookSecret,
+} from "./helpers";
+import type { Id } from "../convex/_generated/dataModel";
 import { api, internal } from "../convex/_generated/api";
 import {
   credentialBinding,
@@ -27,6 +38,7 @@ describe("immutable publishing and bounded readiness", () => {
     expect(
       (
         await admin.mutation(api.specs.publish, {
+          draftHash: await sha256Hex(spec),
           projectId: p._id,
           version: "1.0.0",
         })
@@ -36,9 +48,14 @@ describe("immutable publishing and bounded readiness", () => {
     await expect(
       t
         .withIdentity(identity("one", "member", "org:member"))
-        .mutation(api.specs.publish, { projectId: p._id, version: "1.0.0" }),
+        .mutation(api.specs.publish, {
+          draftHash: await sha256Hex(spec),
+          projectId: p._id,
+          version: "1.0.0",
+        }),
     ).rejects.toThrow("admin");
     const result = await admin.mutation(api.specs.publish, {
+      draftHash: await sha256Hex(spec),
       projectId: p._id,
       version: "1.0.0",
     });
@@ -49,6 +66,7 @@ describe("immutable publishing and bounded readiness", () => {
     expect(
       (
         await admin.mutation(api.specs.publish, {
+          draftHash: await sha256Hex(spec),
           projectId: p._id,
           version: "1.0.0",
         })
@@ -141,6 +159,7 @@ describe("immutable publishing and bounded readiness", () => {
     expect(
       (
         await admin.mutation(api.specs.publish, {
+          draftHash: await sha256Hex(spec),
           projectId: p._id,
           version: "1.0.0",
         })
@@ -150,6 +169,7 @@ describe("immutable publishing and bounded readiness", () => {
     expect(
       (
         await admin.mutation(api.specs.publish, {
+          draftHash: await sha256Hex(spec),
           projectId: p._id,
           version: "1.0.1",
         })
@@ -171,6 +191,7 @@ describe("immutable publishing and bounded readiness", () => {
       admin = t.withIdentity(identity());
     await pass(t, p._id);
     await admin.mutation(api.specs.publish, {
+      draftHash: await sha256Hex(spec),
       projectId: p._id,
       version: "1.0.0",
     });
@@ -217,6 +238,7 @@ describe("immutable publishing and bounded readiness", () => {
       admin = t.withIdentity(identity());
     await pass(t, p._id);
     await admin.mutation(api.specs.publish, {
+      draftHash: await sha256Hex(spec),
       projectId: p._id,
       version: "1.0.0",
     });
@@ -299,12 +321,16 @@ describe("immutable publishing and bounded readiness", () => {
     );
     await pass(t, p._id);
     const publication = await admin.mutation(api.specs.publish, {
+      draftHash: await sha256Hex(spec),
       projectId: p._id,
       version: "1.0.0",
     });
     for (const value of [
       publication,
-      await admin.query(api.projects.list, { orgSlug: "one" }),
+      await admin.query(api.projects.list, {
+        orgSlug: "one",
+        paginationOpts: { cursor: null, numItems: 50 },
+      }),
       await admin.query(api.projects.get, {
         orgSlug: "one",
         projectSlug: "echo",
@@ -379,6 +405,7 @@ describe("immutable publishing and bounded readiness", () => {
       admin = t.withIdentity(identity());
     await pass(t, p._id);
     await admin.mutation(api.specs.publish, {
+      draftHash: await sha256Hex(spec),
       projectId: p._id,
       version: "1.0.0",
     });
@@ -451,3 +478,153 @@ describe("single AAD-bound secret envelope", () => {
     );
   });
 });
+
+it("rejects stale publish hashes even when a collaborator has refreshed readiness", async () => {
+  const t = harness();
+  await seed(t);
+  const project = await draftProject(t);
+  const admin = t.withIdentity(identity());
+  const before = (await admin.query(api.specs.getDraft, {
+    projectId: project._id,
+  }))!;
+  const changed = spec.replace("Echo", "Collaborator edit");
+  const saved = await admin.mutation(api.specs.saveDraft, {
+    projectId: project._id,
+    spec: changed,
+    baseHash: before.draftHash,
+  });
+  await pass(t, project._id);
+  const conflict = await admin.mutation(api.specs.publish, {
+    projectId: project._id,
+    version: "1.0.0",
+    draftHash: before.draftHash,
+  });
+  expect(conflict).toEqual(
+    await admin.mutation(api.specs.saveDraft, {
+      projectId: project._id,
+      spec,
+      baseHash: before.draftHash,
+    }),
+  );
+  expect(conflict).toMatchObject({
+    ok: false,
+    conflict: true,
+    draft: changed,
+    draftHash: saved.draftHash,
+  });
+  expect(await t.run((ctx) => ctx.db.query("specVersions").collect())).toEqual(
+    [],
+  );
+  expect(
+    await t.run((ctx) => ctx.db.query("routeTombstones").collect()),
+  ).toEqual([]);
+  expect(
+    await admin.mutation(api.specs.publish, {
+      projectId: project._id,
+      version: "1.0.0",
+      draftHash: saved.draftHash!,
+    }),
+  ).toMatchObject({ ok: true });
+});
+
+it.each(["archive", "sunset"])(
+  "keeps large drafts out of paginated projects and %s cleanup",
+  async (cleanup) => {
+    vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", webhookSecret);
+    const t = harness();
+    await seed(t);
+    const admin = t.withIdentity(identity());
+    const large = spec.replace(
+      '"title":"Echo"',
+      '"title":"Echo","description":"' + "x".repeat(390_000) + '"',
+    );
+    const ids: Id<"projects">[] = [];
+    for (let i = 0; i < 55; i++) {
+      const project = await admin.mutation(api.projects.create, {
+        orgSlug: "one",
+        name: `Project ${i}`,
+        slug: `project-${String(i).padStart(2, "0")}`,
+      });
+      ids.push(project._id);
+      expect(
+        await admin.mutation(api.specs.saveDraft, {
+          projectId: project._id,
+          spec: large,
+          baseHash: await sha256Hex(""),
+        }),
+      ).toMatchObject({ ok: true });
+    }
+    const rows = await t.run((ctx) => ctx.db.query("projects").collect());
+    expect(
+      new TextEncoder().encode(JSON.stringify(rows)).byteLength,
+    ).toBeLessThan(100_000);
+    for (const row of rows) {
+      expect(row.draft).toMatchObject({
+        revision: 2,
+        hash: await sha256Hex(large),
+      });
+      expect(row.draft).not.toHaveProperty("text");
+    }
+    const first = await admin.query(api.projects.list, {
+      orgSlug: "forged-other-org",
+      paginationOpts: { cursor: null, numItems: 1000 },
+    });
+    expect(first.page).toHaveLength(50);
+    expect(first.isDone).toBe(false);
+    const second = await admin.query(api.projects.list, {
+      orgSlug: "one",
+      paginationOpts: { cursor: first.continueCursor, numItems: 50 },
+    });
+    expect(second.page).toHaveLength(5);
+    expect(second.isDone).toBe(true);
+    expect(
+      new Set([...first.page, ...second.page].map((row) => row._id)).size,
+    ).toBe(55);
+    const draft = (await admin.query(api.specs.getDraft, {
+      projectId: ids[0]!,
+    }))!;
+    expect(draft.draft).toBe(large);
+    await admin.mutation(api.specs.saveDraft, {
+      projectId: ids[0]!,
+      spec: large,
+      baseHash: "stale",
+    });
+    expect(await t.run((ctx) => ctx.db.get(ids[0]!))).toEqual(rows[0]);
+    if (cleanup === "archive") {
+      expect(
+        (
+          await webhook(t, "archive-large", "organization.deleted", {
+            id: "org_one",
+          })
+        ).status,
+      ).toBe(200);
+    } else {
+      await t.run(async (ctx) => {
+        for (const id of ids)
+          await ctx.db.patch(id, {
+            retirement: {
+              state: "scheduled",
+              revision: 1,
+              message: "Retiring",
+              startedAt: Date.now() - MIN_DEPRECATION_NOTICE_MS,
+              sunsetAt: Date.now(),
+              cleanupPhase: "pending",
+            },
+          });
+      });
+      await t.mutation(internal.projects.retireSunsetProjects, {});
+    }
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    const retired = await t.run((ctx) => ctx.db.query("projects").collect());
+    expect(retired).toHaveLength(55);
+    for (const row of retired) expect(row.retirement?.state).toBe("retired");
+    expect(
+      await t.run((ctx) =>
+        ctx.db
+          .query("projectDrafts")
+          .withIndex("by_project", (q) => q.eq("projectId", ids[0]!))
+          .unique(),
+      ),
+    ).toMatchObject({ text: large, revision: 2 });
+  },
+);

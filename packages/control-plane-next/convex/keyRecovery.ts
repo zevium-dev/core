@@ -1,5 +1,9 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  type QueryCtx,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import { ownedKey, requireKeyManager } from "./lib/keys";
 export const verificationTarget = internalQuery({
@@ -10,19 +14,25 @@ export const verificationTarget = internalQuery({
     return { ownerUserId: key.ownerUserId, clerkOrgId: key.clerkOrgId };
   },
 });
+async function cleanupTarget(ctx: Pick<QueryCtx, "db">, keyId: string) {
+  const key = await ctx.db
+    .query("apiKeys")
+    .withIndex("by_key", (q) => q.eq("keyId", keyId))
+    .unique();
+  if (key?.kind === "key") return key.revokedAt !== undefined ? key : null;
+  const rotation = await ctx.db
+    .query("apiKeys")
+    .withIndex("by_new_key", (q) => q.eq("newKeyId", keyId))
+    .unique();
+  return rotation?.kind === "rotation" && rotation.state === "failed"
+    ? rotation
+    : null;
+}
 export const claim = internalMutation({
   args: { keyId: v.string() },
   handler: async (ctx, args) => {
-    const key = await ctx.db
-      .query("apiKeys")
-      .withIndex("by_key", (q) => q.eq("keyId", args.keyId))
-      .unique();
-    if (
-      key?.kind !== "key" ||
-      key.revokedAt === undefined ||
-      !key.providerRevoke
-    )
-      return null;
+    const key = await cleanupTarget(ctx, args.keyId);
+    if (!key?.providerRevoke) return null;
     const job = key.providerRevoke;
     if (
       job.state === "complete" ||
@@ -61,12 +71,9 @@ export const claim = internalMutation({
 export const finish = internalMutation({
   args: { keyId: v.string(), attempt: v.number(), success: v.boolean() },
   handler: async (ctx, args) => {
-    const key = await ctx.db
-      .query("apiKeys")
-      .withIndex("by_key", (q) => q.eq("keyId", args.keyId))
-      .unique();
+    const key = await cleanupTarget(ctx, args.keyId);
     if (
-      key?.kind !== "key" ||
+      !key ||
       key.providerRevoke?.state !== "processing" ||
       key.providerRevoke.attempts !== args.attempt
     )
@@ -102,13 +109,20 @@ export const recoverDue = internalMutation({
             .lte("providerRevoke.nextAttemptAt", Date.now()),
         )
         .take(50);
-      for (const key of due)
-        if (key.kind === "key" && key.revokedAt !== undefined)
+      for (const key of due) {
+        const keyId =
+          key.kind === "key" && key.revokedAt !== undefined
+            ? key.keyId
+            : key.kind === "rotation" && key.state === "failed"
+              ? key.newKeyId
+              : undefined;
+        if (keyId)
           await ctx.scheduler.runAfter(
             0,
             internal.keyVerification.revokeWithRetry,
-            { keyId: key.keyId },
+            { keyId },
           );
+      }
     }
   },
 });

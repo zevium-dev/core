@@ -1,3 +1,4 @@
+import { getProjectDraft, draftConflict } from "./lib/drafts";
 import { v, ConvexError } from "convex/values";
 import { isValidSemver, sha256Hex } from "@zevium/shared";
 import { mutation, query } from "./_generated/server";
@@ -18,11 +19,12 @@ export const getDraft = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
     const { project } = await requireProjectMember(ctx, args.projectId);
-    return project.draft
+    const draft = await getProjectDraft(ctx, project._id);
+    return draft
       ? {
-          draft: project.draft.text,
-          draftHash: project.draft.hash,
-          lastSavedAt: project.draft.savedAt,
+          draft: draft.text,
+          draftHash: draft.hash,
+          lastSavedAt: draft.savedAt,
         }
       : null;
   },
@@ -38,7 +40,7 @@ export const saveDraft = mutation({
     const issues = args.spec.trim() ? specIssues(args.spec) : [];
     if (issues.some((i) => i.level === "error"))
       return { ok: false, issues, draft: args.spec, lastSavedAt: 0 };
-    const current = project.draft;
+    const current = await getProjectDraft(ctx, project._id);
     if (current?.text === args.spec)
       return {
         ok: true,
@@ -48,33 +50,39 @@ export const saveDraft = mutation({
         lastSavedAt: current.savedAt,
       };
     if (args.baseHash !== (current?.hash ?? null))
-      return {
-        ok: false,
-        conflict: true,
-        issues: [],
-        draft: current?.text ?? "",
-        draftHash: current?.hash ?? null,
-        lastSavedAt: current?.savedAt ?? 0,
-      };
+      return draftConflict(current);
     const draft = {
-      text: args.spec,
+      revision: (current?.revision ?? 0) + 1,
       hash: await sha256Hex(args.spec),
       savedAt: Date.now(),
     };
+    if (current) await ctx.db.patch(current._id, { ...draft, text: args.spec });
+    else
+      await ctx.db.insert("projectDrafts", {
+        projectId: project._id,
+        ...draft,
+        text: args.spec,
+      });
     await ctx.db.patch(project._id, { draft });
     return {
       ok: true,
       issues,
-      draft: draft.text,
+      draft: args.spec,
       draftHash: draft.hash,
       lastSavedAt: draft.savedAt,
     };
   },
 });
 export const publish = mutation({
-  args: { projectId: v.id("projects"), version: v.string() },
+  args: {
+    projectId: v.id("projects"),
+    version: v.string(),
+    draftHash: v.string(),
+  },
   handler: async (ctx, args) => {
     const { project, org } = await requireProjectAdmin(ctx, args.projectId);
+    const draft = await getProjectDraft(ctx, project._id);
+    if (args.draftHash !== (draft?.hash ?? null)) return draftConflict(draft);
     const version = args.version.trim();
     const error = (path: string, message: string) => ({
       ok: false,
@@ -96,7 +104,6 @@ export const publish = mutation({
         "version",
         `Version ${version} already published (immutable)`,
       );
-    const draft = project.draft;
     if (!draft?.text.trim())
       return error("$", "Save a draft spec before publishing");
     const issues = specIssues(draft.text);

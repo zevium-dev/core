@@ -27,7 +27,7 @@ import {
   verifiedKeyRotationProjectionValidator,
   verifyProjection,
 } from "./lib/keyProjection";
-import type { QueryCtx } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
 async function visible(ctx: QueryCtx) {
   const { org, claims } = await requireActiveOrg(ctx);
   const rows = isPrivilegedOrgRole(claims.orgRole)
@@ -272,6 +272,51 @@ export const beginRotation = mutation({
     return rotationDto((await ctx.db.get(id)) as Rotation, org.clerkOrgId);
   },
 });
+/** Only authenticated broker projections may nominate a minted key for cleanup. */
+async function recordFailedRotation(
+  ctx: MutationCtx,
+  op: Rotation,
+  clerkOrgId: string,
+  newKeyId?: string,
+) {
+  if (op.state === "complete") return rotationDto(op, clerkOrgId);
+  if (op.newKeyId && newKeyId && op.newKeyId !== newKeyId)
+    throw new ConvexError("Rotation operation conflicts with cleanup key");
+  const keyId = newKeyId ?? op.newKeyId;
+  if (keyId && !op.providerRevoke) {
+    // Never revoke an already registered key or duplicate another cleanup job.
+    const registered = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_key", (q) => q.eq("keyId", keyId))
+      .unique();
+    const cleanup = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_new_key", (q) => q.eq("newKeyId", keyId))
+      .first();
+    if (!registered && (!cleanup || cleanup._id === op._id)) {
+      await ctx.db.patch(op._id, {
+        newKeyId: keyId,
+        providerRevoke: {
+          state: "pending",
+          attempts: 0,
+          nextAttemptAt: Date.now(),
+        },
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.keyVerification.revokeWithRetry,
+        { keyId },
+      );
+    }
+  }
+  if (op.state !== "failed")
+    await ctx.db.patch(op._id, {
+      state: "failed",
+      failure: "Key rotation could not be completed",
+      updatedAt: Date.now(),
+    });
+  return rotationDto((await ctx.db.get(op._id)) as Rotation, clerkOrgId);
+}
 export const completeRotation = mutation({
   args: {
     projection: verifiedKeyRotationProjectionValidator,
@@ -280,7 +325,7 @@ export const completeRotation = mutation({
   },
   handler: async (ctx, args) => {
     const p = args.projection;
-    await verifyProjection(p, args.signature, true);
+    await verifyProjection(p, args.signature, true, true);
     const { key: old, org, claims } = await ownedKey(ctx, p.oldKeyId);
     requireKeyManager(claims.subject, claims.orgRole, old);
     const op = await ctx.db
@@ -303,9 +348,15 @@ export const completeRotation = mutation({
         );
       return { ...rotationDto(op, org.clerkOrgId), graceUntil: p.graceUntil };
     }
-    if (op.state !== "pending" || (op.leaseUntil ?? 0) <= Date.now())
-      throw new ConvexError("Rotation operation failed");
     const n = p.newProvision;
+    const fail = () =>
+      recordFailedRotation(ctx, op, org.clerkOrgId, n.clerkKeyId);
+    if (
+      op.state !== "pending" ||
+      (op.leaseUntil ?? 0) <= Date.now() ||
+      Math.abs(Date.now() - p.verifiedAt) > 300_000
+    )
+      return fail();
     if (
       !currentKey(old) ||
       old.lifecycle !== "active" ||
@@ -316,7 +367,7 @@ export const completeRotation = mutation({
         old.verifiedAt,
       ))
     )
-      throw new ConvexError("Only the current key can be rotated");
+      return fail();
     if (
       n.clerkOrgId !== org.clerkOrgId ||
       n.ownerUserId !== old.ownerUserId ||
@@ -326,10 +377,15 @@ export const completeRotation = mutation({
       n.monthlyCapCredits !== (old.monthlyCapCredits ?? null) ||
       canonicalJson(n.scopes) !== canonicalJson(old.scopes)
     )
-      throw new ConvexError("Verified key rotation does not match identity");
-    if (p.graceUntil !== p.verifiedAt + 86_400_000)
-      throw new ConvexError("Rotation grace must be 24 hours");
-    await insertKey(ctx, org, n, p.verifiedAt, args.keyName, old);
+      return fail();
+    if (p.graceUntil !== p.verifiedAt + 86_400_000) return fail();
+    try {
+      await insertKey(ctx, org, n, p.verifiedAt, args.keyName, old);
+    } catch (error) {
+      // insertKey's domain checks throw before any write; database failures still roll back.
+      if (!(error instanceof ConvexError)) throw error;
+      return fail();
+    }
     await ctx.db.patch(old._id, {
       lifecycle: "grace",
       graceUntil: p.graceUntil,
@@ -352,7 +408,16 @@ export const completeRotation = mutation({
   },
 });
 export const failRotation = mutation({
-  args: { operationId: v.string(), message: v.string() },
+  args: {
+    operationId: v.string(),
+    message: v.string(),
+    cleanup: v.optional(
+      v.object({
+        projection: verifiedKeyRotationProjectionValidator,
+        signature: v.string(),
+      }),
+    ),
+  },
   handler: async (ctx, args) => {
     const { org, claims } = await requireActiveOrg(ctx);
     const op = await ctx.db
@@ -367,13 +432,21 @@ export const failRotation = mutation({
       .unique();
     if (!op || op.kind !== "rotation")
       throw new ConvexError("Rotation operation not found");
-    if (op.state === "pending")
-      await ctx.db.patch(op._id, {
-        state: "failed",
-        failure: "Key rotation could not be completed",
-        updatedAt: Date.now(),
-      });
-    return rotationDto((await ctx.db.get(op._id)) as Rotation, org.clerkOrgId);
+    if (args.cleanup) {
+      const { projection, signature } = args.cleanup;
+      await verifyProjection(projection, signature, true, true);
+      if (
+        projection.operationId !== op.operationId ||
+        projection.oldKeyId !== op.oldKeyId
+      )
+        throw new ConvexError("Rotation operation conflicts with cleanup key");
+    }
+    return recordFailedRotation(
+      ctx,
+      op,
+      org.clerkOrgId,
+      args.cleanup?.projection.newProvision.clerkKeyId,
+    );
   },
 });
 export const expireGrace = internalMutation({

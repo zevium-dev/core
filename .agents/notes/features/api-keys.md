@@ -1,8 +1,8 @@
 # API keys
 
 > Status: partial (#396 cap recovery fixed; UI issuance verified in round-two dogfood; #364/#356 ownership and lifecycle fixes implemented; #336 per-key request limits built; P1 #13 partial) · Updated: 2026-10-11
-> Rebuild status: Isolated rebuild PR 2 key lifecycle implemented; production still uses existing control plane.
-> Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
+> Rebuild status: PR #437 review fixes implemented (2026-10-11). Isolated rebuild PR 2 key lifecycle implemented; production still uses existing control plane.
+> Code: `packages/control-plane-next/convex/{keySettings,keyRecovery,clerkWebhooks}.ts`, `apps/gateway/test/payment-recovery.test.ts`, `apps/web/src/routes/app/settings/keys.tsx`, `apps/web/src/lib/api-keys.ts`, `convex/keySettings.ts`, `convex/keyVerification.ts`, `convex/keySettings.test.ts`, `convex/keyVerification.test.ts`, `apps/web/src/lib/api-key-error.ts`, `convex/http.ts` (`/wallet-grants`), `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/wallet.ts`
 > Related: [gateway](gateway.md), [wallet-billing](wallet-billing.md), [accounts-orgs](accounts-orgs.md), [machine-payments](machine-payments.md), [registry-v2](../architecture/registry-v2.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 A consumer's API key is the credential every metered call carries. Keys belong to a member, draw from the org wallet, and carry per-key spend limits; rotation keeps the old key alive for a grace period so integrations never break.
@@ -27,6 +27,8 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 ## Tech
 
 ### Isolated rebuild PR 2 — 2026-10-11
+
+PR #437 review fixes: membership deletion fences keys using signed envelope/Svix time, including keys issued after joining. Deleted-user cleanup pages 50 keys across orgs using `by_owner`; each `revokeKey` bumps edge revision once and schedules provider revoke. Expired/invalid rotation completion returns a failed DTO and records broker-authenticated `newKeyId` plus cleanup state on the failed rotation. `failRotation` accepts optional signed projection evidence; arbitrary key IDs cannot trigger revocation. `by_new_key` feeds the existing bounded retry/lease/recovery worker; failed minted keys cannot later register. Regression coverage includes cross-page cleanup, failed completion replay, lost dispatch and stale-worker fencing.
 
 Next stores immutable broker-verified owner/subject/org/hash identity in `apiKeys`; registration/replay has no registry-outbox lookup. Indexed key/hash/member-slot claims, fixed 24-hour grace, durable rotation replay, family cap revisions, membership receipt fencing and bounded provider cleanup preserve terminal revocation. No plaintext keys enter Convex. DTOs expose display policy only. Code: `packages/control-plane-next/convex/{keySettings,keyVerification,keyRecovery}.ts`, `lib/{keys,keyProjection}.ts`, `tests/keys.test.ts`, `tests/domainClaimsHarness.ts`. Snapshot integration remains PR 5; root key broker/consumers remain unchanged.
 

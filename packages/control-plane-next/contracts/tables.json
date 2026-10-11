@@ -4,6 +4,7 @@
     "users",
     "orgTombstones",
     "projects",
+    "projectDrafts",
     "routeTombstones",
     "specVersions",
     "upstreamCredentials",

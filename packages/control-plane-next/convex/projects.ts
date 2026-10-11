@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { v, ConvexError } from "convex/values";
 import { isValidSlug, sha256Hex } from "@zevium/shared";
 import {
@@ -23,16 +24,22 @@ function bounded(value: string, max: number, label: string) {
   return text;
 }
 export const list = query({
-  args: { orgSlug: v.string() },
-  handler: async (ctx) => {
+  args: { orgSlug: v.string(), paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     const { org } = await requireActiveOrg(ctx);
     const rows = await ctx.db
       .query("projects")
       .withIndex("by_org_slug", (q) => q.eq("organizationId", org._id))
-      .collect();
-    return rows
-      .filter((r) => r.retirement?.state !== "retired")
-      .map(projectDto);
+      .paginate({
+        ...args.paginationOpts,
+        numItems: Math.max(1, Math.min(50, args.paginationOpts.numItems)),
+      });
+    return {
+      ...rows,
+      page: rows.page
+        .filter((r) => r.retirement?.state !== "retired")
+        .map(projectDto),
+    };
   },
 });
 export const get = query({
@@ -82,6 +89,11 @@ export const create = mutation({
         .unique()
     )
       throw new ConvexError("Project slug is permanently reserved");
+    const draft = {
+      hash: await sha256Hex(""),
+      revision: 1,
+      savedAt: Date.now(),
+    };
     const id = await ctx.db.insert("projects", {
       organizationId: org._id,
       name,
@@ -100,7 +112,7 @@ export const create = mutation({
       sortName: name.toLowerCase(),
       endpointCount: 0,
       hasFreeTier: false,
-      draft: { text: "", hash: await sha256Hex(""), savedAt: Date.now() },
+      draft,
       quality: { snapshot: null, recoveryPasses: 0 },
       reviewSummary: {
         count: 0,
@@ -108,6 +120,7 @@ export const create = mutation({
         distribution: { one: 0, two: 0, three: 0, four: 0, five: 0 },
       },
     });
+    await ctx.db.insert("projectDrafts", { projectId: id, text: "", ...draft });
     return projectDto((await ctx.db.get(id))!);
   },
 });

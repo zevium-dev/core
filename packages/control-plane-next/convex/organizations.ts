@@ -9,6 +9,7 @@ import {
   handleAvailable,
   isActive,
   trustedSlug,
+  organizationSlug,
 } from "./lib/identity";
 export const ensureOrganization = mutation({
   args: { clerkOrgId: v.string() },
@@ -31,7 +32,7 @@ export const ensureOrganization = mutation({
     if (tomb) throw new ConvexError("Organization is archived");
     let org = await getOrganization(ctx, claims.orgId);
     if (!org) {
-      const slug = trustedSlug(claims.orgSlug);
+      const slug = await organizationSlug(claims.orgSlug, claims.orgId);
       const id = await ctx.db.insert("organizations", {
         clerkOrgId: claims.orgId,
         slug,

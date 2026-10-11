@@ -33,8 +33,9 @@ export async function webhook(
   eventId: string,
   type: string,
   data: unknown,
+  timestamp?: number,
 ) {
-  const body = JSON.stringify({ type, data });
+  const body = JSON.stringify({ type, data, timestamp });
   const now = new Date();
   return t.fetch("/clerk-webhook", {
     method: "POST",

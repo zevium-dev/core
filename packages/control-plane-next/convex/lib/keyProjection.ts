@@ -90,13 +90,14 @@ export async function verifyProjection(
   value: unknown,
   signature: string,
   rotation: boolean,
+  allowExpired = false,
 ) {
   const parsed = (rotation ? rotationSchema : projectionSchema).safeParse(
     value,
   );
   if (
     !parsed.success ||
-    Math.abs(Date.now() - parsed.data.verifiedAt) > 300_000
+    (!allowExpired && Math.abs(Date.now() - parsed.data.verifiedAt) > 300_000)
   )
     throw new ConvexError("Verified key projection is expired or invalid");
   const secret = process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET;
