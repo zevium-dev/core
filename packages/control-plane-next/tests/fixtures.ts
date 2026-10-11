@@ -1,0 +1,96 @@
+import type { Admission, Snapshot } from "../contracts";
+import type { WithoutSystemFields } from "convex/server";
+import type { Doc } from "../convex/_generated/dataModel";
+export const NOW = 1_792_000_000_000;
+export const SECRET = "test-only-secret-never-use-in-production";
+export const organization = (
+  suffix: string,
+): WithoutSystemFields<Doc<"organizations">> => ({
+  clerkOrgId: `org_${suffix}`,
+  name: `Fixture ${suffix}`,
+  slug: suffix,
+  publicHandle: suffix,
+  lastClerkEventAt: NOW,
+  revision: 1,
+});
+export const projectFields = {
+  slug: "echo",
+  name: "Echo",
+  tags: [],
+  status: "draft" as const,
+  visibility: "private" as const,
+  desiredVisibility: "private" as const,
+  qualityStatus: "active" as const,
+  revision: 1,
+  publicationGeneration: 0,
+  houseOperated: false,
+  discoverable: false,
+  searchText: "echo",
+  sortName: "echo",
+  endpointCount: 0,
+  hasFreeTier: false,
+  quality: { snapshot: null, recoveryPasses: 0 },
+  reviewSummary: {
+    count: 0,
+    ratingSum: 0,
+    distribution: { one: 0, two: 0, three: 0, four: 0, five: 0 },
+  },
+};
+export const admitted: Admission = {
+  protocolVersion: 2,
+  deploymentId: "next-fixture",
+  walletId: "wallet_consumer",
+  ownerKey: "org:org_consumer",
+  consumerClerkOrgId: "org_consumer",
+  publisherOrganizationId: "org_publisher_id",
+  projectId: "project_echo",
+  specVersionId: "version_echo",
+  specVersion: "1.0.0",
+  specDigest: "a".repeat(64),
+  operationId: "echo",
+  endpoint: "/echo",
+  method: "POST",
+  reservationId: "reservation_1",
+  settleRefId: "settle:reservation_1",
+  epoch: 2,
+  edgeSequence: 1,
+  admittedAt: NOW,
+  heldCredits: 100,
+  fundingSlices: [
+    {
+      lotId: "lot_merged",
+      originLotId: "lot_original",
+      sourceRef: "payment:original",
+      paymentId: "payment_original",
+      credits: 100,
+    },
+  ],
+  listedCostCredits: 100,
+  pricingDecision: "listed_price",
+  keyId: "key_member",
+  keyFamilyId: "family_member",
+  ownerUserId: "user_member",
+  budgetPeriod: "2026-10",
+  budgetUsedBefore: 0,
+  budgetReservedBefore: 0,
+};
+export const unsignedSnapshot: Snapshot = {
+  schemaVersion: 2,
+  deploymentId: "next-fixture",
+  kind: "org",
+  scope: "org_consumer",
+  revision: 2,
+  generationId: "generation_2",
+  generatedAt: NOW,
+  expiresAt: NOW + 30_000,
+  keyId: "test",
+  nonce: "request_nonce",
+  payloadDigest: "0".repeat(64),
+  signature: "0".repeat(64),
+  payload: {
+    organizationId: "org_consumer_id",
+    clerkOrgId: "org_consumer",
+    archived: false,
+    revision: 2,
+  },
+};
