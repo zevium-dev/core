@@ -18,7 +18,8 @@
     // NEXT_DEPLOYMENT_ID + NEXT_SNAPSHOT_KEYS/NEXT_ADMISSION_KEYS/NEXT_TRANSPORT_KEYS
     // must match Convex; set keys as secrets, never commit values.
     // MCP_OAUTH_ISSUER + MCP_OAUTH_RESOURCE — optional OAuth activation; configure
-    // in Worker settings after Clerk DCR/PKCE/scopes setup. Deploy keeps vars.
+    // in Worker settings after Clerk DCR/PKCE/scopes setup. Every deploy must use
+    // --keep-vars (or supply both explicitly); default deploy removes dashboard vars.
     // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
     "CONVEX_URL": "",
     "CONVEX_SITE_URL": "",

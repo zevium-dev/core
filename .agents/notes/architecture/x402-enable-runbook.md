@@ -1,8 +1,8 @@
-> Historical only after PR 7 (2026-10-11): legacy x402 runtime and schema are deleted. Current code cannot enable this rail. A new implementation review and owner approval are required; see [cutover activation](convex-activation.md).
+> Historical only after PR 7 (2026-10-11): legacy x402 runtime and schema are deleted. Current code cannot enable this rail. Funding, sessions, admission, settlement and recovery must be re-implemented against the new Convex/edge plane, reviewed and owner-approved; every source path and activation instruction below describes last legacy release `3d51eb9a`; see [cutover activation](convex-activation.md).
 
 # Re-enable x402 wallet payments
 
-> Updated: 2026-10-11 · Status: disabled by owner decision; implementation retained
+> Updated: 2026-10-11 · Status: disabled; legacy implementation removed by rebuild, design retained
 > Owner: [machine payments](../features/machine-payments.md)
 
 ## Activation and rollback

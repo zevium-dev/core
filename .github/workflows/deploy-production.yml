@@ -101,6 +101,9 @@ jobs:
             if (process.env.VITE_CONVEX_URL.replace(".convex.cloud", ".convex.site") !== process.env.CONVEX_SITE_URL) process.exit(1);
           '
 
+      - name: Verify initial cutover before any runtime changes
+        run: node scripts/control-plane/preflight-release.mjs
+
       - name: Build production web
         run: pnpm --filter web build
 

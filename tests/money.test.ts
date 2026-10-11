@@ -1398,16 +1398,20 @@ it("distributes platform and publisher totals over bounded 128-shard scopes", as
 it("requires versioned admission and final proofs after cutover", async () => {
   const t = harness();
   const f = await t.run((ctx) => moneyFixture(ctx, "versioned-only"));
-  const unversioned = await t.run((ctx) =>
-    eventFor(ctx, f, 1, { admissionKeyId: undefined }),
-  );
-  expect(await settle(t, unversioned)).toMatchObject({
+  const versioned = await t.run((ctx) => eventFor(ctx, f));
+  const { admissionKeyId: _keyId, ...unversioned } = versioned;
+  expect(
+    await t.mutation(internal.wallets.settleEvent, {
+      eventJson: JSON.stringify(unversioned),
+    }),
+  ).toMatchObject({
     status: "rejected",
-    reason: "Settlement unavailable",
+    reason: "Invalid settlement",
+    retryable: false,
   });
   vi.stubEnv("NEXT_ADMISSION_KEYS", undefined);
   vi.stubEnv("NEXT_ADMISSION_SECRET", SECRET);
-  expect(await settle(t, unversioned)).toMatchObject({
+  expect(await settle(t, versioned)).toMatchObject({
     status: "rejected",
     reason: "Settlement unavailable",
   });

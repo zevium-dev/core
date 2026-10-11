@@ -7,13 +7,31 @@ PR 7 makes root `convex/` canonical. It does **not** deploy, reset shared data, 
 
 Every numbered step below requires the **owner** on each intended environment. Start with disposable development and Stripe test mode; repeat for the hosted production target only after its own explicit approval. Do not run the ordinary release workflow to perform the initial incompatible schema/DO cutover.
 
+## Before merge: disable alternate deployment paths
+
+Confirm both rebuild activation repository variables remain unset/false. In Cloudflare **Workers & Pages → each web/gateway Worker → Settings → Builds**, verify no connected Git repository or automatic production/preview builds can deploy this merge. Include any legacy/staging Workers pointing at the same Convex targets. If connected, the owner disconnects it and cancels queued/in-progress builds before merge; record the check privately. GitHub workflow gates do not control Workers Builds. API alternative: list each Worker's triggers with `GET /accounts/{account_id}/builds/workers/{worker_tag}/triggers` and verify none remain. See [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) and [trigger API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/).
+
+The live provider journey in step 7 is a **hard gate before activation**, specifically before flipping `CONVEX_REBUILD_ACTIVATED` (or the preview equivalent). It is **not a merge gate**. Merging code never supplies owner sign-off or changes providers.
+
 ## 1. Approve evidence and stop old traffic
 
-- Review PR 7 CI, browser evidence and the remaining gates in the rebuild plan. Approve the proposed promo self-consumption, payment-review A–C and read-surface D1–D6 defaults explicitly. Keep card surcharge disabled pending #318.
+- Review PR 7 CI, browser evidence and the remaining gates in the rebuild plan. Record owner sign-offs for [promo self-consumption](../decisions/2026-10-11-promo-self-consumption.md), [payment-review A–C](../decisions/2026-10-11-payment-review-defaults.md), and [read-surface D1–D6](../decisions/2026-10-11-read-surface-review-defaults.md) explicitly. Live Stripe requires separate approval and a reviewed removal of test-only enforcement; this runbook does not authorize it. Keep card surcharge disabled pending #318.
 - Confirm the exact Convex deployment name/cloud URL/site URL, Clerk instance, Stripe test platform account, Worker name/route and web origin. Write them in private operator records. One environment must never ingest another environment's payments.
 - Disable incoming gateway traffic and pause Checkout, transfers and publisher writes. Disable old Clerk/Stripe destinations and account for already queued deliveries/retries. Keep their receipt IDs for reconciliation; disabling delivery is not cancellation of provider money.
-- Inspect old `WalletSqliteDO` storage and old Convex ledger. Export unresolved holds, final/usage queues, ACK state, payment/refund/dispute/transfer/account IDs and receipts. Complete old served-call settlement and resolve ambiguous provider operations against the **old paired code** before wiping it. If any outcome or journal is unresolved, stop here. Do not treat zero users or a timeout as proof of an empty journal.
-- Export the old Convex deployment (including file storage if used) and retain Cloudflare version/configuration evidence privately. Record the owner-approved empty/drained result for every legacy wallet namespace. Existing `NextWalletDO` journals also survive retries; do not change deployment ID or discard referenced key versions after use.
+- Pin **`3d51eb9a406e6dafae03919988875f75c87e52d3`** (`3d51eb9a`, PR #442 merge) as the **last legacy release**. Verified against remote `develop` before PR #443 on 2026-10-11. Preserve its paired backend/web/Worker and migration tags v1–v5 in Git; it contains `apps/gateway/src/wallet.ts` / `wallet-storage.ts`, which PR 7 deletes.
+- **Default: discard disposable test data.** Owner decision 2026-10-11: zero users; legacy wallet data is disposable. Before v6, the owner must explicitly confirm that the exact target's legacy wallet data is disposable test data and approve its irreversible deletion by `v6-control-plane-cutover`. Record namespace IDs, selected deployment, release SHA and sign-off in private operator records. An export or an empty-journal proof is not required for this approved discard path. This decision does not authorize deleting real provider obligations; any non-test money or ambiguous provider operation must be reconciled before proceeding.
+- **Optional: preserve legacy data.** If the owner wants an export instead, follow the pinned-release procedure below **before v6**. Record completed export/reconciliation and owner sign-off before deleting storage. Neither route has sign-off implicitly from merge, CI, or this document.
+- Export the old Convex deployment (including file storage if used) and retain Cloudflare version/configuration evidence privately. Existing `NextWalletDO` journals are separate from discarded legacy test data; never change deployment ID or discard referenced key versions after use.
+
+### Optional legacy WalletSqliteDO export
+
+There is no export endpoint in PR 7 or the unmodified pinned release. Build this temporary operator-only route on the **pinned legacy code**, not on the replacement. This work and any deploy require the owner's export-path approval:
+
+1. While v6 has **not** run, create an isolated checkout with `git worktree add --detach .tmp/legacy-export 3d51eb9a406e6dafae03919988875f75c87e52d3`. Keep the original Worker name/account, `WALLET` binding, `WalletSqliteDO` class and v1–v5 migrations; do not introduce v6. Install with pnpm. If the pinned release is no longer serving, owner deploys the reviewed export patch from this checkout with `wrangler deploy --keep-vars` to that same Worker/namespace. Merely checking out code cannot read remote storage; after v6 this procedure cannot recover deleted objects.
+2. Enumerate namespaces with `GET /accounts/{account_id}/workers/durable_objects/namespaces`; select the exact Worker and `WalletSqliteDO` class. Enumerate **all** object pages with `GET /accounts/{account_id}/workers/durable_objects/namespaces/{namespace_id}/objects?limit=1000`, following returned cursor until exhausted. Save IDs and `hasStoredData`; the list API returns identities, not contents. [Cloudflare object-list API](https://developers.cloudflare.com/api/resources/durable_objects/subresources/namespaces/subresources/objects/methods/list/).
+3. Add a temporary authenticated `GET /internal/legacy-wallet-export/:objectId` route in legacy `apps/gateway/src/index.ts`, protected by Cloudflare Access **and** a dedicated export secret checked before object access. Validate 64-hex object ID; resolve `env.WALLET.get(env.WALLET.idFromString(objectId))`, never `idFromName`. Invoke an added read-only `exportPage(table, after)` RPC on `WalletSqliteDO` in legacy `wallet.ts`. Accept only the table allowlist below and a nonnegative safe-integer cursor; no arbitrary SQL or writes. Use `SELECT rowid AS export_rowid, * FROM <allowlisted_table> WHERE rowid > ? ORDER BY rowid LIMIT 100`, bind cursor, return last rowid and continue until empty. Add a separate paginated KV export using `ctx.storage.list({startAfter, limit:100})`; include `ctx.storage.getAlarm()` and object ID in the manifest. Preserve value types when serializing KV data. Keep responses `Cache-Control: no-store`; never log contents/credentials.
+4. Export every legacy SQL table: `wallet_checkpoint`, `empty_wallet_refresh`, `terminal_refs`, `key_rate_buckets`, `counters`, `settlement_dead_letters`, `machine_lots`, `reservations`, `pending_settlements`, `applied_grants`, `key_settings`, `dead_letters`. These contain balances/sequence/ACK checkpoints, holds, pending usage and terminal results. Include KV facilitator receipts/results, and paired Convex payment/refund/dispute/transfer/account IDs and delivery receipts.
+5. Stop public writes and finish in-flight requests; pause legacy alarms/background writers while taking the snapshot so pages cannot drift. Test the export patch against fixture storage first. Owner fetches all pages for each stored object into private mode-0600 files, checks counts/hashes and manifest completeness, then reconciles holds/queued usage/ambiguous provider operations using the old paired code. Do not claim the namespace empty from one list page or a timeout. Remove the export route/secret after verified capture; retain encrypted backups and a reviewed restoration plan. Owner signs off before v6.
 
 ## 2. Prepare matched configuration privately
 
@@ -23,7 +41,7 @@ Create independent values in the owner's secret manager. No values belong in Git
 pnpm activation:check .tmp/activation.json
 ```
 
-This command is offline and prints names/errors only. It checks pairing, independent key material, test Stripe mode and disabled features. It cannot prove provider credentials, webhook delivery, OAuth consent or the browser money journey.
+This command is offline and prints names/errors only. It uses the runtime strict keyring parser (including own-key membership), checks independent material, Clerk publishable-key frontend-API host and pk/sk mode pairing, test Stripe mode and disabled features. It cannot prove provider credentials, webhook delivery, OAuth consent or the browser money journey.
 
 Convex runtime (the validator also accepts built-in `CONVEX_URL` and `CONVEX_SITE_URL` as target metadata; do not override those reserved values):
 
@@ -53,6 +71,8 @@ Web build/server:
 - Build: `VITE_CONVEX_URL`, `VITE_GATEWAY_URL`, `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_BUILD_SHA`.
 - Server: `CLERK_SECRET_KEY`, matching `CLERK_PUBLISHABLE_KEY` when set, `REGISTRY_KEY_PROJECTION_HMAC_SECRET`, `CONVEX_SITE_URL`, optional `NEXT_WEB_SEARCH_SECRET`.
 - Browser and server Clerk keys must belong to the same instance as Convex issuer/webhooks. Clear old browser query/session data; document IDs do not survive reset.
+
+`--secrets-file` adds/replaces secrets; it **never deletes omitted secrets**. Before opening traffic, owner lists gateway secret **names** with `pnpm --filter @zevium/gateway exec wrangler secret list --name "$ACTIVATION_GATEWAY_NAME" --config "$ACTIVATION_GATEWAY_CONFIG"`. Explicitly delete every retired `X402_*`, `WALLET_SESSION_SECRET` and `GATEWAY_REGISTRY_*` entry using `wrangler secret delete "$RETIRED_SECRET_NAME"` with the same name/config. Inspect dashboard Variables too and remove retired plain vars: `--keep-vars` preserves them. Re-list names to prove removal. Keep the current `GATEWAY_INTERNAL_SECRET`, NEXT keyrings and web `REGISTRY_KEY_PROJECTION_HMAC_SECRET`.
 
 Remove obsolete `CONTROL_PLANE_MODE`, `VITE_CONTROL_PLANE_MODE`, `VITE_NEXT_CONVEX_URL`, `NEXT_CONVEX_SITE_URL`, `NEXT_ADMISSION_SECRET`, registry sync/transport variables, old Stripe names and machine-payment/session credentials. Unversioned admission-secret fallback is deleted; all settlements require a retained signing key ID.
 
@@ -92,8 +112,8 @@ Set Convex runtime variables on that exact target, then push **root** schema/fun
 
 ## 6. Deploy Worker migrations, then web
 
-- Reconfirm old `WalletSqliteDO` is drained/exported/reconciled. PR 7 appends `v6-control-plane-cutover`, deleting that class and **its storage irreversibly**. Tags v1–v5 remain byte-for-byte semantically unchanged. No migration transfers old wallet balances into `NextWalletDO`.
-- Configure Worker secrets and matched variables, then use the owner-selected `wrangler deploy` with canonical production or preview config to apply the new migration. **Initial DO migration cannot use `wrangler versions upload`**. Do not edit/reuse migration tags or change `NextWalletDO` identity after traffic. Verify `/health` contract `2` and exact release. Leave public traffic blocked until paired checks pass.
+- Reconfirm the owner signed the exact-target discard decision, or completed and signed off the optional export/reconciliation. PR 7 appends `v6-control-plane-cutover`, deleting that class and **its storage irreversibly**. Tags v1–v5 remain byte-for-byte semantically unchanged. No migration transfers old wallet balances into `NextWalletDO`.
+- Configure Worker secrets and matched variables, then use the owner-selected `wrangler deploy --keep-vars` with canonical production or preview config to apply the new migration. **Initial DO migration cannot use `wrangler versions upload`**. Do not edit/reuse migration tags or change `NextWalletDO` identity after traffic. Verify `/health` contract `2` and exact release. Leave public traffic blocked until paired checks pass.
 - Build web with the same Convex/Worker destinations and release SHA, configure web server bindings, then deploy web. Verify its release metadata, Clerk instance, HTTP and WebSocket destinations.
 
 Owner command sequence, from the repository root after steps 1–5 and private configuration validation (placeholders are names, not supplied values):
@@ -104,7 +124,7 @@ ACTIVATION_TAG="production-$ACTIVATION_SHA"
 # For disposable hosted development use staging-$ACTIVATION_SHA instead.
 # Owner sets ACTIVATION_GATEWAY_NAME and ACTIVATION_GATEWAY_CONFIG
 # (wrangler.jsonc or wrangler.preview.jsonc, relative to apps/gateway).
-pnpm --filter @zevium/gateway exec wrangler deploy \
+pnpm --filter @zevium/gateway exec wrangler deploy --keep-vars \
   --config "$ACTIVATION_GATEWAY_CONFIG" --name "$ACTIVATION_GATEWAY_NAME" \
   --secrets-file ../../.tmp/gateway-secrets.json \
   --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
@@ -112,12 +132,12 @@ pnpm --filter @zevium/gateway exec wrangler deploy \
   --var "APP_ORIGIN:$APP_ORIGIN" \
   --var "ZEVIUM_RELEASE:$ACTIVATION_SHA" --tag "$ACTIVATION_TAG"
 VITE_BUILD_SHA="$ACTIVATION_SHA" pnpm --filter web build
-pnpm --filter web exec wrangler deploy \
+pnpm --filter web exec wrangler deploy --keep-vars \
   --config dist/server/wrangler.json --name "$ACTIVATION_WEB_NAME" \
   --secrets-file ../../.tmp/web-secrets.json --tag "$ACTIVATION_TAG"
 ```
 
-The owner supplies mode-0600 secret maps: gateway contains the three NEXT keyrings, internal secret and optional Clerk OAuth secret; web contains Clerk secret, broker HMAC, matched Convex site and optional search HMAC. Nonsecret OAuth issuer/resource belong in the owner-selected Worker configuration when enabled. Configure the intended web routes before deploying its generated config; production routes must not be reused for hosted development. VITE_CONVEX_URL, VITE_GATEWAY_URL, VITE_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY must be exported for the web build. Verify actual CLI target and route output before accepting any change. These commands are owner instructions, not completed implementation actions.
+The owner supplies mode-0600 secret maps: gateway contains the three NEXT keyrings, internal secret and optional Clerk OAuth secret; web contains Clerk secret, broker HMAC, matched Convex site and optional search HMAC. Nonsecret OAuth issuer/resource belong in dashboard vars or the owner-selected Worker configuration when enabled. `--keep-vars` preserves dashboard `MCP_OAUTH_ISSUER` / `MCP_OAUTH_RESOURCE`; without it, default deploy removes those vars. Configure the intended web routes before deploying its generated config; production routes must not be reused for hosted development. VITE_CONVEX_URL, VITE_GATEWAY_URL, VITE_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY must be exported for the web build. Verify actual CLI target and route output before accepting any change. These commands are owner instructions, not completed implementation actions.
 
 ## 7. Enable destinations and run the hard gate
 
@@ -129,15 +149,15 @@ Enable new Clerk and Stripe test destinations; verify signed deliveries and dura
 4. Issue key in UI. Call local/hosted paired HTTP gateway and MCP; verify consumer debit, exact publisher/platform 95/5, usage, estimates/partial labels, no upstream at zero balance. Keyless mock costs zero and never contacts upstream.
 5. Verify Connect test onboarding, risk release after the real hold (or an explicitly isolated test clock fixture), whole-cent transfer, sub-cent carry and canonical provider evidence. Do not weaken production hold rules to speed the check.
 6. Test refund/dispute withdrawal/reinstatement; close/drain before reclaim, original-source conservation, retained exceptions, operator audit notes and no invented debit/earnings. Verify unknown transfer outcome stays allocated.
-7. Revoke key/archive org, wait through the accepted authority window, verify refusal. Check restart/lost ACK replay and that no unresolved journal is discarded. If OAuth/email enabled, verify real consent/refresh and fresh notification delivery/opt-out too.
+7. Revoke key/archive org, wait through the accepted authority window, verify refusal. Check restart/lost ACK replay and that no unresolved journal is discarded. Verify real OAuth consent/refresh and real Resend notification delivery/opt-out too.
 
-Backend fixtures and local HTTP acceptance do not satisfy the live provider-backed portions. If Clerk/test payments cannot work without owner configuration, record the exact failure and leave activation blocked.
+This is the HARD activation gate: real provider-backed Checkout→grant, real API key calls, Connect, refund/dispute, and real OAuth and Resend journeys. Missing provider configuration or an unverified journey leaves activation blocked; dormant integration defaults do not count as a pass. “Live provider-backed” here still means Stripe **test mode**, not live-money approval. Backend fixtures and local HTTP acceptance do not satisfy the live provider-backed portions. If Clerk/test payments cannot work without owner configuration, record the exact failure and leave activation blocked.
 
 ## 8. Permit later automated releases
 
 After initial migration and all gates, owner may set repository variable `CONVEX_REBUILD_ACTIVATED=true`. Production still requires protected-environment approval and green current-develop CI. Set `PRODUCTION_CONVEX_URL`, `PRODUCTION_CONVEX_SITE_URL`, `PRODUCTION_GATEWAY_URL`, `PRODUCTION_WEB_URL`, `PRODUCTION_DEPLOYMENT_ID`; provision corresponding `PRODUCTION_NEXT_SNAPSHOT_KEYS`, `PRODUCTION_NEXT_ADMISSION_KEYS`, `PRODUCTION_NEXT_TRANSPORT_KEYS`, `PRODUCTION_GATEWAY_INTERNAL_SECRET`, optional `PRODUCTION_NEXT_WEB_SEARCH_SECRET`, existing broker/credential/Clerk/deploy secrets. Provider secrets already live on the approved Convex target.
 
-Preview requires separate `CONVEX_REBUILD_PREVIEW_ACTIVATED=true`, stable independent `PREVIEW_NEXT_SNAPSHOT_KEYS`, `PREVIEW_NEXT_ADMISSION_KEYS`, `PREVIEW_NEXT_TRANSPORT_KEYS`, `GATEWAY_PREVIEW_INTERNAL_SECRET`, optional `PREVIEW_NEXT_WEB_SEARCH_SECRET`, existing broker/credential and Clerk preview secrets. Preview ID is `preview-pr-<number>`; pair URLs/Clerk/Stripe destinations per preview. Do not rotate keys on each rebuild. Existing legacy preview databases require explicit disposable reset before reuse. Neither label nor merge bypasses these gates.
+Preview requires separate `CONVEX_REBUILD_PREVIEW_ACTIVATED=true`, stable independent `PREVIEW_NEXT_SNAPSHOT_KEYS`, `PREVIEW_NEXT_ADMISSION_KEYS`, `PREVIEW_NEXT_TRANSPORT_KEYS`, `GATEWAY_PREVIEW_INTERNAL_SECRET`, optional `PREVIEW_NEXT_WEB_SEARCH_SECRET`, existing broker/credential and Clerk preview secrets. Accepted preview tradeoff: these `PREVIEW_NEXT_*` keyrings are static repository secrets shared by previews, with signed scope `preview-pr-<number>` preventing cross-preview use; they are not minted per PR. Pair URLs/Clerk/Stripe destinations per preview. Do not rotate keys on each rebuild. Existing legacy preview databases require explicit disposable reset before reuse. Each preview must be manually initialized first: `/health` contract 2 and an existing `pr-<number>` Convex preview whose marker is unset or `preview-pr-<number>`. New or legacy previews fail closed until that manual setup. Both production and preview run a read-only health/marker preflight before any Convex env write or code deploy; a nonempty mismatching marker or failed lookup blocks release. Neither label nor merge bypasses these gates.
 
 ## Rollback
 

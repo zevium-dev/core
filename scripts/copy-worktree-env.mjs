@@ -6,9 +6,12 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  readFileSync,
   rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { parseEnv } from "node:util";
+import { isLocalDeployment } from "./control-plane/guard-dev.mjs";
 
 const projectRoot = process.env.T3CODE_PROJECT_ROOT;
 const worktreeRoot = realpathSync(process.cwd());
@@ -79,6 +82,26 @@ if (!projectRoot || realpathSync(projectRoot) === worktreeRoot) {
 
   let copied = 0;
   for (const file of files) {
+    const source = join(projectRoot, file);
+    const config = parseEnv(readFileSync(source, "utf8"));
+    const hasRemoteTarget =
+      (config.CONVEX_DEPLOYMENT &&
+        !isLocalDeployment(config.CONVEX_DEPLOYMENT)) ||
+      config.CONVEX_DEPLOY_KEY ||
+      config.CONVEX_DEPLOYMENT_TOKEN ||
+      config.CONVEX_SELF_HOSTED_URL ||
+      config.CONVEX_SELF_HOSTED_ADMIN_KEY;
+    if (hasRemoteTarget) {
+      console.warn(
+        `Env file ${file} contains a shared/remote Convex selector. See .agents/notes/architecture/convex-activation.md.`,
+      );
+      if (process.env.T3_COPY_REMOTE_CONVEX_ENV !== "1") {
+        console.warn(
+          "Skipped: explicitly set T3_COPY_REMOTE_CONVEX_ENV=1 to copy after reviewing the target; pnpm dev still requires the cutover guard.",
+        );
+        continue;
+      }
+    }
     const destination = join(worktreeRoot, file);
     mkdirSync(dirname(destination), { recursive: true });
     try {

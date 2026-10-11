@@ -35,6 +35,17 @@ const final = async () => ({
   ambiguous: false,
 });
 describe("scalar v2 admission and replay", () => {
+  it("requires a signing key ID on admission and settlement", async () => {
+    expect(
+      admittedRequest.safeParse({ ...admitted, admissionKeyId: undefined })
+        .success,
+    ).toBe(false);
+    expect(
+      settlement.safeParse({ ...(await final()), admissionKeyId: undefined })
+        .success,
+    ).toBe(false);
+    expect(settlement.safeParse(await final()).success).toBe(true);
+  });
   it("binds original source, environment, price and reservation", async () => {
     const value = settlement.parse(await final());
     expect(await verifyAdmission(value, SECRET)).toBe(true);

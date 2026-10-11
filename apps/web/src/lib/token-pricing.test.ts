@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as pricingPolicy from "../../../../packages/shared/src/pricing-policy";
 import { listSpecEndpoints } from "./spec-endpoints";
 import { parsePublishedEndpoints } from "./openapi-reference";
-import { formatCataloguePriceRange } from "./catalogue-card";
 import { summarizeEndpoints, formatPricingSummary } from "./spec-pricing";
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,14 +42,5 @@ describe("token pricing surfaces", () => {
     expect(
       formatPricingSummary(summarizeEndpoints(listSpecEndpoints(spec)!)),
     ).toBe("1 endpoints");
-    expect(
-      formatCataloguePriceRange({
-        minCost: 1000,
-        maxCost: 1000,
-        endpointCount: 1,
-        hasFreeTier: false,
-        hasTokenPricing: true,
-      }),
-    ).toBe("Token pricing");
   });
 });

@@ -39,6 +39,8 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 ## Tech
 
+Admission and settlement contracts require `admissionKeyId`; missing IDs fail validation as non-retryable before any ledger write. The 402 recovery map and CORS exposed headers no longer advertise x402. Code: `packages/shared/src/edge/settlement.ts`, `apps/gateway/src/{payment-required,cors}.ts`; regression coverage in `tests/{contracts,money}.test.ts`.
+
 Only the reviewed signed v2 authority path executes. Cold scopes use bounded single-flight coordinator fills; warm execution uses local 30-second authority. SQLite wallet admission reserves at most 32 original sources before upstream, preserves holds through checkpoint renewal, and emits contiguous signed finals/ACKs asynchronously. Refunds, archive, admin decreases and dust require durable freeze/drain. MCP buffers at most 1 MiB before finalization; HTTP streams directly. x402/token execution and legacy grant/sync routes are deleted. v6-control-plane-cutover deletes WalletSqliteDO storage; owner must drain/export/reconcile before deployment. NextWalletDO and its v5 namespace remain unchanged.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).

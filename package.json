@@ -10,7 +10,7 @@
     "build:ci": "node scripts/quality/build-ci.mjs",
     "ci:pr": "pnpm format:check && pnpm lint && pnpm quality:static && pnpm typecheck && pnpm test && pnpm ci:control-plane && pnpm build:ci && pnpm routes:check && pnpm diff:check",
     "build:production": "node scripts/build.mjs",
-    "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
+    "dev": "pnpm predev && concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "diff:check": "git diff --check",
     "e2e": "bash e2e/run-all.sh",
     "format": "prettier --write .",
@@ -27,11 +27,12 @@
     "typecheck": "turbo typecheck && tsc --noEmit -p tsconfig.json",
     "test:seed": "node --test scripts/seed.test.mjs",
     "test:worktree-setup": "node --test scripts/copy-worktree-env.test.mjs",
-    "ci:control-plane": "pnpm contracts:check && node --test scripts/control-plane/activation.test.mjs && pnpm schema:check && pnpm test:races",
+    "ci:control-plane": "pnpm contracts:check && tsx --test scripts/control-plane/activation.test.mjs scripts/control-plane/guards.test.mjs && pnpm schema:check && pnpm test:races",
     "contracts:check": "tsx scripts/control-plane/check-contracts.ts",
     "schema:check": "node scripts/control-plane/validate-local.mjs",
     "test:races": "node scripts/control-plane/races.mjs",
-    "activation:check": "node scripts/control-plane/validate-activation.mjs"
+    "activation:check": "tsx scripts/control-plane/validate-activation.mjs",
+    "predev": "node scripts/control-plane/guard-dev.mjs"
   },
   "devDependencies": {
     "@clerk/backend": "^3.22.0",

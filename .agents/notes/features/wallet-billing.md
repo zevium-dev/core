@@ -58,11 +58,15 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## Tech
 
+Legacy WalletSqliteDO test data is disposable by the 2026-10-11 owner decision. Exact-target discard (default) or optional pinned-release export still needs owner sign-off before v6; see the activation runbook. No existing NextWalletDO journal is covered by that discard approval.
+
 Root money modules own append-only wallet journals, materialized balances, promo/admin/paid FIFO lots and indexed original-source balances. Dust moves retain zero-delta source journals; 32-source admissions fail before upstream when fragmented. Verified test-mode Checkout grants principal atomically; refunds/disputes close/drain before paged exact-source reclamation and publisher clawback/restoration. Every page is generation fenced and globally throughput limited. Authentic unchargeable finals become retained zero-debit exceptions; no debt or synthetic grant. needs_review currently keeps the whole wallet frozen (#440). Fees remain off under #318. Full refunds return amountPaidCents; Stripe live keys/objects are refused.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 ## Decisions
+
+- 2026-10-11 — [Legacy wallet discard policy](../decisions/2026-10-11-legacy-wallet-discard.md), exact-target owner sign-off required before v6.
 
 - 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 

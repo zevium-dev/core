@@ -36,9 +36,11 @@ function fixture(t) {
       writeFileSync(path, value);
       return path;
     },
-    run(projectRoot = source) {
+    run(projectRoot = source, extraEnv = {}) {
       const env = { ...process.env };
       delete env.T3CODE_PROJECT_ROOT;
+      delete env.T3_COPY_REMOTE_CONVEX_ENV;
+      Object.assign(env, extraEnv);
       if (projectRoot) env.T3CODE_PROJECT_ROOT = projectRoot;
       return execFileSync(process.execPath, [script], {
         cwd: target,
@@ -128,4 +130,32 @@ test("setup uses mise tools and stops when trust fails", (t) => {
     }),
   );
   assert.equal(readFileSync(log, "utf8"), "trust --quiet mise.toml\n");
+});
+
+test("requires explicit opt-in before copying shared Convex selectors", (t) => {
+  const f = fixture(t);
+  f.write(".env.local", 'CONVEX_DEPLOYMENT="dev:legacy" # shared target\n');
+  f.write(
+    "apps/web/.env.local",
+    "VITE_CONVEX_URL=https://fixture.convex.cloud\n",
+  );
+  assert.match(f.run(), /Copied 1 local env files/);
+  assert.equal(existsSync(join(f.target, ".env.local")), false);
+  assert.match(
+    f.run(f.source, { T3_COPY_REMOTE_CONVEX_ENV: "1" }),
+    /Copied 1 local env files/,
+  );
+  assert.match(
+    readFileSync(join(f.target, ".env.local"), "utf8"),
+    /dev:legacy/,
+  );
+});
+
+test("copies anonymous selectors but refuses hidden deployment credentials", (t) => {
+  const f = fixture(t);
+  f.write(".env.local", "CONVEX_DEPLOYMENT=anonymous:fixture\n");
+  f.write(".env", "CONVEX_DEPLOY_KEY=fixture\n");
+  assert.match(f.run(), /Copied 1 local env files/);
+  assert.equal(existsSync(join(f.target, ".env.local")), true);
+  assert.equal(existsSync(join(f.target, ".env")), false);
 });

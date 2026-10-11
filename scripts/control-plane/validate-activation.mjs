@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { readRing } from "../../packages/shared/src/edge/replication.ts";
 
 export function validateActivation(config) {
   const errors = [];
@@ -95,6 +96,24 @@ export function validateActivation(config) {
       convex.CONVEX_SITE_URL
   )
     errors.push("Convex cloud/site destinations must name the same deployment");
+  try {
+    const pk = /^pk_(test|live)_([A-Za-z0-9+/]+={0,2})$/.exec(
+      web.VITE_CLERK_PUBLISHABLE_KEY ?? "",
+    );
+    const sk = /^sk_(test|live)_.+$/.exec(convex.CLERK_SECRET_KEY ?? "");
+    if (!pk || !sk || pk[1] !== sk[1]) throw new Error();
+    const decoded = Buffer.from(pk[2], "base64").toString("utf8");
+    if (
+      Buffer.from(decoded).toString("base64").replace(/=+$/, "") !==
+        pk[2].replace(/=+$/, "") ||
+      decoded !== `${new URL(convex.CLERK_JWT_ISSUER_DOMAIN).host}$`
+    )
+      throw new Error();
+  } catch {
+    errors.push(
+      "Clerk publishable key must match the issuer frontend-API host and secret-key mode (test/live)",
+    );
+  }
   const material = new Set();
   for (const name of [
     "NEXT_SNAPSHOT_KEYS",
@@ -103,18 +122,12 @@ export function validateActivation(config) {
     "UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS",
   ]) {
     try {
-      const ring = JSON.parse(convex[name]);
-      if (!ring.current || !ring.keys?.[ring.current]) throw new Error();
+      const ring = readRing(convex[name]);
       for (const [id, value] of Object.entries(ring.keys)) {
         if (
-          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ||
-          typeof value !== "string" ||
-          value.length < 32
-        )
-          throw new Error();
-        if (
           name === "UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS" &&
-          (Buffer.from(value, "base64").length !== 32 ||
+          (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ||
+            Buffer.from(value, "base64").length !== 32 ||
             Buffer.from(value, "base64").toString("base64") !== value)
         )
           throw new Error();

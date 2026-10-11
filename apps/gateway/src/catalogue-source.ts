@@ -31,7 +31,7 @@ export interface CatalogueSource {
   invalidate?(): void;
 }
 
-/** Canonical edge types and protocol helpers. Authority comes from signed snapshots. */
+/** Collect public catalogue pages, stopping on exhausted or repeated cursors. */
 export async function listAllPublic(
   source: CatalogueSource,
   args: Omit<CatalogueListArgs, "cursor"> = {},

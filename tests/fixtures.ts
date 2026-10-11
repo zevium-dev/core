@@ -37,6 +37,7 @@ export const projectFields = {
   },
 };
 export const admitted: Admission = {
+  admissionKeyId: "k1",
   protocolVersion: 2,
   deploymentId: "next-fixture",
   walletId: "wallet_consumer",

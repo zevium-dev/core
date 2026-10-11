@@ -75,6 +75,13 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
 
+      - name: Verify initial preview cutover before any runtime changes
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PREVIEW_DEPLOY_KEY }}
+          NEXT_DEPLOYMENT_ID: preview-pr-${{ github.event.pull_request.number || inputs.pr_number }}
+          NEXT_GATEWAY_URL: https://zevium-gateway-pr-${{ github.event.pull_request.number || inputs.pr_number }}.zevium-dev.workers.dev
+        run: node scripts/control-plane/preflight-release.mjs --preview-name "pr-$PR_NUMBER"
+
       - name: Deploy isolated Convex backend
         id: deploy
         env:
@@ -141,7 +148,7 @@ jobs:
         run: |
           gateway_name="zevium-gateway-pr-$PR_NUMBER"
           release_sha="$(git rev-parse HEAD)"
-          pnpm --filter @zevium/gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+          pnpm --filter @zevium/gateway exec wrangler deploy --keep-vars --name "$gateway_name" --config wrangler.preview.jsonc \
             --var "NEXT_DEPLOYMENT_ID:preview-pr-$PR_NUMBER" \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
@@ -155,7 +162,7 @@ jobs:
           done
           # secret put mints a new current version without metadata; redeploy
           # last so the serving version carries the release tag proof.
-          pnpm --filter @zevium/gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+          pnpm --filter @zevium/gateway exec wrangler deploy --keep-vars --name "$gateway_name" --config wrangler.preview.jsonc \
             --tag "preview-$PR_NUMBER-$release_sha" \
             --var "NEXT_DEPLOYMENT_ID:preview-pr-$PR_NUMBER" \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
@@ -228,7 +235,7 @@ jobs:
           test -n "$REGISTRY_KEY_PROJECTION_HMAC_SECRET"
           web_name="zevium-web-pr-$PR_NUMBER"
           WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("apps/web/dist/server/wrangler.preview.json", JSON.stringify(c));'
-          pnpm --filter web exec wrangler deploy --name "$web_name" --config dist/server/wrangler.preview.json
+          pnpm --filter web exec wrangler deploy --keep-vars --name "$web_name" --config dist/server/wrangler.preview.json
           printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           printf '%s' "$REGISTRY_KEY_PROJECTION_HMAC_SECRET" | pnpm --filter web exec wrangler secret put REGISTRY_KEY_PROJECTION_HMAC_SECRET --name "$web_name" --config dist/server/wrangler.preview.json
           printf '%s' "$CONVEX_SITE_URL" | pnpm --filter web exec wrangler secret put CONVEX_SITE_URL --name "$web_name" --config dist/server/wrangler.preview.json

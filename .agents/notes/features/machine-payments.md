@@ -24,6 +24,8 @@ Current behavior: keyless paid calls receive normal auth-required recovery, with
 
 ## Tech
 
+PR #443 review cleanup also removes `invalid_payment` recovery and exposed payment/session headers from `apps/gateway/src/{payment-required,cors}.ts`. Future activation requires new-plane implementation, not restoring environment bindings.
+
 x402 execution/session/funding implementation and anonymous schema were removed with legacy control plane. Setting old bindings cannot enable it. Git history retains the previous implementation and provider evidence; existing x402 runbooks are historical design references, not executable activation instructions. Revival requires a new reviewed implementation, provider/finality policy and owner approval. Ordinary org-wallet calls remain authenticated and credit-gated.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
