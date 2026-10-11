@@ -4,7 +4,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./edge/*": "./src/edge/*.ts"
   },
   "scripts": {
     "test": "vitest run --allowOnly=false",
@@ -13,5 +14,8 @@
   "devDependencies": {
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
   }
 }

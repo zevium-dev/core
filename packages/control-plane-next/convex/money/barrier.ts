@@ -3,6 +3,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { fingerprint } from "../../contracts/transport";
 import { drainAck } from "../../contracts/snapshots";
+import { internal } from "../_generated/api";
 import { add, getWallet, money } from "./walletLedger";
 export type Close = NonNullable<Doc<"wallets">["close"]>;
 /** Control callers persist the server-issued ID before communicating with the DO. */
@@ -42,6 +43,10 @@ export async function requestClose(
         : {}),
     },
   });
+  if (wallet.gateState === "open" && process.env.NEXT_GATEWAY_URL)
+    await ctx.scheduler.runAfter(0, internal.edgeMaintenance.wakeWallet, {
+      clerkOrgId: wallet.owner.clerkOrgId,
+    });
   return getWallet(ctx, walletId);
 }
 /** Internal transport seam. PR 5 authenticates the DO before invoking it. Never infer ACK from a timeout. */

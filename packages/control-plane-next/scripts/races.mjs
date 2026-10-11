@@ -82,6 +82,14 @@ const financeHarness = readFileSync(
   .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
   .replace('"./measureDb"', '"../tests/measureDb"');
 writeFileSync(new URL("convex/financeRaces.ts", scratch), financeHarness);
+const edgeHarness = readFileSync(
+  new URL("../tests/edgeHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
+  .replace('"./financeFixtures"', '"../tests/financeFixtures"');
+writeFileSync(new URL("convex/edgeHarness.ts", scratch), edgeHarness);
 for (const name of ["convex.json", "tsconfig.json", "package.json"]) {
   cpSync(new URL(name, base), new URL(name, scratch));
 }
@@ -135,28 +143,71 @@ run([
 ]);
 run(["env", "set", "NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_fixture"]);
 run(["dev", "--once", "--typecheck", "enable"]);
-run(["run", "testClaims:races"]);
+if (!process.env.NEXT_EDGE_ONLY) {
+  run(["run", "testClaims:races"]);
 
-run(["run", "domainClaims:races"]);
+  run(["run", "domainClaims:races"]);
 
-run(["run", "moneyRaces:races"]);
+  run(["run", "moneyRaces:races"]);
 
-run(["run", "financeRaces:races"]);
+  run(["run", "financeRaces:races"]);
 
-// Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
-function result(args) {
-  const child = spawnSync("pnpm", ["exec", "convex", "run", ...args], {
-    cwd: fileURLToPath(scratch),
-    env,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
+  // Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
+  function result(args) {
+    const child = spawnSync("pnpm", ["exec", "convex", "run", ...args], {
+      cwd: fileURLToPath(scratch),
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    assert.equal(child.status, 0, `Convex ${args[0]} failed`);
+    return JSON.parse(child.stdout);
+  }
+  let progress = result(["financeRaces:largeStart"]);
+  for (let batch = 0; !progress.done && batch < 8; batch++) {
+    progress = result(["financeRaces:largeBatch", JSON.stringify(progress)]);
+    console.log("PR4 10001-bucket local reconciliation", progress);
+  }
+  assert.equal(progress.done, true, "Large reconciliation failed to finish");
+  // Scale fixtures deliberately synthesize earnings outside ordinary usage.
+  // Run the paired conservation audit on its own fresh anonymous deployment.
+  const paired = spawnSync("pnpm", ["exec", "node", "scripts/races.mjs"], {
+    cwd: fileURLToPath(base),
+    env: { ...env, NEXT_EDGE_ONLY: "1" },
+    stdio: "inherit",
   });
-  assert.equal(child.status, 0, `Convex ${args[0]} failed`);
-  return JSON.parse(child.stdout);
+  assert.equal(paired.status, 0, "Isolated paired acceptance failed");
+  process.exit(0);
 }
-let progress = result(["financeRaces:largeStart"]);
-for (let batch = 0; !progress.done && batch < 8; batch++) {
-  progress = result(["financeRaces:largeBatch", JSON.stringify(progress)]);
-  console.log("PR4 10001-bucket local reconciliation", progress);
-}
-assert.equal(progress.done, true, "Large reconciliation failed to finish");
+const edgeRing = JSON.stringify({
+  current: "k1",
+  keys: { k1: "test-only-secret-never-use-in-production" },
+});
+for (const key of [
+  "NEXT_SNAPSHOT_KEYS",
+  "NEXT_ADMISSION_KEYS",
+  "NEXT_TRANSPORT_KEYS",
+])
+  run(["env", "set", key, edgeRing]);
+run([
+  "env",
+  "set",
+  "GATEWAY_INTERNAL_SECRET",
+  "test-only-internal-secret-never-production",
+]);
+const edge = spawnSync(
+  "pnpm",
+  [
+    "--filter",
+    "@zevium/gateway",
+    "exec",
+    "node",
+    "scripts/next-acceptance.mjs",
+  ],
+  {
+    cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    env: { ...env, NEXT_TEST_SCRATCH: fileURLToPath(scratch) },
+    stdio: "inherit",
+  },
+);
+assert.equal(edge.status, 0, "Paired Worker/Convex acceptance failed");

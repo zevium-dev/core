@@ -138,6 +138,9 @@ async function call(headers: HeadersInit = {}, target = url) {
 describe("anonymous x402 wallet rail", () => {
   it("shares a durable rate bucket across payer sessions, isolates payers, and binds admission proofs to wallets", async () => {
     const f = setup(1);
+    // Anchor before the first issuance; a one-second wall-clock offset can
+    // collide with that token's rounded timestamp on a loaded test runner.
+    const renewalIssuedAt = Date.now() - 60_000;
     const first = await call({
       "PAYMENT-SIGNATURE": paymentHeader({ id: "one" }),
     });
@@ -183,7 +186,7 @@ describe("anonymous x402 wallet rail", () => {
       "https://gateway.test",
       network,
       payer,
-      Date.now() - 1000,
+      renewalIssuedAt,
     );
     expect(renewed).not.toBe(token);
     expect(

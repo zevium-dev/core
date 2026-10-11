@@ -10,7 +10,12 @@
   "observability": { "enabled": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "durable_objects": {
-    "bindings": [{ "name": "WALLET", "class_name": "WalletSqliteDO" }],
+    "bindings": [
+      { "name": "EDGE_OAUTH", "class_name": "EdgeOAuthDO" },
+      { "name": "EDGE_SNAPSHOTS", "class_name": "EdgeSnapshotDO" },
+      { "name": "NEXT_WALLET", "class_name": "NextWalletDO" },
+      { "name": "WALLET", "class_name": "WalletSqliteDO" },
+    ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["WalletDO"] },
@@ -20,6 +25,10 @@
       "tag": "v4-wallet-sqlite",
       "new_sqlite_classes": ["WalletSqliteDO"],
       "deleted_classes": ["WalletDO"],
+    },
+    {
+      "tag": "v5-next-edge",
+      "new_sqlite_classes": ["EdgeSnapshotDO", "NextWalletDO", "EdgeOAuthDO"],
     },
   ],
 }

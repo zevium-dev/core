@@ -1,3 +1,9 @@
+import { nextDeps } from "./next/pipeline";
+import { wakeWallet, readWalletFailure } from "./next/wake";
+import type { NextEnv } from "./next/snapshots";
+export { EdgeOAuthDO } from "./next/oauth";
+export { EdgeSnapshotDO } from "./next/snapshots";
+export { NextWalletDO } from "./next/wallet";
 import { isX402Enabled } from "./x402-config";
 import { isWalletSession, verifyWalletSession } from "./wallet-session";
 import {
@@ -54,7 +60,7 @@ import { applyGatewaySecurityHeaders } from "./security-headers";
 export { WalletSqliteDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
-export interface Env {
+export interface Env extends NextEnv {
   /** Only the literal "true" enables the retained anonymous payment rail. */
   X402_ENABLED?: string;
   X402_DEPOSIT_ADDRESS?: string;
@@ -158,6 +164,7 @@ export function __resetProdDepsCache(): void {
 }
 
 function buildDeps(env: Env): WorkerDeps {
+  if (env.CONTROL_PLANE_MODE === "next") return nextDeps(env);
   // Module-scoped test harness wins when installed (vitest-pool-workers).
   if (testDeps) {
     return isX402Enabled(env)
@@ -290,6 +297,7 @@ function buildDeps(env: Env): WorkerDeps {
 
 function pipelineOnly(deps: WorkerDeps): PipelineDeps {
   return {
+    nextExecute: deps.nextExecute,
     machinePayments: deps.machinePayments,
     keyVerifier: deps.keyVerifier,
     specSource: deps.specSource,
@@ -362,25 +370,39 @@ async function dispatchRequest(
   if (request.method === "OPTIONS") {
     return corsPreflight();
   }
+  if (url.pathname === "/internal/next-wake") return wakeWallet(request, env);
+  if (url.pathname === "/internal/next-failure")
+    return readWalletFailure(request, env);
 
   if (url.pathname === "/" || url.pathname === "/health") {
     const testMode = env.GATEWAY_TEST_MODE === "1";
     const deployment = gatewayDeploymentProof(env);
     const specConfigReady =
       testMode ||
-      Boolean(
-        env.CONVEX_URL &&
-        env.CONVEX_SITE_URL &&
-        env.GATEWAY_INTERNAL_SECRET &&
-        env.CLERK_SECRET_KEY &&
-        validGatewayDeploymentProof(deployment),
-      );
+      (env.CONTROL_PLANE_MODE === "next"
+        ? Boolean(
+            env.NEXT_DEPLOYMENT_ID &&
+            env.NEXT_CONVEX_SITE_URL &&
+            env.NEXT_SNAPSHOT_KEYS &&
+            env.NEXT_ADMISSION_KEYS &&
+            env.NEXT_TRANSPORT_KEYS &&
+            env.EDGE_SNAPSHOTS &&
+            env.NEXT_WALLET &&
+            env.GATEWAY_INTERNAL_SECRET,
+          )
+        : Boolean(
+            env.CONVEX_URL &&
+            env.CONVEX_SITE_URL &&
+            env.GATEWAY_INTERNAL_SECRET &&
+            env.CLERK_SECRET_KEY &&
+            validGatewayDeploymentProof(deployment),
+          ));
     return Response.json(
       {
         ok: specConfigReady,
         service: "zevium-gateway",
         release: env.ZEVIUM_RELEASE ?? "development",
-        contract: 1,
+        contract: env.CONTROL_PLANE_MODE === "next" ? 2 : 1,
         deployment,
       },
       { status: specConfigReady ? 200 : 503 },

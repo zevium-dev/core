@@ -1,7 +1,7 @@
 # Wallet & billing
 
 > Status: partial (P0 #5 + P1 #8 built; signup credit uses first signed org creation; P1 #12 spend controls planned; #360 SQLite wallet storage and #421 immediate empty-wallet credit recovery built; #109 anonymous lots built behind configuration; #334 admission-proof settlement built; real-money journey unproven) · Updated: 2026-10-11
-> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement, terminal exception/drain recovery, idempotent admin operations and promo self-consumption protection implemented; isolated PR 4 verified Stripe projection, bounded retry escalation, exposure-only reconciliation, fees/refunds and closed-wallet maintenance implemented; PR 5 pairing and cutover remain pending.
+> Rebuild status: isolated PR 3 ledger, atomic signup, bounded lots/dust, source-backed settlement, terminal exception/drain recovery, idempotent admin operations and promo self-consumption protection implemented; isolated PR 4 verified Stripe projection, bounded retry escalation, exposure-only reconciliation, fees/refunds and closed-wallet maintenance implemented; PR 5 edge pairing implemented behind a switch; cutover remains PR 7.
 > Code: `packages/control-plane-next/convex/{wallets,usage,billing,stripeEvents}.ts`, `packages/control-plane-next/convex/money/`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/settlement-queue.ts`, `apps/gateway/src/usage.ts`, `convex/wallets.ts`, `convex/machinePayments.ts`, `convex/billing.ts`, `convex/accounting.ts`, `convex/usage.ts`, `convex/http.ts`, `convex/cronTasks.ts`, `apps/web/src/routes/app/billing.tsx`, `apps/web/src/routes/app/index.tsx`, `apps/web/src/routes/app/settings/activity.tsx`, `e2e/04-payment-drill.sh`, `convex/organizations.ts`, `convex/signup-credit.test.ts`, `convex/funding.test.ts`, `convex/ingest-usage.test.ts`, `apps/gateway/src/wallet-storage.ts`, `packages/shared/src/pricing-policy.ts`, `convex/users.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
 > Related: [pricing](pricing.md), [earnings-payouts](earnings-payouts.md), [machine-payments](machine-payments.md), [gateway](gateway.md), [api-keys](api-keys.md), [accounts-orgs](accounts-orgs.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [decision: card fee floor (proposed)](../decisions/2026-10-10-card-fee-floor.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -58,6 +58,14 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Insufficient balance on `/gateway` returns `402` with machine-readable create-key / top-up / docs actions — see [gateway](gateway.md) and [machine-payments](machine-payments.md)
 
 ## Tech
+
+### Isolated rebuild PR 5 — 2026-10-11
+
+`wallets.edgeBootstrapId` fences the durable edge owner before admission; cold wallets can drain before their first call. Negative closes enqueue authenticated wake delivery through `NEXT_GATEWAY_URL`, with cron retry until an actual drain ACK. A wake receipt never grants permission to reclaim.
+
+PR #441 review hardening adds a bounded single-flight cold checkpoint fill, five-minute idle polling stop, unchanged-generation expiry renewal without source rewrites, and alarm cleanup of old counters/resolved failures. Rejected finals log structured alerts; internal `wallets.recoverRejectedSettlement` provides exact-evidence, watermark-pinned zero-debit recovery. [Cold-fill/skew decision](../decisions/2026-10-11-edge-cold-fill-and-clock-skew.md).
+
+Next Wallet DO reserves at most 32 original sources, persists keyed signed admissions/finals and reconciles pinned inventory without restoring outstanding holds. Real drain ACKs gate PR 4 refunds; exceptions and unknown restart outcomes advance the final watermark with zero debit and an operator case. Closed-wallet maintenance never exposes transient inventory. Default live wallet stays unchanged. [Protocol, bounds, configuration and acceptance evidence](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11). Code: `apps/gateway/src/next/wallet.ts`; Worker/backend acceptance: `apps/gateway/scripts/next-acceptance.mjs`.
 
 ### Isolated rebuild PR 4 — 2026-10-11
 

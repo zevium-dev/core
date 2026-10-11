@@ -26,11 +26,15 @@ A consumer's API key is the credential every metered call carries. Keys belong t
 
 ## Tech
 
+### Isolated rebuild PR 5 — 2026-10-11
+
+The next pairing verifies possession against signed singleton key snapshots, guarded by current organization authority. Membership removal, deleted users, terminal revocation, rotation grace, expiry, disabled state and family caps remain authoritative. No request-path Clerk fallback. Key/route/wallet authority expires after 30 seconds; cold state returns unavailable and triggers background refresh. Existing live cache behavior below remains selected until cutover. Code: `packages/control-plane-next/convex/edgeSnapshots.ts`, `apps/gateway/src/next/{snapshots,pipeline,wallet}.ts`; [handoff](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11).
+
 ### Isolated rebuild PR 2 — 2026-10-11
 
 PR #437 review fixes: membership deletion fences keys using signed envelope/Svix time, including keys issued after joining. Deleted-user cleanup pages 50 keys across orgs using `by_owner`; each `revokeKey` bumps edge revision once and schedules provider revoke. Expired/invalid rotation completion returns a failed DTO and records broker-authenticated `newKeyId` plus cleanup state on the failed rotation. `failRotation` accepts optional signed projection evidence; arbitrary key IDs cannot trigger revocation. `by_new_key` feeds the existing bounded retry/lease/recovery worker; failed minted keys cannot later register. Regression coverage includes cross-page cleanup, failed completion replay, lost dispatch and stale-worker fencing.
 
-Next stores immutable broker-verified owner/subject/org/hash identity in `apiKeys`; registration/replay has no registry-outbox lookup. Indexed key/hash/member-slot claims, fixed 24-hour grace, durable rotation replay, family cap revisions, membership receipt fencing and bounded provider cleanup preserve terminal revocation. No plaintext keys enter Convex. DTOs expose display policy only. Code: `packages/control-plane-next/convex/{keySettings,keyVerification,keyRecovery}.ts`, `lib/{keys,keyProjection}.ts`, `tests/keys.test.ts`, `tests/domainClaimsHarness.ts`. Snapshot integration remains PR 5; root key broker/consumers remain unchanged.
+Next stores immutable broker-verified owner/subject/org/hash identity in `apiKeys`; registration/replay has no registry-outbox lookup. Indexed key/hash/member-slot claims, fixed 24-hour grace, durable rotation replay, family cap revisions, membership receipt fencing and bounded provider cleanup preserve terminal revocation. No plaintext keys enter Convex. DTOs expose display policy only. Code: `packages/control-plane-next/convex/{keySettings,keyVerification,keyRecovery}.ts`, `lib/{keys,keyProjection}.ts`, `tests/keys.test.ts`, `tests/domainClaimsHarness.ts`. Snapshot integration is implemented by isolated PR 5 above; root key broker/consumers remain unchanged until cutover.
 
 - **Monthly-cap recovery (#396)**: gateway and MCP now share the safe cap explanation and explicit admin-increase/next-UTC-month instructions, plus `actions.manageKey` at the configured web origin (#417). Wallet top-up alone does not raise a key cap; cap envelopes omit that action. Existing `402 key_cap_exceeded` remains compatible. Contract tests: `apps/gateway/test/payment-recovery.test.ts`.
 

@@ -8,7 +8,9 @@ export type ForwardResult = { response: Response } | { timedOut: boolean };
 /** Forward once, preserving the request body stream and bounded header wait. */
 export async function forward(
   request: Request,
-  admission: Admission,
+  admission: Pick<Admission, "published" | "verified" | "upstreamUrl"> & {
+    tokenRequest?: Admission["tokenRequest"];
+  },
   fetchImpl: typeof fetch = fetch,
   prepareResponse?: (response: Response) => Promise<Response>,
 ): Promise<ForwardResult> {

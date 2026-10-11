@@ -20,6 +20,14 @@ export type PipelineEnv = {
 };
 
 export type PipelineDeps = {
+  nextExecute?: (
+    request: Request,
+    env: PipelineEnv,
+    ctx: ExecutionContext,
+    route: GatewayRoute,
+    prepare?: (response: Response) => Promise<Response>,
+    authenticatedKey?: VerifiedKey,
+  ) => Promise<Response>;
   machinePayments?: MachinePaymentDeps;
   keyVerifier: KeyVerifier;
   /** Trusted MCP OAuth identity; never populated from request parameters. */
@@ -61,6 +69,15 @@ export async function handleGatewayRequest(
   /** Buffered adapters prepare their result before settlement; rejection refunds. */
   prepareResponse?: (response: Response) => Promise<Response>,
 ): Promise<Response> {
+  if (deps.nextExecute)
+    return deps.nextExecute(
+      request,
+      env,
+      _ctx,
+      route,
+      prepareResponse,
+      deps.authenticatedKey,
+    );
   const started = (deps.now ?? Date.now)();
   const requestId = deps.idGenerator?.() ?? crypto.randomUUID();
   let paid:

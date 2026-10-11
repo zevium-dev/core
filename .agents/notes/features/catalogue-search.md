@@ -45,6 +45,10 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 ## Tech
 
+### Isolated rebuild PR 5 review — 2026-10-11
+
+The isolated PR #441 gateway pairing (`apps/gateway/src/next/pipeline.ts`) reads one signed public catalogue manifest for browsing/MCP fallback search. It trusts generation-time public filtering, performs no per-listing route/org RPCs, and cold-fills through the coordinator. A failed fill reports unavailable rather than successful empty results. The web/semantic replacement stays in PR 6. [Gateway PR 5 notes](gateway.md#isolated-rebuild-pr-5--2026-10-11).
+
 - **Per-token pricing (#329, PR #413): deferred/disabled (2026-10-11).** Shared `isTokenPricingEnabled()` defaults to false: `extractPricing` treats token-priced operations as unpriced, hiding them from public references, discovery/MCP docs/search pricing and preventing gateway/mock execution. Publishing remains allowed with a warning; editor retains rates but marks operations unavailable. Fixed scalar prices (including zero) are unchanged. Metering and settlement code remains for revival and in-flight settlement. [Switch, rollout, and future policy](pricing.md#deferred-llm-pricing-and-future-policy).
 
 - **Realtime lists (#363)**: `CatalogueList` uses Convex `usePaginatedQuery` over `catalogue.listPublicPaginated`; every loaded page remains subscribed and filter arguments reset pagination during render. Empty filtered pages remain loadable. `listPublic` retains its cursor/items contract for landing and SSR callers; the new endpoint shares its indexed implementation and preserves Convex split/end cursors. `publicFacets` subscribes independently. Public catalogue reuses its dehydrated first page while the live hook starts.

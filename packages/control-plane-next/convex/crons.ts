@@ -44,4 +44,16 @@ crons.interval(
   internal.connect.recover,
   {},
 );
+crons.interval(
+  "recover drained edge maintenance",
+  { minutes: 1 },
+  internal.edgeMaintenance.recover,
+  { cursor: null },
+);
+crons.interval(
+  "discover wallet dust",
+  { minutes: 5 },
+  internal.edgeMaintenance.discoverDust,
+  { cursor: null },
+);
 export default crons;

@@ -392,13 +392,16 @@ describe("authority and transport", () => {
       keys: { test: SECRET },
     };
     expect(await verifySnapshot(signed, expected)).toEqual(signed);
+    expect(
+      await verifySnapshot(signed, { ...expected, now: NOW - 1000 }),
+    ).toEqual(signed);
     for (const patch of [
       { deploymentId: "wrong" },
       { nonce: "old" },
       { scope: "other" },
       { minimumRevision: 3 },
       { now: NOW + 30000 },
-      { now: NOW - 1 },
+      { now: NOW - 1001 },
       { keys: { test: "x".repeat(32) } },
     ])
       await expect(

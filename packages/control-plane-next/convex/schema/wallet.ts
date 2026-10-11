@@ -44,6 +44,7 @@ export const walletTables = {
     ),
     gateRevision: v.number(),
     settledThroughEdgeSequence: v.number(),
+    edgeBootstrapId: v.optional(v.string()),
     nextExpiryAt: v.optional(v.number()),
     owner: v.object({
       kind: v.literal("org"),
@@ -183,6 +184,7 @@ export const walletTables = {
       }),
     ),
   })
+    .index("by_dust", ["state", "remainingCredits"])
     .index("by_source", ["sourceRef"])
     .index("by_spend", [
       "walletId",
@@ -219,6 +221,7 @@ export const walletTables = {
     expiredCredits: v.number(),
     state: lotState,
   })
+    .index("by_wallet_spend", ["walletId", "state", "sourceCreatedAt"])
     .index("by_lot_origin", ["lotId", "originLotId"])
     .index("by_lot_spend", ["lotId", "state", "sourceCreatedAt", "originLotId"])
     .index("by_origin", ["originLotId", "lotId"])

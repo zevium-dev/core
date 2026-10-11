@@ -1,6 +1,6 @@
 # Gateway (metered call path)
 
-> Status: built; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
+> Status: built; isolated rebuild PR 5 pairing implemented behind `CONTROL_PLANE_MODE=next`; #396/#417 payment recovery and #421 empty-wallet refresh fixed; dead-layer pruning and staged call path complete (#359, #333); #336 request limits and #334 admission proofs built (P0); LLM per-token pricing deferred/disabled · Updated: 2026-10-11
 > Code: `apps/gateway/test/payment-recovery.test.ts`, `apps/gateway/src/index.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/admit.ts`, `packages/shared/src/admission-proof.ts`, `convex/specs.ts`, `convex/wallets.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/finalize.ts`, `apps/gateway/src/cache.ts`, `apps/gateway/src/convex-http.ts`, `apps/gateway/src/headers.ts`, `apps/gateway/src/idempotency.ts`, `apps/gateway/src/cors.ts`, `apps/gateway/src/payment-required.ts`, `apps/gateway/src/errors.ts`, `apps/gateway/src/key-verifier.ts`, `apps/gateway/src/spec-source.ts`, `apps/gateway/src/wallet.ts`, `apps/gateway/src/usage.ts`, `packages/shared/src/pricing-policy.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -38,6 +38,12 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. When the machine rail is explicitly enabled and configured, the envelope also carries x402 V2 top-up requirements. Verified payment returns a payer-bound session. (FLOW 3.4; owned by [machine-payments](machine-payments.md))
 
 ## Tech
+
+### Isolated rebuild PR 5 — 2026-10-11
+
+`CONTROL_PLANE_MODE=next` selects signed 30-second edge authority and source-backed SQLite admissions/finals; default deployments retain the current path until PR 7. Warm reads remain local; cold misses share a synchronous coordinator fill with a two-second budget. Snapshot/OAuth/wallet alarms maintain active authority afterward. Direct calls stream through the existing forwarder; MCP retains bounded buffering before finalization. Key revocation, encrypted route headers, contiguous drain ACKs, exception recovery and append-only DO migration details live in the [PR 5 handoff](../architecture/convex-rebuild.md#pr-5-implementation-and-handoff--2026-10-11). Code: `apps/gateway/src/next/`, `packages/shared/src/edge/`, `packages/control-plane-next/convex/{edgeSnapshots,edgeMaintenance,http}.ts`. Tests: `apps/gateway/scripts/next-acceptance.mjs`, `test/next-wallet.test.ts`, next `tests/edge.test.ts`. Token execution, capability routing and x402 stay unavailable in this pairing.
+
+Review fixes in PR #441: ten-second negative caches without persisted missing identities/tokens; 60s snapshot/OAuth cleanup; five-minute wallet idle stop; unchanged wallet generations renew only `validUntil`; catalogue/search read the generation-filtered public manifest once without route/org warmup. HTTP actions supply snapshot query time; `generatedAt` tolerates 1s skew, expiry remains exact. Wallet alarms prune old day/month counters, refilled buckets and resolved local failures. Rejected finals emit `next_settlement_failure` alerts; authentic current-epoch contiguous closed-gate finals become zero-debit exceptions. Internal `wallets.recoverRejectedSettlement` pins original-final fingerprint and expected watermark for audited operator recovery; no synthetic ACK or current-epoch skip is allowed. Tests include real production DO migration configuration and cold metered OAuth/MCP through the actual `EDGE_OAUTH` binding, with local provider HTTP fixtures.
 
 ### Accepted changes — implementation pending (2026-10-11)
 
@@ -101,6 +107,8 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 - [header-hygiene](../findings/header-hygiene.md) — request/response filter rules; filter before stamping gateway metadata; own-property lookup for the exclusion table.
 
 ## Decisions
+
+- 2026-10-11 — ACCEPTED and built in PR #441: bounded synchronous single-flight cold fills; 1s issuance-only clock skew. Negative results do not retain polling identities; idle state cleanup and per-isolate cold budgets bound abuse. [Decision](../decisions/2026-10-11-edge-cold-fill-and-clock-skew.md).
 
 - 2026-10-11 — ACCEPTED: DO spend authority and 30s snapshot design; freeze/drain before negative adjustments, no fixed-price consumer debt. #353/#430. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).
 - 2026-10-11 — ACCEPTED: Exactly one upstream per listing; publisher owns multi-provider failover. #327/#328 P2. [Decision](../decisions/2026-10-11-capability-routing-deferred.md).

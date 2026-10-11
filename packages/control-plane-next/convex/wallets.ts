@@ -9,7 +9,7 @@ import {
 import { internal } from "./_generated/api";
 import { requireActiveOrg } from "./lib/auth";
 import { checkpoint, getWallet } from "./money/walletLedger";
-import { settleOne, type Outcome } from "./money/settle";
+import { settleOne, recoverRejectedFinal, type Outcome } from "./money/settle";
 import { ingestUsage } from "../contracts/settlement";
 import {
   abandonClose,
@@ -62,6 +62,16 @@ export const settleEvent = internalMutation({
       throw new Error("Settlement too large");
     return settleOne(ctx, JSON.parse(args.eventJson));
   },
+});
+/** No public HTTP/UI entrypoint. Operators must supply exact DO failure evidence. */
+export const recoverRejectedSettlement = internalMutation({
+  args: {
+    eventJson: v.string(),
+    expectedFingerprint: v.string(),
+    expectedWatermark: v.number(),
+    reason: v.string(),
+  },
+  handler: (ctx, args): Promise<Outcome> => recoverRejectedFinal(ctx, args),
 });
 /** HTTP batch orchestration; per-event mutation rollback isolates poisoned refs and bounds writes. */
 export const recordUsage = internalAction({

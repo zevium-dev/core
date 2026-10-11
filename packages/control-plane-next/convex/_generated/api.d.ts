@@ -13,6 +13,8 @@ import type * as billing from "../billing.js";
 import type * as clerkWebhooks from "../clerkWebhooks.js";
 import type * as connect from "../connect.js";
 import type * as crons from "../crons.js";
+import type * as edgeMaintenance from "../edgeMaintenance.js";
+import type * as edgeSnapshots from "../edgeSnapshots.js";
 import type * as http from "../http.js";
 import type * as keyRecovery from "../keyRecovery.js";
 import type * as keySettings from "../keySettings.js";
@@ -68,6 +70,8 @@ declare const fullApi: ApiFromModules<{
   clerkWebhooks: typeof clerkWebhooks;
   connect: typeof connect;
   crons: typeof crons;
+  edgeMaintenance: typeof edgeMaintenance;
+  edgeSnapshots: typeof edgeSnapshots;
   http: typeof http;
   keyRecovery: typeof keyRecovery;
   keySettings: typeof keySettings;
