@@ -2,7 +2,7 @@
 
 > Investigated: 2026-10-11. Runtime: `@clerk/backend` 3.22.0. Live automatic-signup payload not verified.
 
-Owner requires $1 only for the org automatically created at signup, once per Clerk user ever. Creator ID alone proves ownership, not signup provenance. Choosing the first delivered org is also unsafe: webhook delivery is unordered. A short creation-time window can include a manually created second org, and a deleted first org may no longer appear in a later Backend API membership list.
+Initial requirement was strict automatic-signup provenance. Creator ID proves ownership but does not prove automatic creation, and webhook delivery is unordered. The owner subsequently accepted the simpler first-created-org rule, with first-processed delivery winning when webhooks race. See [decision](../decisions/2026-10-11-signup-credit-first-created-org.md).
 
 ## Evidence
 
@@ -11,10 +11,12 @@ Owner requires $1 only for the org automatically created at signup, once per Cle
 - [Clerk's organization webhook example](https://clerk.com/blog/per-user-licensing-with-stripe-and-clerk-organizations): `organization.created` includes `created_by` and `created_at`.
 - Installed SDK `node_modules/@clerk/backend/dist/api/resources/JSON.d.ts`: `OrganizationJSON` has `created_by`, `created_at`, metadata; no automatic-creation field. `UserJSON` has `created_at` and nullable `organization_memberships`; nested membership organizations carry `OrganizationJSON`.
 
-## Implemented proof and limits
+## Conclusion after owner review
 
-Use only a unique owned organization present in the signed `user.created` snapshot, with valid creation timestamps (organization not older than user), matched to a signed `organization.created` event with the same creator and exact org timestamp. This establishes ownership at signup without choosing by delivery time or client input. Store both facts independently so either event can arrive first; freeze eligibility and grant claims permanently. No later user update or membership can expand eligibility.
+The discarded implementation required a unique owned organization in signed `user.created.organization_memberships` plus matching signed `organization.created` creator and timestamp. Clerk does not document that automatic org creation appears in the user snapshot. That requirement could silently deny every signup; synthetic snapshot tests did not establish a production happy path.
 
-**This is a fail-closed inference from the signup snapshot, not a documented Clerk automatic-creation marker.** No public contract located guarantees that the automatic org is present when Clerk emits `user.created`. If Clerk emits user creation before auto-org provisioning (or omits membership data), this path deliberately grants nothing. A synthetic signed-payload test proves implementation behavior, not real provider delivery. Production acceptance needs a real automatic signup and inspection of its signed event shape. If the snapshot is absent, obtain an authoritative provider marker or a trusted provisioning association; do not silently loosen eligibility to a timing heuristic.
+The accepted implementation grants from signed `organization.created.created_by` alone, once per Clerk user ever. Automatic org creation supplies the personal org at signup. The indexed creator claim, org claim, ledger append, balance, nonrefundable lot and checkpoint commit atomically; claims survive deletable mirrors. User deletion leaves a permanent tombstone. Joining an organization, client metadata, browser mirror initialization and org updates never claim credit.
+
+Accepted imperfection: if a second org is created before the first org's webhook is processed, whichever signed creation webhook is processed first gets the grant. `created_at` does not reorder or move an issued grant. Snapshot proof code and tests were removed; missing membership snapshots no longer block funding. Live provider signup delivery was not exercised in this task.
 
 No live provider configuration or shared deployment data was changed during this investigation.

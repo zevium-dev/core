@@ -269,7 +269,6 @@ export const applyOrganizationWebhook = internalMutation({
     ),
     clerkOrgId: v.string(),
     creatorClerkUserId: v.optional(v.string()),
-    clerkCreatedAt: v.optional(v.number()),
     name: v.optional(v.string()),
     slug: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
@@ -357,22 +356,15 @@ export const applyOrganizationWebhook = internalMutation({
       .query("organizationTombstones")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-    // Creation proof survives a newer profile update arriving first. Updates
-    // and generic mirror writes cannot establish signup eligibility.
+    // A delayed creation event still claims credit after a newer profile update.
+    // Updates and generic mirror writes cannot nominate a grant recipient.
     if (
       tombstone === null &&
       existing !== null &&
-      existing.archivedAt === undefined
+      existing.archivedAt === undefined &&
+      args.eventType === "organization.created"
     ) {
-      if (args.eventType === "organization.created") {
-        await ctx.db.patch(existing._id, {
-          signupCreatorClerkUserId:
-            existing.signupCreatorClerkUserId ?? args.creatorClerkUserId,
-          signupClerkCreatedAt:
-            existing.signupClerkCreatedAt ?? args.clerkCreatedAt,
-        });
-        await grantSignupCredit(ctx, existing._id);
-      }
+      await grantSignupCredit(ctx, existing._id, args.creatorClerkUserId);
     }
     if (
       tombstone !== null ||
@@ -404,15 +396,11 @@ export const applyOrganizationWebhook = internalMutation({
         imageUrl: args.imageUrl,
         lastClerkEventAt: args.eventTimestamp,
         unreadNotificationCount: 0,
-        ...(args.eventType === "organization.created"
-          ? {
-              signupCreatorClerkUserId: args.creatorClerkUserId,
-              signupClerkCreatedAt: args.clerkCreatedAt,
-            }
-          : {}),
       });
       await ensureWallet(ctx, organizationId);
-      await grantSignupCredit(ctx, organizationId);
+      if (args.eventType === "organization.created") {
+        await grantSignupCredit(ctx, organizationId, args.creatorClerkUserId);
+      }
       await ctx.scheduler.runAfter(
         0,
         internal.catalogue.syncOrganizationCataloguePage,

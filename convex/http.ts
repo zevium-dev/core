@@ -55,13 +55,10 @@ type ClerkUserEventData = {
   username?: string | null;
   primary_email_address_id?: string | null;
   email_addresses?: ClerkEmailAddress[];
-  created_at?: number;
-  organization_memberships?: { organization: ClerkOrgEventData }[] | null;
 };
 type ClerkOrgEventData = {
   id: string;
   created_by?: string | null;
-  created_at?: number;
   name: string;
   slug: string;
   image_url?: string | null;
@@ -123,7 +120,6 @@ http.route({
           clerkOrgId: data.id,
           name: data.name,
           creatorClerkUserId: data.created_by ?? undefined,
-          clerkCreatedAt: data.created_at,
           slug: data.slug,
           imageUrl: data.image_url ?? undefined,
         });
@@ -160,34 +156,6 @@ http.route({
           data.username ||
           email ||
           "User";
-        if (event.type === "user.created") {
-          // Clerk exposes no automatic-creation flag. Require a unique owned
-          // organization already in the signed signup snapshot; timing alone
-          // cannot distinguish a manually created organization. Never read
-          // user-controlled unsafe_metadata or a later membership snapshot.
-          const owned = Array.isArray(data.organization_memberships)
-            ? data.organization_memberships
-                .map((m) => m.organization)
-                .filter(
-                  (org) =>
-                    org?.created_by === data.id &&
-                    typeof org.id === "string" &&
-                    org.id.trim() !== "" &&
-                    Number.isSafeInteger(data.created_at) &&
-                    (data.created_at ?? 0) > 0 &&
-                    Number.isSafeInteger(org.created_at) &&
-                    (org.created_at ?? 0) >= (data.created_at ?? 0),
-                )
-            : [];
-          const personal = owned.length === 1 ? owned[0] : undefined;
-          await ctx.runMutation(internal.users.recordSignupFromClerk, {
-            clerkUserId: data.id,
-            personalOrganization:
-              personal?.created_at === undefined
-                ? undefined
-                : { clerkOrgId: personal.id, createdAt: personal.created_at },
-          });
-        }
         await ctx.runMutation(internal.users.upsertFromClerk, {
           clerkUserId: data.id,
           name,

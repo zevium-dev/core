@@ -4,6 +4,8 @@
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
 > Status: superseded 2026-10-11 by [decision](2026-10-11-signup-credit-eligibility.md): Eligibility superseded; #317 implementation history retained.
 
+> Recipient selection superseded by [2026-10-11 first-created-org decision](2026-10-11-signup-credit-first-created-org.md).
+
 ## Decision
 
 New organizations start with about $1 of promotional credit (10,000 credits) by default. This resolves the free-tier conflict: code refuses free-tier calls at zero balance, and the golden path wants a real free call before any payment. With a starting balance, free-tier and cheap paid calls work immediately after signup.

@@ -13,21 +13,9 @@ const event = {
   eventType: "organization.created" as const,
   clerkOrgId: "org_signup",
   creatorClerkUserId: "user_creator",
-  clerkCreatedAt: 100,
   name: "Signup",
   slug: "signup",
 };
-
-async function signup(
-  t: ReturnType<typeof convexTest>,
-  clerkUserId = event.creatorClerkUserId,
-  clerkOrgId = event.clerkOrgId,
-) {
-  await t.mutation(internal.users.recordSignupFromClerk, {
-    clerkUserId,
-    personalOrganization: { clerkOrgId, createdAt: event.clerkCreatedAt },
-  });
-}
 
 async function signedEvent(
   t: ReturnType<typeof convexTest>,
@@ -49,20 +37,6 @@ async function signedEvent(
   });
 }
 
-const signupData = {
-  id: event.creatorClerkUserId,
-  created_at: 90,
-  organization_memberships: [
-    {
-      organization: {
-        id: event.clerkOrgId,
-        created_by: event.creatorClerkUserId,
-        created_at: event.clerkCreatedAt,
-      },
-    },
-  ],
-};
-
 async function state(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => ({
     wallets: await ctx.db.query("wallets").collect(),
@@ -79,10 +53,6 @@ describe("signup promotional credit", () => {
     vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", secret);
     vi.stubEnv("GATEWAY_INTERNAL_SECRET", "test-gateway-secret");
     const t = convexTest(schema, modules);
-    expect(
-      (await signedEvent(t, "user.created", signupData, "msg_user_signup"))
-        .status,
-    ).toBe(200);
     const body = JSON.stringify({
       type: event.eventType,
       data: {
@@ -90,7 +60,7 @@ describe("signup promotional credit", () => {
         name: event.name,
         slug: event.slug,
         created_by: event.creatorClerkUserId,
-        created_at: event.clerkCreatedAt,
+        created_at: 100,
       },
     });
     const timestamp = new Date();
@@ -144,7 +114,6 @@ describe("signup promotional credit", () => {
 
   it("deduplicates new webhook ids and trusted mirror retries, then denies a second org by the creator", async () => {
     const t = convexTest(schema, modules);
-    await signup(t);
     await t.mutation(internal.organizations.applyOrganizationWebhook, event);
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
@@ -165,6 +134,11 @@ describe("signup promotional credit", () => {
     await t.mutation(internal.users.deleteFromClerk, {
       clerkUserId: event.creatorClerkUserId,
     });
+    await t.mutation(internal.users.upsertFromClerk, {
+      clerkUserId: event.creatorClerkUserId,
+      name: "Recreated mirror",
+      email: "creator@example.com",
+    });
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
       svixId: "msg_second",
@@ -177,7 +151,6 @@ describe("signup promotional credit", () => {
     expect(
       result.wallets.map((wallet) => wallet.balance).sort((a, b) => a - b),
     ).toEqual([0, 10_000]);
-    await signup(t, "user_other", "org_other");
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
       svixId: "msg_other",
@@ -190,7 +163,6 @@ describe("signup promotional credit", () => {
 
   it("funds a browser-created mirror when creator proof arrives, including out-of-order delivery", async () => {
     const t = convexTest(schema, modules);
-    await signup(t);
     const browser = t.withIdentity({
       subject: "invited_member",
       org_id: event.clerkOrgId,
@@ -237,47 +209,35 @@ describe("signup promotional credit", () => {
     expect((await state(t)).entries).toHaveLength(0);
     expect((await state(t)).claims).toHaveLength(0);
   });
-  it("waits for signup proof when organization.created arrives first", async () => {
+  it("lets the first processed creation win when a later org arrives first", async () => {
     const t = convexTest(schema, modules);
-    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
-    expect((await state(t)).entries).toHaveLength(0);
-    await signup(t);
-    await signup(t);
-    expect((await state(t)).entries).toHaveLength(1);
-  });
-
-  it("does not let a later org delivered first steal the signup grant", async () => {
-    const t = convexTest(schema, modules);
-    await signup(t);
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
       svixId: "msg_later",
       clerkOrgId: "org_later",
       slug: "later",
+      eventTimestamp: 200,
     });
-    expect((await state(t)).entries).toHaveLength(0);
     await t.mutation(internal.organizations.applyOrganizationWebhook, event);
-    expect((await state(t)).claims[0]?.clerkOrgId).toBe(event.clerkOrgId);
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims[0]?.clerkOrgId).toBe("org_later");
   });
 
-  it("does not grant to an org the signup user joins", async () => {
+  it("joining an org never spends the joining user's claim", async () => {
     const t = convexTest(schema, modules);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      creatorClerkUserId: "user_other",
+    });
     await signedEvent(
       t,
       "user.created",
       {
-        ...signupData,
-        organization_memberships: [
-          {
-            organization: {
-              id: event.clerkOrgId,
-              created_by: "user_other",
-              created_at: 100,
-            },
-          },
-        ],
+        id: event.creatorClerkUserId,
+        organization_memberships: [{ organization: { id: event.clerkOrgId } }],
       },
-      "msg_joined",
+      "msg_user_joined",
     );
     await t
       .withIdentity({
@@ -288,10 +248,6 @@ describe("signup promotional credit", () => {
       .mutation(api.organizations.ensureOrganization, {
         clerkOrgId: event.clerkOrgId,
       });
-    await t.mutation(internal.organizations.applyOrganizationWebhook, {
-      ...event,
-      creatorClerkUserId: "user_other",
-    });
     await signedEvent(
       t,
       "organizationMembership.created",
@@ -301,46 +257,20 @@ describe("signup promotional credit", () => {
       },
       "msg_membership",
     );
-    expect((await state(t)).entries).toHaveLength(0);
+    expect(
+      (await state(t)).claims.map((claim) => claim.creatorClerkUserId),
+    ).toEqual(["user_other"]);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, {
+      ...event,
+      svixId: "msg_own_org",
+      clerkOrgId: "org_own",
+      slug: "own",
+    });
+    expect((await state(t)).claims).toHaveLength(2);
   });
-
-  it.each([
-    undefined,
-    null,
-    [],
-    [
-      ...signupData.organization_memberships,
-      {
-        organization: {
-          id: "org_ambiguous",
-          created_by: event.creatorClerkUserId,
-          created_at: 100,
-        },
-      },
-    ],
-  ])(
-    "fails closed for absent or ambiguous signup membership proof: %j",
-    async (memberships) => {
-      const t = convexTest(schema, modules);
-      await signedEvent(
-        t,
-        "user.created",
-        {
-          ...signupData,
-          organization_memberships: memberships,
-        },
-        "msg_unproven",
-      );
-      await t.mutation(internal.organizations.applyOrganizationWebhook, event);
-      await signedEvent(t, "user.updated", signupData, "msg_update");
-      await signedEvent(t, "user.created", signupData, "msg_replay_changed");
-      expect((await state(t)).entries).toHaveLength(0);
-    },
-  );
 
   it("requires organization.created, not an update or generic trusted mirror", async () => {
     const t = convexTest(schema, modules);
-    await signup(t);
     await t.mutation(internal.organizations.upsertFromClerk, {
       clerkOrgId: event.clerkOrgId,
       name: event.name,
@@ -359,7 +289,6 @@ describe("signup promotional credit", () => {
 
   it("preserves the user claim after org deletion and recreation", async () => {
     const t = convexTest(schema, modules);
-    await signup(t);
     await t.mutation(internal.organizations.applyOrganizationWebhook, event);
     await t.mutation(internal.organizations.applyOrganizationWebhook, {
       ...event,
@@ -377,7 +306,6 @@ describe("signup promotional credit", () => {
       clerkOrgId: "org_recreated",
       slug: "recreated",
     });
-    await signup(t, event.creatorClerkUserId, "org_recreated");
     const result = await state(t);
     expect(result.entries).toHaveLength(1);
     expect(result.claims).toHaveLength(1);
@@ -397,7 +325,6 @@ describe("signup promotional credit", () => {
           eventType: "organization.deleted",
         });
       }
-      await signup(t);
       await t.mutation(internal.organizations.applyOrganizationWebhook, event);
       expect((await state(t)).entries).toHaveLength(0);
     }
@@ -418,13 +345,12 @@ describe("signup promotional credit", () => {
         grantedAt: 1,
       });
     });
-    await signup(t);
     await t.mutation(internal.organizations.applyOrganizationWebhook, event);
     expect((await state(t)).entries).toHaveLength(0);
     expect((await state(t)).claims).toHaveLength(1);
   });
 
-  it("cannot fund an anonymous wallet even with matching creation facts", async () => {
+  it("cannot fund an anonymous wallet even with a signed creation event", async () => {
     const t = convexTest(schema, modules);
     await t.run(async (ctx) => {
       await ctx.db.insert("organizations", {
@@ -432,17 +358,14 @@ describe("signup promotional credit", () => {
         name: "Anonymous",
         slug: event.slug,
         walletKind: "anonymous",
-        signupCreatorClerkUserId: event.creatorClerkUserId,
-        signupClerkCreatedAt: event.clerkCreatedAt,
       });
     });
-    await signup(t);
+    await t.mutation(internal.organizations.applyOrganizationWebhook, event);
     expect((await state(t)).entries).toHaveLength(0);
   });
   it("serializes concurrent creation deliveries into one ledger append", async () => {
     const t = convexTest(schema, modules);
     await Promise.all([
-      signup(t),
       t.mutation(internal.organizations.applyOrganizationWebhook, event),
       t.mutation(internal.organizations.applyOrganizationWebhook, {
         ...event,
@@ -455,35 +378,48 @@ describe("signup promotional credit", () => {
     expect(result.wallets[0]).toMatchObject({ balance: 10_000, sequence: 1 });
   });
 
-  it.each([undefined, 99, 101])(
-    "rejects mismatched or absent organization creation time: %s",
-    async (clerkCreatedAt) => {
-      const t = convexTest(schema, modules);
-      await signup(t);
-      await t.mutation(internal.organizations.applyOrganizationWebhook, {
-        ...event,
-        clerkCreatedAt,
-      });
-      expect((await state(t)).entries).toHaveLength(0);
-    },
-  );
-
-  it("ignores client-controlled metadata suggesting signup eligibility", async () => {
+  it("serializes competing organizations into one per-user claim", async () => {
     const t = convexTest(schema, modules);
-    await signedEvent(
-      t,
-      "user.created",
-      {
-        id: event.creatorClerkUserId,
-        created_at: 90,
-        unsafe_metadata: {
-          personalOrganization: event.clerkOrgId,
-          organization_memberships: signupData.organization_memberships,
+    await Promise.all([
+      t.mutation(internal.organizations.applyOrganizationWebhook, event),
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        ...event,
+        svixId: "msg_competing",
+        clerkOrgId: "org_competing",
+        slug: "competing",
+      }),
+    ]);
+    const result = await state(t);
+    expect(result.entries).toHaveLength(1);
+    expect(result.claims).toHaveLength(1);
+    expect(
+      result.wallets.reduce((sum, wallet) => sum + wallet.balance, 0),
+    ).toBe(10_000);
+  });
+
+  it("user snapshots and client metadata cannot nominate a recipient", async () => {
+    const t = convexTest(schema, modules);
+    for (const type of ["user.created", "user.updated"]) {
+      await signedEvent(
+        t,
+        type,
+        {
+          id: event.creatorClerkUserId,
+          organization_memberships: [
+            {
+              organization: {
+                id: event.clerkOrgId,
+                created_by: event.creatorClerkUserId,
+              },
+            },
+          ],
+          unsafe_metadata: { personalOrganization: event.clerkOrgId },
         },
-      },
-      "msg_unsafe_metadata",
-    );
+        `msg_${type}`,
+      );
+    }
+    expect((await state(t)).claims).toHaveLength(0);
     await t.mutation(internal.organizations.applyOrganizationWebhook, event);
-    expect((await state(t)).entries).toHaveLength(0);
+    expect((await state(t)).entries).toHaveLength(1);
   });
 });

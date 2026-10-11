@@ -1,6 +1,6 @@
 # Accounts & organizations
 
-> Status: partial (signup credit #317 restricted to proven signup personal org; provider snapshot delivery unverified) · Updated: 2026-10-11
+> Status: partial (signup credit #317 uses first signed org creation, once per user) · Updated: 2026-10-11
 > Code: `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts` (`/clerk-webhook`), `convex/lib/auth.ts`, `packages/shared/src/org-capabilities.ts`, `convex/clerk-webhook.test.ts`, `convex/organizations.test.ts`, `convex/signup-credit.test.ts`, `convex/org-admin-auth.test.ts`, `apps/web/src/routes/sign-in.$.tsx`, `apps/web/src/routes/sign-up.$.tsx`, `apps/web/src/routes/app.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/app/org/create.tsx`, `apps/web/src/routes/app/settings.tsx`, `apps/web/src/routes/app/settings/index.tsx`, `apps/web/src/components/app-sidebar.tsx`, `apps/web/src/hooks/use-ensure-mirror.ts`, `convex/lib/signupCredit.ts`, `convex/schema.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
@@ -82,14 +82,14 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 
 ### Implementation notes
 
-- **Signup credit (#317)**: signed `user.created` freezes a unique creator-owned personal-org candidate from its membership snapshot; signed `organization.created` must match its creator, org ID and creation timestamp. `signupCreditEligibility` and `signupCreditGrants` survive mirror deletion. Browser initialization, org updates and later memberships never nominate a grant recipient. Missing/ambiguous signup proof fails closed; Clerk's inclusion of the automatic org in this snapshot is not yet live-verified. Exact rules and the provider limitation live in [wallet-billing](wallet-billing.md#implementation-notes).
+- **Signup credit (#317)**: signed `organization.created.created_by` identifies the creator; the first processed eligible creation claims the user's one lifetime grant. Clerk automatic creation supplies the signup personal org. `signupCreditGrants` and deletion tombstones survive mirrors; browser initialization, user snapshots, org updates, metadata and membership events cannot nominate recipients. The owner accepts first-processed delivery winning if two creation webhooks race. Exact rules live in [wallet-billing](wallet-billing.md#implementation-notes).
 
 - **Org-role authorization**: Clerk's active-org JWT claims are authoritative. Members may read org/project state and collaborate on spec drafts. Exact `org:admin` is required server-side before project lifecycle/visibility/deletion, immutable publication/deprecation, webhook configuration/signing-secret reads, wallet top-ups, and Stripe Connect onboarding/transfers. Missing or unknown roles fail closed; cross-org resource mutations return the same not-found class as missing resources. Matching client gates hide unusable controls but never replace server authorization.
 - **Authentication loading**: sign-in/up routes mount Clerk directly so their loading skeletons do not wait behind the authenticated Convex principal boundary. CSP derives the exact Clerk Frontend API origin from the build's publishable key, allowing production custom domains as well as development instances and Clerk's documented abuse-protection hosts. Client navigation to home starts catalogue teaser fetching without blocking the page shell; SSR still awaits data for hydration.
 
 ### Code map (observed)
 
-- Clerk webhook router: `convex/http.ts` `/clerk-webhook` → `organizations.applyOrganizationWebhook` / `archiveFromClerk` / `deleteFromClerk`, `users.upsertFromClerk` / `recordSignupFromClerk` / `deleteFromClerk`. Tests in `convex/clerk-webhook.test.ts` cover user personal-data deletion, org archive preserving financial/audit/project history, webhook-authoritative profile fields vs browser overwrite, minimal public org DTOs, Svix-id dedupe + stale-event rejection.
+- Clerk webhook router: `convex/http.ts` `/clerk-webhook` → `organizations.applyOrganizationWebhook` / `archiveFromClerk` / `deleteFromClerk`, `users.upsertFromClerk` / `deleteFromClerk`. Tests in `convex/clerk-webhook.test.ts` cover user personal-data deletion, org archive preserving financial/audit/project history, webhook-authoritative profile fields vs browser overwrite, minimal public org DTOs, Svix-id dedupe + stale-event rejection.
 - Browser mirror init: `use-ensure-mirror.ts` calls `users.ensureUser` then `organizations.ensureOrganization`.
 - Org-less guard: `useOrgLessGuard` in `apps/web/src/routes/app.tsx` pushes users with no active org and zero memberships to `/app/org/create` (skipped under `/app/org` to avoid redirect loop). Comment states Clerk auto-org-creation is enabled instance-wide for new signups.
 - Role check: `requireOrgAdmin` (`convex/lib/auth.ts`) → `isPrivilegedOrgRole` (`packages/shared/src/org-capabilities.ts`) accepts `org:owner` or `org:admin`.
@@ -101,7 +101,9 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 ## Decisions
 
 - 2026-10-11 — ACCEPTED: Only signup auto-created personal org gets $1, once per user; later-created/joined orgs get nothing. P0 #426. [Decision](../decisions/2026-10-11-signup-credit-eligibility.md).
+- 2026-10-11 — ACCEPTED: first signed org creation claims the one-time user signup promotion; automatic creation supplies the personal org. First-processed delivery wins if webhooks race. [Decision](../decisions/2026-10-11-signup-credit-first-created-org.md).
 - 2026-10-11 — Owner: signup promotion belongs only to the automatically created signup personal org, once per Clerk user ever; later-created/joined orgs receive no signup grant. Supersedes the creator fallback below.
+- 2026-10-11 — ACCEPTED: first signed org creation claims the one-time user signup promotion; automatic creation supplies the personal org. First-processed delivery wins if webhooks race. [Decision](../decisions/2026-10-11-signup-credit-first-created-org.md).
 
 - 2026-10-10 — BUILT (#317): $1 signup promotion with once-per-Clerk-creator fallback. [decision](../decisions/2026-10-10-signup-credit.md) (Historical; scope superseded 2026-10-11 above.)
 - 2026-10-10 — BUILT (#317): $1 signup promotion with once-per-Clerk-creator fallback. [decision](../decisions/2026-10-10-signup-credit.md)
