@@ -14,6 +14,7 @@ import {
 const startHandler = createStartHandler(defaultStreamHandler);
 
 const PUBLIC_ASSET_PATHS = new Set([
+  "/cli/zevium.mjs",
   "/favicon.ico",
   "/logo192.png",
   "/logo512.png",

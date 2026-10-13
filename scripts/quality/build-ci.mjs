@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
@@ -21,6 +23,7 @@ try {
   const clerkSecretFixture = ["sk", "test", "ZmFrZS5jbGVyay5hY2NvdW50JA"].join(
     "_",
   );
+  run("pnpm", ["--filter", "@zevium/cli", "build"]);
   run("pnpm", ["--filter", "web", "build"], {
     ...process.env,
     CLERK_PUBLISHABLE_KEY: clerkPublicFixture,
@@ -29,6 +32,13 @@ try {
     VITE_CONVEX_URL: "https://ci.invalid",
     VITE_GATEWAY_URL: "https://ci.invalid",
   });
+  assert.deepEqual(
+    readFileSync(
+      resolve(repositoryRoot, "apps/web/dist/client/cli/zevium.mjs"),
+    ),
+    readFileSync(resolve(repositoryRoot, "packages/cli/dist/zevium.mjs")),
+    "Web download must match the standalone CLI bundle",
+  );
   run("pnpm", ["--filter", "web", "test:csrf-runtime", "--skip-build"]);
 } catch (error) {
   process.stderr.write(

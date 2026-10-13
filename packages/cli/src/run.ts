@@ -1,11 +1,13 @@
 import {
   generatedCallArguments,
-  GENERATOR_VERSION,
   type GeneratedOperation,
   isValidSlug,
 } from "@zevium/shared";
 import { z } from "zod";
 import { terminalText } from "./terminal.js";
+
+// This is a reviewed client compatibility pin, not the producer's latest version.
+const SUPPORTED_GENERATOR_MAJOR = 1;
 
 const LIMIT = 1024 * 1024;
 const jsonSchema = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
@@ -53,7 +55,7 @@ const operationSchema = z.object({
 const docsSchema = z.object({
   publisherData: z.object({
     generated: z.object({
-      generatorVersion: z.literal(GENERATOR_VERSION),
+      generatorVersion: z.literal(SUPPORTED_GENERATOR_MAJOR),
       version: z.string(),
       markdown: z.string(),
       operations: z.array(operationSchema),
@@ -188,10 +190,39 @@ async function run(
     throw error;
   }
   const docs = docsSchema.safeParse(raw);
-  if (!docs.success)
-    throw new Error(
-      "Generated contract unavailable or unsupported generator version; consult listing Markdown",
-    );
+  if (!docs.success) {
+    const envelope = z
+      .object({
+        publisherData: z.object({
+          generated: z.object({
+            error: z.unknown().optional(),
+            reason: z.unknown().optional(),
+            generatorVersion: z.unknown().optional(),
+          }),
+        }),
+      })
+      .safeParse(raw);
+    if (envelope.success) {
+      const generated = envelope.data.publisherData.generated;
+      if (typeof generated.error === "string") {
+        const reason =
+          typeof generated.reason === "string"
+            ? generated.reason
+            : generated.error;
+        throw new Error(
+          `generated contract unavailable for this listing (${reason}); read the listing Markdown`,
+        );
+      }
+      if (
+        typeof generated.generatorVersion === "number" &&
+        generated.generatorVersion !== SUPPORTED_GENERATOR_MAJOR
+      )
+        throw new Error(
+          `listing uses generator major ${generated.generatorVersion}; this CLI supports ${SUPPORTED_GENERATOR_MAJOR}; download the latest CLI`,
+        );
+    }
+    throw new Error("invalid contract");
+  }
   const generated = docs.data.publisherData.generated;
   if (!command || command === "--help") return generated.markdown;
   const operation: GeneratedOperation | undefined = generated.operations.find(

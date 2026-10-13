@@ -20,21 +20,24 @@ afterEach(() => {
 });
 
 describe("Worker-first asset routing", () => {
-  it.each(["/favicon.ico", "/logo192.png", "/logo512.png", "/manifest.json"])(
-    "serves public asset %s in production",
-    async (path) => {
-      vi.stubEnv("DEV", false);
-      const request = new Request(`https://www.zevium.dev${path}`);
-      const assets = {
-        context: {},
-        ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
-      };
-      const response = await server.fetch(request, assets);
-      expect(response.status).toBe(200);
-      expect(assets.ASSETS.fetch).toHaveBeenCalledWith(request);
-      expect(startHandler).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    "/cli/zevium.mjs",
+    "/favicon.ico",
+    "/logo192.png",
+    "/logo512.png",
+    "/manifest.json",
+  ])("serves public asset %s in production", async (path) => {
+    vi.stubEnv("DEV", false);
+    const request = new Request(`https://www.zevium.dev${path}`);
+    const assets = {
+      context: {},
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+    };
+    const response = await server.fetch(request, assets);
+    expect(response.status).toBe(200);
+    expect(assets.ASSETS.fetch).toHaveBeenCalledWith(request);
+    expect(startHandler).not.toHaveBeenCalled();
+  });
   it.each([
     ["/src/styles.css", "text/css"],
     ["/@tanstack-start/styles.css?routes=__root__", "text/css"],

@@ -2,7 +2,7 @@
 
 # Dev environment
 
-> Updated: 2026-10-10 (seed runner, local Convex CSP, discovery origins; #384, #387, #392)
+> Updated: 2026-10-13 (isolated verification paths; #451)
 > Related: [deploy](deploy.md), [testing](testing.md)
 
 Facts an agent needs before running anything locally. Hard-won; keep them. If a fact stops being true, fix it here in the same change.
@@ -37,6 +37,9 @@ Use `mise exec -- pnpm ...` when pnpm is not on PATH. Never npm/yarn.
 Use `TMPDIR="$PWD/.tmp" VITEST_MAX_WORKERS=2 pnpm ci:pr` after `mkdir -p .tmp`. Anonymous schema/race checks stay isolated; never validate against legacy shared dev.
 
 ## Worktrees
+
+- Keep nested verification checkouts short (for example `.tmp/v`). Convex’s local Node executor uses a Unix socket inside `TMPDIR`; long nested paths can exceed the socket path limit and surface as `listen EINVAL` followed by HTTP 500 from `/api/deploy2/start_push`. Keep scratch inside the checkout’s `.tmp/`, not a system temp directory.
+- Full-history gitleaks also scans local T3 checkpoint refs. If findings exist only in unrelated checkpoint history, verify the PR in a clean single-branch clone under `.tmp/`; preserve checkpoint refs and do not weaken scan rules.
 
 - **T3 worktrees**: root `t3.json` runs setup asynchronously. Ignored `.env*` and `.dev.vars*` files are copied from `T3CODE_PROJECT_ROOT` without replacing existing worktree files. Files containing nonlocal `CONVEX_DEPLOYMENT`, deploy credentials or self-hosted selectors are skipped with a warning by default. After reviewing the target, explicit `T3_COPY_REMOTE_CONVEX_ENV=1` permits copying them with a warning; it does not bypass `pnpm dev` protection. Linux requests reflinks through Node; macOS uses native `cp -c` for APFS, publishing the cloned file exclusively. Unsupported filesystems fall back to independent copies. `pnpm-workspace.yaml` enables pnpm 11.8's global virtual store and `clone-or-copy` for every install and subsequent command, sharing registry dependency graphs while workspace packages remain checkout-local. CI runs env-copy tests and workspace types on Linux; there is no separate macOS job. CI and production continue using frozen installs.
 - Worktree setup runs with trusted mise tools (`mise.toml`) — see [findings/worktree-setup.md](../findings/worktree-setup.md).
