@@ -188,10 +188,14 @@ export const prepareStart = internalQuery({
     }
     const client = providerClient(getOAuthProvider(scheme.provider)!);
     if (client === null) return { ok: false, error: "provider_not_configured" };
+    // Expired links stay "pending" until cleanup; they don't hold a slot.
     const pending = await ctx.db
       .query("oauthConnections")
-      .withIndex("by_org_status", (q) =>
-        q.eq("clerkOrgId", args.clerkOrgId).eq("status", "pending"),
+      .withIndex("by_org_status_expiry", (q) =>
+        q
+          .eq("clerkOrgId", args.clerkOrgId)
+          .eq("status", "pending")
+          .gt("pendingExpiresAt", Date.now()),
       )
       .take(MAX_PENDING_CONNECTIONS);
     if (pending.length >= MAX_PENDING_CONNECTIONS) {
@@ -356,7 +360,9 @@ export const listForOrg = internalQuery({
     const now = Date.now();
     const rows = await ctx.db
       .query("oauthConnections")
-      .withIndex("by_org_status", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .withIndex("by_org_status_expiry", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId),
+      )
       .take(500);
     return rows
       .filter((row) => row.status !== "revoked")

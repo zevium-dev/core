@@ -47,7 +47,7 @@ export const connectionTables = {
   })
     .index("by_public_id", ["publicId"])
     .index("by_state_hash", ["stateHash"])
-    .index("by_org_status", ["clerkOrgId", "status"])
+    .index("by_org_status_expiry", ["clerkOrgId", "status", "pendingExpiresAt"])
     .index("by_org_project_scheme_status", [
       "clerkOrgId",
       "projectId",

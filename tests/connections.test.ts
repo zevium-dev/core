@@ -3,6 +3,7 @@ import type { FunctionArgs } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { internal } from "../convex/_generated/api";
+import { MAX_PENDING_CONNECTIONS } from "../convex/connections";
 import type { Id } from "../convex/_generated/dataModel";
 import { organization, projectFields } from "./fixtures";
 import { harness } from "./helpers";
@@ -528,6 +529,43 @@ describe("connected accounts", () => {
     ).toEqual({
       connections: [],
     });
+  });
+
+  it("caps open links per org; expired links free their slot", async () => {
+    const t = harness();
+    const { projectId } = await seed(t);
+    const now = Date.now();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < MAX_PENDING_CONNECTIONS; i += 1) {
+        await ctx.db.insert("oauthConnections", {
+          publicId: `conn_open${i}`,
+          clerkOrgId: CONSUMER,
+          projectId,
+          api: "publisher/video",
+          scheme: "video",
+          provider: "youtube",
+          requestedScopes: [UPLOAD],
+          createdByKeyId: "key_1",
+          redirectUri: REDIRECT,
+          status: "pending",
+          tokenRevision: 0,
+          pendingExpiresAt: now + 60_000,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    });
+    expect((await start(t, projectId)).body).toEqual({
+      error: "too_many_pending",
+    });
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("oauthConnections")
+        .withIndex("by_public_id", (q) => q.eq("publicId", "conn_open0"))
+        .unique();
+      await ctx.db.patch(row!._id, { pendingExpiresAt: now - 1 });
+    });
+    expect((await start(t, projectId)).status).toBe(200);
   });
 
   it("cleans up abandoned authorization links", async () => {

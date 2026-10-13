@@ -136,7 +136,7 @@ Adding a provider = one registry entry, two env vars, the provider's app registr
 - `ConnectionView`: `id` (`conn_` + 26 base32), `api`, `scheme`, `provider`, `label`, `status` (`pending`, `expired`, `active`, `reauthorize`, `failed`, `revoked`), `scopes`, `createdAt`, `connectedAt`, `error`.
 - `label` (≤ 64 printable chars) maps connections to the app's own end users. Many connections per org and API.
 - Same evidence as calls: signed key and route snapshots. Disabled, expired or lapsed-grace keys 403; archived orgs and unknown keys 401; private APIs 404 for other orgs; deprecated `entitled_only` APIs 403; sunset or retired 410. Management routes are not rate limited (the per-key limiter lives in wallet admission); writes are bounded by the 50-open-link cap.
-- Start errors: `publisher_not_allowed` 403 (project not `houseOperated`), `provider_not_configured` 503 (Zevium client env missing), `no_oauth_scheme`/`scheme_required`/`scheme_not_found` 400, `too_many_pending` 429 (50 open links per org).
+- Start errors: `publisher_not_allowed` 403 (project not `houseOperated`), `provider_not_configured` 503 (Zevium client env missing), `no_oauth_scheme`/`scheme_required`/`scheme_not_found` 400, `too_many_pending` 429 (50 unexpired open links per org; expired links free their slot at once, before hourly cleanup deletes them).
 - `returnUrl`: https, or http on localhost/127.0.0.1.
 
 ## Metered calls
