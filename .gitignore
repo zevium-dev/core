@@ -62,3 +62,5 @@
 /packages/cli/.turbo/
 
 /packages/cli/dist/
+
+/apps/web/public/cli/
