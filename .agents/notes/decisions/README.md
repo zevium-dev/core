@@ -70,3 +70,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-11 | [PR #442 read-surface review defaults](2026-10-11-read-surface-review-defaults.md)                   | proposed; applied in next preview      |
 | 2026-10-11 | [Legacy wallet cutover data](2026-10-11-legacy-wallet-discard.md)                                    | accepted; v6 sign-off pending          |
 | 2026-10-13 | [CLI ships as a plain Node script](2026-10-13-cli-node-script.md)                                    | accepted; built, owner release pending |
+| 2026-10-13 | [CLI supports Node 22 LTS](2026-10-13-cli-node-22-lts.md)                                            | accepted (built)                       |

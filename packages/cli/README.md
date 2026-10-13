@@ -1,7 +1,7 @@
 # Zevium CLI
 
-Single self-contained Node.js ESM script. Requires Node.js **24.15.0 or newer**
-(the repository's Node baseline). No runtime packages or TypeScript runner.
+Single self-contained Node.js ESM script. Requires Node.js **22.12.0 or newer**
+(chosen to support Node 22 LTS). No runtime packages or TypeScript runner.
 
 ```bash
 curl -fsSLo zevium https://zevium.dev/cli/zevium.mjs && chmod +x zevium
@@ -40,9 +40,9 @@ independent of the CLI package version and listing version. The CLI explicitly
 supports major `1`; it does not automatically follow the shared producer constant.
 Additive optional fields can retain major 1 and are ignored by older clients.
 Changes to required fields, flag encoding, or call-binding semantics require a
-new major and an explicit client compatibility review. Unknown, missing, malformed,
-or unsupported majors fail before execution, with instructions to download the
-latest script or read the listing Markdown. A new major requires a compatible CLI
+new major and an explicit client compatibility review. Unsupported numeric majors fail before execution with an upgrade message.
+Unavailable generation reports its reason and points to listing Markdown; malformed
+contracts report "invalid contract". A new major requires a compatible CLI
 release before the gateway starts producing it.
 
 Docs identify the immutable published version used for generation. Gateway routes
@@ -60,10 +60,12 @@ pnpm --filter @zevium/cli test
 ```
 
 The dev command rebuilds before running. esbuild bundles shared code and zod into
-`dist/zevium.mjs`, writes the Node shebang/runtime guard, and sets mode 0755. Turbo
-orders the CLI build before the web build; direct web builds also rebuild/copy it
-to `apps/web/public/cli/zevium.mjs`. Generated files stay uncommitted. Tests run a
-copied bundle with external module resolution blocked and exercise version guards.
+`dist/zevium.mjs`, writes the Node shebang/runtime guard, and sets mode 0755. Web
+builds independently bundle to `apps/web/public/cli/zevium.mjs`; no workspace bin
+link or Turbo ordering is needed. Tests build their own scratch artifact, copy it
+into an isolated directory, and block external module resolution while exercising
+version guards and HTTP docs/calls. All outputs are gitignored. Bundles are minified
+and omit legal/path comments.
 
 Owner-only release steps, package inspection, and rollout order live in the
 [agent-surface feature note](../../.agents/notes/features/agent-surface.md#cli-distribution-451).

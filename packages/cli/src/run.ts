@@ -190,10 +190,39 @@ async function run(
     throw error;
   }
   const docs = docsSchema.safeParse(raw);
-  if (!docs.success)
-    throw new Error(
-      "Generated contract unavailable or unsupported generator version; this CLI supports major 1. Download the latest CLI from /cli/zevium.mjs on your Zevium site or consult listing Markdown",
-    );
+  if (!docs.success) {
+    const envelope = z
+      .object({
+        publisherData: z.object({
+          generated: z.object({
+            error: z.unknown().optional(),
+            reason: z.unknown().optional(),
+            generatorVersion: z.unknown().optional(),
+          }),
+        }),
+      })
+      .safeParse(raw);
+    if (envelope.success) {
+      const generated = envelope.data.publisherData.generated;
+      if (typeof generated.error === "string") {
+        const reason =
+          typeof generated.reason === "string"
+            ? generated.reason
+            : generated.error;
+        throw new Error(
+          `generated contract unavailable for this listing (${reason}); read the listing Markdown`,
+        );
+      }
+      if (
+        typeof generated.generatorVersion === "number" &&
+        generated.generatorVersion !== SUPPORTED_GENERATOR_MAJOR
+      )
+        throw new Error(
+          `listing uses generator major ${generated.generatorVersion}; this CLI supports ${SUPPORTED_GENERATOR_MAJOR}; download the latest CLI`,
+        );
+    }
+    throw new Error("invalid contract");
+  }
   const generated = docs.data.publisherData.generated;
   if (!command || command === "--help") return generated.markdown;
   const operation: GeneratedOperation | undefined = generated.operations.find(

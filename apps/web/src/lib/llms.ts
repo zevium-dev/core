@@ -37,7 +37,7 @@ Use search_apis({ query }) to find candidates, then get_api_docs({ org, project 
 
 ## Install the CLI
 
-Requires Node.js 24.15.0 or newer. [Download the single-file Node script](${webUrl("/cli/zevium.mjs")}); no package install is needed.
+Requires Node.js 22.12.0 or newer. [Download the single-file Node script](${webUrl("/cli/zevium.mjs")}); no package install is needed.
 
 \`\`\`bash
 curl -fsSLo zevium ${webUrl("/cli/zevium.mjs")} && chmod +x zevium
@@ -47,7 +47,7 @@ curl -fsSLo zevium ${webUrl("/cli/zevium.mjs")} && chmod +x zevium
 ./zevium <publisher> <project> <command> [flags]
 \`\`\`
 
-Move the file onto PATH to use zevium from any directory. On Windows, save as zevium.mjs and run node zevium.mjs --help. Re-download to update. Read generated listing docs for command names and flags. Docs/help need no key; execution uses only authenticated, credit-gated MCP call_api. ZEVIUM_GATEWAY_URL selects the gateway (default: HTTPS on gateway.zevium.dev); for this site use the origin of the MCP endpoint above. Generator major 1 is supported; unknown or malformed majors fail before execution and require an updated CLI. This is independent of the listing's published version and the CLI package version.
+Move the file onto PATH to use zevium from any directory. On Windows, save as zevium.mjs and run node zevium.mjs --help. Re-download to update. Read generated listing docs for command names and flags. Docs/help need no key; execution uses only authenticated, credit-gated MCP call_api. ZEVIUM_GATEWAY_URL selects the gateway (default: HTTPS on gateway.zevium.dev); for this site use the origin of the MCP endpoint above. Generator major 1 is supported; unsupported numeric majors fail before execution and require an updated CLI. Unavailable generation reports its reason and points to listing Markdown; malformed contracts report "invalid contract". This is independent of the listing's published version and the CLI package version.
 
 ## Direct calls and pricing
 

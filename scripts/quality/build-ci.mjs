@@ -23,6 +23,7 @@ try {
   const clerkSecretFixture = ["sk", "test", "ZmFrZS5jbGVyay5hY2NvdW50JA"].join(
     "_",
   );
+  run("pnpm", ["--filter", "@zevium/cli", "build"]);
   run("pnpm", ["--filter", "web", "build"], {
     ...process.env,
     CLERK_PUBLISHABLE_KEY: clerkPublicFixture,

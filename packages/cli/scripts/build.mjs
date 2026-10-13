@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { chmod, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 const packageRoot = new URL("../", import.meta.url);
 const manifest = JSON.parse(
@@ -8,8 +9,9 @@ const manifest = JSON.parse(
 );
 const minimumNode = manifest.engines.node.replace(/^>=/, "");
 
-export async function buildCli() {
-  const output = new URL("dist/zevium.mjs", packageRoot);
+export async function buildCli(
+  output = new URL("dist/zevium.mjs", packageRoot),
+) {
   const result = await build({
     absWorkingDir: fileURLToPath(packageRoot),
     // Keep entry exports/top-level await out of the artifact so a download
@@ -22,6 +24,8 @@ export async function buildCli() {
     },
     outfile: fileURLToPath(output),
     bundle: true,
+    minify: true,
+    legalComments: "none",
     platform: "node",
     format: "esm",
     target: `node${minimumNode}`,
@@ -47,4 +51,7 @@ if (differentPart !== -1 && actualNode[differentPart] < requiredNode[differentPa
   return output;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await buildCli();
+if (process.argv[1] === fileURLToPath(import.meta.url))
+  await buildCli(
+    process.argv[2] ? pathToFileURL(resolve(process.argv[2])) : undefined,
+  );

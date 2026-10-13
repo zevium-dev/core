@@ -246,8 +246,8 @@ describe("zevium CLI", () => {
       "unsupported_parameter_location",
     );
   });
-  it.each([0, 2, 9000, -1, 1.1, "1", "1.0.0", null, undefined])(
-    "rejects unsupported or malformed generator major %s before call_api",
+  it.each([0, 2, 9000, -1, 1.1])(
+    "rejects unsupported numeric generator major %s before call_api",
     async (generatorVersion) => {
       const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
         toolResult(
@@ -258,10 +258,48 @@ describe("zevium CLI", () => {
       );
       await expect(
         runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
-      ).rejects.toThrow("this CLI supports major 1");
+      ).rejects.toThrow(
+        `listing uses generator major ${generatorVersion}; this CLI supports 1; download the latest CLI`,
+      );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
   );
+  it.each(["response_size_limit", "complexity_limit"])(
+    "reports unavailable generation (%s) without an upgrade prompt",
+    async (reason) => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
+        toolResult(
+          JSON.stringify({
+            publisherData: {
+              generated: { error: "generation_unavailable", reason },
+            },
+          }),
+        ),
+      );
+      await expect(
+        runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
+      ).rejects.toThrow(
+        `generated contract unavailable for this listing (${reason}); read the listing Markdown`,
+      );
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    ...["1", "1.0.0", null, undefined].map((generatorVersion) => ({
+      publisherData: { generated: { ...contract, generatorVersion } },
+    })),
+    {},
+    { publisherData: { generated: null } },
+    { publisherData: { generated: { ...contract, operations: null } } },
+  ])("reports malformed contracts without an upgrade prompt", async (raw) => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(toolResult(JSON.stringify(raw)));
+    await expect(
+      runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
+    ).rejects.toThrow(/^invalid contract$/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
   it("accepts additive fields within supported major 1", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
@@ -301,6 +339,8 @@ describe("zevium CLI", () => {
             }),
           ),
       }),
-    ).rejects.toThrow("unsupported generator version");
+    ).rejects.toThrow(
+      "listing uses generator major 9000; this CLI supports 1; download the latest CLI",
+    );
   });
 });

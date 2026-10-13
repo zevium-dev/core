@@ -7,7 +7,7 @@
   },
   "scripts": {
     "zevium": "pnpm build && node dist/zevium.mjs",
-    "test": "pnpm build && vitest run --allowOnly=false",
+    "test": "vitest run --allowOnly=false",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
     "prepack": "pnpm build"
@@ -22,9 +22,15 @@
   },
   "description": "Generated Zevium API commands through the authenticated, credit-gated MCP gateway",
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=22.12.0"
   },
   "files": [
     "dist/zevium.mjs"
-  ]
+  ],
+  "license": "WTFPL",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zevium-dev/core.git",
+    "directory": "packages/cli"
+  }
 }

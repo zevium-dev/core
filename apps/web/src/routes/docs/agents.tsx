@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 
 import { AgentInstall } from "#/components/agent-install";
 import { DocsCodeBlock } from "#/components/docs-code-block";
@@ -9,7 +11,12 @@ import {
   tryItBaseUrl,
 } from "#/lib/landing";
 
+const currentOrigin = createIsomorphicFn()
+  .server(() => new URL(getRequest().url).origin)
+  .client(() => window.location.origin);
+
 export const Route = createFileRoute("/docs/agents")({
+  loader: () => ({ origin: currentOrigin() }),
   head: () => ({
     meta: [
       { title: "Agents · Zevium Docs" },
@@ -30,6 +37,7 @@ const DISCOVERY_URL = discoveryEndpointUrl(GATEWAY);
 const LISTING_DOCS_URL = `${new URL("/docs/", GATEWAY).href}{publisherHandle}/{projectSlug}`;
 
 function DocsAgentsPage() {
+  const { origin } = Route.useLoaderData();
   return (
     <DocsPage
       title="Agents"
@@ -48,12 +56,16 @@ function DocsAgentsPage() {
 
       <h2>Install the CLI</h2>
       <p>
-        Download <a href="/cli/zevium.mjs">the Zevium CLI</a>, a single Node.js
-        script. Requires Node.js 24.15.0 or newer; no package install is needed.
+        Download{" "}
+        <a href="/cli/zevium.mjs" download="zevium.mjs">
+          the Zevium CLI
+        </a>
+        , a single Node.js script. Requires Node.js 22.12.0 or newer; no package
+        install is needed.
       </p>
       <DocsCodeBlock
         lang="bash"
-        code={`curl -fsSLo zevium https://zevium.dev/cli/zevium.mjs && chmod +x zevium
+        code={`curl -fsSLo zevium ${origin}/cli/zevium.mjs && chmod +x zevium
 ./zevium --help
 ./zevium <publisher> <project>
 # Set ZEVIUM_API_KEY in your environment before execution.

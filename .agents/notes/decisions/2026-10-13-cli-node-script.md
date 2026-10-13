@@ -7,7 +7,8 @@
 Distribute the CLI as one self-contained ESM JavaScript file with
 `#!/usr/bin/env node`, requiring an installed Node runtime. Do not compile a
 standalone native binary. Bundle shared code and zod; no runtime package install
-or tsx dependency. Target the repository's Node 24.15.0 baseline.
+or tsx dependency. Target Node >=22.12.0, chosen to support Node 22 LTS. This supersedes the initial
+Node 24.15.0 floor; see [runtime revision](2026-10-13-cli-node-22-lts.md).
 
 Serve it at the stable web path `/cli/zevium.mjs`. Build and copy the artifact during
 the web build; do not commit generated output. Prepare `@zevium/cli` for npm
