@@ -13,6 +13,8 @@ import {
 export { GenerationError } from "./schema.js";
 export type { JsonSchema } from "./schema.js";
 
+// Wire-format major: additive optional fields retain this value; incompatible
+// shapes or call-binding semantics require a bump and explicit client support.
 export const GENERATOR_VERSION = 1;
 export const MAX_GENERATED_BYTES = 196_608;
 const METHODS: HttpMethod[] = [

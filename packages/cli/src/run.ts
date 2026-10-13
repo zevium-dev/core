@@ -1,11 +1,13 @@
 import {
   generatedCallArguments,
-  GENERATOR_VERSION,
   type GeneratedOperation,
   isValidSlug,
 } from "@zevium/shared";
 import { z } from "zod";
 import { terminalText } from "./terminal.js";
+
+// This is a reviewed client compatibility pin, not the producer's latest version.
+const SUPPORTED_GENERATOR_MAJOR = 1;
 
 const LIMIT = 1024 * 1024;
 const jsonSchema = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
@@ -53,7 +55,7 @@ const operationSchema = z.object({
 const docsSchema = z.object({
   publisherData: z.object({
     generated: z.object({
-      generatorVersion: z.literal(GENERATOR_VERSION),
+      generatorVersion: z.literal(SUPPORTED_GENERATOR_MAJOR),
       version: z.string(),
       markdown: z.string(),
       operations: z.array(operationSchema),
@@ -190,7 +192,7 @@ async function run(
   const docs = docsSchema.safeParse(raw);
   if (!docs.success)
     throw new Error(
-      "Generated contract unavailable or unsupported generator version; consult listing Markdown",
+      "Generated contract unavailable or unsupported generator version; this CLI supports major 1. Download the latest CLI from /cli/zevium.mjs on your Zevium site or consult listing Markdown",
     );
   const generated = docs.data.publisherData.generated;
   if (!command || command === "--help") return generated.markdown;

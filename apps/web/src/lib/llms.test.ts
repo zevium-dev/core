@@ -34,6 +34,7 @@ if (gatewayIndex.includes('parts[0] === "docs" && parts.length === 3')) {
   gatewayRoutes.add("/docs/{publisherHandle}/{projectSlug}");
 }
 const routeTree = source("../routeTree.gen.ts");
+const staticWebPaths = new Set(["/cli/zevium.mjs"]);
 const webRoutes = new Set(
   Array.from(
     routeTree.matchAll(/fullPath: ['"]([^'"]+)['"]/g),
@@ -55,13 +56,14 @@ describe("llms.txt", () => {
         const path = decodeURIComponent(url.pathname);
         if (url.origin === "https://web.example.test") {
           expect(
-            Array.from(webRoutes).some(
-              (route) =>
-                route.replace(/\/$/, "") === path ||
-                (route.endsWith("/$") &&
-                  (path === route.slice(0, -2) ||
-                    path.startsWith(route.slice(0, -1)))),
-            ),
+            staticWebPaths.has(path) ||
+              Array.from(webRoutes).some(
+                (route) =>
+                  route.replace(/\/$/, "") === path ||
+                  (route.endsWith("/$") &&
+                    (path === route.slice(0, -2) ||
+                      path.startsWith(route.slice(0, -1)))),
+              ),
             `Missing web route: ${path}`,
           ).toBe(true);
         } else {
@@ -92,6 +94,10 @@ describe("llms.txt", () => {
     const text = await response.text();
     expect(text).toContain("https://preview.example.test/app/settings/keys");
     expect(text).toContain("https://edge.example.test/mcp");
+    expect(text).toContain(
+      "curl -fsSLo zevium https://preview.example.test/cli/zevium.mjs && chmod +x zevium",
+    );
+    expect(text).toContain("Generator major 1 is supported");
     expect(text).toContain(
       "https://edge.example.test/docs/{publisherHandle}/{projectSlug}",
     );

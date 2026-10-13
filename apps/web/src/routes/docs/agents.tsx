@@ -46,6 +46,35 @@ function DocsAgentsPage() {
         <a href="/llms.txt">Agent-readable setup guide (llms.txt)</a>
       </p>
 
+      <h2>Install the CLI</h2>
+      <p>
+        Download <a href="/cli/zevium.mjs">the Zevium CLI</a>, a single Node.js
+        script. Requires Node.js 24.15.0 or newer; no package install is needed.
+      </p>
+      <DocsCodeBlock
+        lang="bash"
+        code={`curl -fsSLo zevium https://zevium.dev/cli/zevium.mjs && chmod +x zevium
+./zevium --help
+./zevium <publisher> <project>
+# Set ZEVIUM_API_KEY in your environment before execution.
+./zevium <publisher> <project> <command> [flags]`}
+      />
+      <p>
+        Use publisher and project slugs from the catalogue; read their generated
+        docs for command names and flags. Move the file onto your PATH to run
+        <code> zevium</code> from any directory. On Windows, download the same
+        file as <code>zevium.mjs</code> and run{" "}
+        <code>node zevium.mjs --help</code>. Re-download to update.
+      </p>
+      <p>
+        Docs and help need no key. Execution uses authenticated, credit-gated
+        <code> call_api</code>; set <code>ZEVIUM_API_KEY</code> and fund your
+        organization first. <code>ZEVIUM_GATEWAY_URL</code> selects a different
+        gateway (default: <code>https://gateway.zevium.dev</code>). Generator
+        major 1 is supported; unknown majors stop before execution and ask you
+        to update.
+      </p>
+
       <h2>Discovery index</h2>
       <p>
         A machine-readable catalogue of published APIs with per-endpoint pricing

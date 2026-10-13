@@ -1,24 +1,30 @@
 {
   "name": "@zevium/cli",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "bin": {
-    "zevium": "./bin/zevium.mjs"
+    "zevium": "./dist/zevium.mjs"
   },
   "scripts": {
-    "zevium": "node bin/zevium.mjs",
-    "test": "vitest run --allowOnly=false",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@zevium/shared": "workspace:*",
-    "tsx": "^4.23.15",
-    "zod": "^4.6.5"
+    "zevium": "pnpm build && node dist/zevium.mjs",
+    "test": "pnpm build && vitest run --allowOnly=false",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "prepack": "pnpm build"
   },
   "devDependencies": {
     "@types/node": "26.6.4",
     "typescript": "^5.9.0",
-    "vitest": "^4.1.11"
-  }
+    "vitest": "^4.1.11",
+    "@zevium/shared": "workspace:*",
+    "zod": "^4.6.5",
+    "esbuild": "0.28.2"
+  },
+  "description": "Generated Zevium API commands through the authenticated, credit-gated MCP gateway",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "files": [
+    "dist/zevium.mjs"
+  ]
 }

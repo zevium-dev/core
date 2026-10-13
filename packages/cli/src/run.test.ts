@@ -246,6 +246,44 @@ describe("zevium CLI", () => {
       "unsupported_parameter_location",
     );
   });
+  it.each([0, 2, 9000, -1, 1.1, "1", "1.0.0", null, undefined])(
+    "rejects unsupported or malformed generator major %s before call_api",
+    async (generatorVersion) => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
+        toolResult(
+          JSON.stringify({
+            publisherData: { generated: { ...contract, generatorVersion } },
+          }),
+        ),
+      );
+      await expect(
+        runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
+      ).rejects.toThrow("this CLI supports major 1");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("accepts additive fields within supported major 1", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        toolResult(
+          JSON.stringify({
+            publisherData: {
+              generated: {
+                ...contract,
+                generatorVersion: 1,
+                futureOptionalField: true,
+              },
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(toolResult("ok"));
+    expect(
+      await runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
+    ).toBe("ok");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
   it("bounds streamed responses and rejects stale generator formats", async () => {
     await expect(
       runCli(["acme", "pets"], {
