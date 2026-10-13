@@ -1,5 +1,10 @@
 import {
   type TokenPricing,
+  schemaToForm,
+  initialFormValue,
+  operationParameters,
+  type FormNode,
+  type RequestParameter,
   synthesize,
   extractPricing,
   parseSpec,
@@ -46,6 +51,13 @@ export type ApiEndpoint = {
   requestBodyDeclared: boolean;
   requestBodyRequired: boolean;
   responses: ApiResponse[];
+  form: {
+    document: unknown;
+    parameters: RequestParameter[];
+    bodySchema: unknown;
+    bodyNode: FormNode;
+    bodyInitial: unknown;
+  };
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -193,6 +205,7 @@ function extractResponses(
 export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
   const spec = parseSpec(specJson);
   const rows: ApiEndpoint[] = [];
+  const document: unknown = JSON.parse(specJson);
   for (const [path, pathItem] of Object.entries(spec.paths)) {
     for (const [method, rawOperation] of Object.entries(pathItem)) {
       if (method === "parameters" || !isRecord(rawOperation)) continue;
@@ -217,7 +230,35 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
       const requestBody = isRecord(resolvedOperation.requestBody)
         ? resolvedOperation.requestBody
         : null;
+      const content =
+        requestBody && isRecord(requestBody.content) ? requestBody.content : {};
+      const candidateMedia = content[bodyDefaults.contentType];
+      const media = isRecord(candidateMedia) ? candidateMedia : {};
+      const bodySchema = media.schema ?? {};
+      const namedExample = isRecord(media.examples)
+        ? Object.values(media.examples)
+            .map((example) => resolveLocalJsonRefChain(example, document))
+            .find(
+              (example) => isRecord(example) && Object.hasOwn(example, "value"),
+            )
+        : undefined;
+      const bodyNode = schemaToForm(bodySchema, document);
       rows.push({
+        form: {
+          document,
+          parameters: operationParameters(
+            pathItem.parameters,
+            operation.parameters,
+            document,
+          ),
+          bodySchema,
+          bodyNode,
+          bodyInitial: Object.hasOwn(media, "example")
+            ? media.example
+            : isRecord(namedExample)
+              ? namedExample.value
+              : initialFormValue(bodyNode, requestBody?.required === true),
+        },
         id: `${method}:${path}`,
         method: method as HttpMethod,
         path,
@@ -259,30 +300,6 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
       : left.path.localeCompare(right.path),
   );
   return rows;
-}
-
-export function buildRequestPath(
-  template: string,
-  values: Record<string, string>,
-): string {
-  return template.replace(/\{([^}/]+)\}/g, (_, name: string) =>
-    encodeURIComponent(values[parameterKey("path", name)] ?? ""),
-  );
-}
-
-export function appendQueryParameters(
-  url: string,
-  parameters: ApiParameter[],
-  values: Record<string, string>,
-): string {
-  const query = new URLSearchParams();
-  for (const parameter of parameters) {
-    if (parameter.location !== "query") continue;
-    const value = values[parameter.key]?.trim() ?? "";
-    if (value !== "") query.append(parameter.name, value);
-  }
-  const encoded = query.toString();
-  return encoded === "" ? url : `${url}?${encoded}`;
 }
 
 export function readableJsonResponse(

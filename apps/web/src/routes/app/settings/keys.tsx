@@ -139,7 +139,9 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
   const dialogTriggerRef = useRef<HTMLElement | null>(null);
   const revokeTriggerRef = useRef<HTMLElement | null>(null);
   const revealedRef = useRef<RevealedSecret | null>(revealed);
-  revealedRef.current = revealed;
+  useLayoutEffect(() => {
+    revealedRef.current = revealed;
+  }, [revealed]);
 
   const createMutation = useMutation({
     mutationFn: async (keyName: string) => ({
@@ -590,13 +592,15 @@ function KeyRow({
     return () => window.clearInterval(interval);
   }, []);
 
-  useEffect(() => {
+  const [previousCap, setPreviousCap] = useState(setting?.monthlyCapCredits);
+  if (previousCap !== setting?.monthlyCapCredits) {
+    setPreviousCap(setting?.monthlyCapCredits);
     setCapInput(
       setting?.monthlyCapCredits === undefined
         ? ""
         : String(setting.monthlyCapCredits),
     );
-  }, [setting?.monthlyCapCredits]);
+  }
 
   const capMutation = useMutation({
     mutationFn: setCap,

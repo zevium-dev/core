@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { buildCli } from "../../../packages/cli/scripts/build.mjs";
+
 import { applyProductionEnv } from "./build-env.mjs";
 
 applyProductionEnv(process.env);
@@ -38,6 +40,9 @@ delete viteEnv.CLERK_PUBLISHABLE_KEY;
 function scrubForbiddenArtifact() {
   if (existsSync(forbiddenArtifact)) unlinkSync(forbiddenArtifact);
 }
+
+// Direct web builds (including CI) also rebuild the downloadable CLI.
+await buildCli(new URL("../public/cli/zevium.mjs", import.meta.url));
 
 scrubForbiddenArtifact();
 try {

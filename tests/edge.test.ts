@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { harness } from "./helpers";
 import { moneyFixture, eventFor, assertWallet } from "./moneyFixtures";
 import { sign, fingerprint } from "../contracts/transport";
-import { requestClose } from "../convex/money/barrier";
+import { requestClose, finishClose } from "../convex/money/barrier";
 import { headerBundle } from "../contracts/snapshots";
 import { internal } from "../convex/_generated/api";
 import { sha256Hex } from "@zevium/shared";
@@ -14,6 +14,7 @@ import {
   walletPage,
 } from "@zevium/shared/edge/replication";
 import { grantLot } from "../convex/money/lots";
+import { drain } from "./financeFixtures";
 import { NOW, SECRET } from "./fixtures";
 const ring = { current: "one", keys: { one: SECRET, two: SECRET + "rotated" } };
 beforeEach(() => {
@@ -47,7 +48,7 @@ it("retries cold-wallet wakes without treating delivery as a drain ACK", async (
   await t.mutation(internal.edgeMaintenance.recover, { cursor: null });
   expect(
     await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect()),
-  ).toHaveLength(2);
+  ).toHaveLength(3);
   await t.action(internal.edgeMaintenance.wakeWallet, {
     clerkOrgId: wallet.owner.clerkOrgId,
   });
@@ -413,4 +414,48 @@ it("uses the HTTP action's supplied clock for query projection freshness", async
   });
   expect(second.generatedAt).toBe(first.generatedAt + 5000);
   expect(second.expiresAt).toBe(first.expiresAt + 5000);
+});
+
+it("wakes reopened wallets and retries failed delivery after they leave the closing scan", async () => {
+  vi.stubEnv("NEXT_GATEWAY_URL", "https://gateway.invalid");
+  vi.stubEnv("GATEWAY_INTERNAL_SECRET", SECRET);
+  const t = harness();
+  const f = await t.run((ctx) => moneyFixture(ctx, "reopen-wake"));
+  await t.run((ctx) => requestClose(ctx, f.walletId, "reopen", "refund"));
+  await t.run((ctx) => drain(ctx, f.walletId));
+  const before = await t.run((ctx) =>
+    ctx.db.system.query("_scheduled_functions").collect(),
+  );
+  const reopened = await t.run((ctx) => finishClose(ctx, f.walletId, "reopen"));
+  expect(reopened).toMatchObject({ gateState: "open", epoch: 2 });
+  const scheduled = await t.run((ctx) =>
+    ctx.db.system.query("_scheduled_functions").collect(),
+  );
+  expect(scheduled).toHaveLength(before.length + 1);
+  expect(scheduled.at(-1)?.args).toEqual([
+    { clerkOrgId: reopened.owner.clerkOrgId },
+  ]);
+  const network = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response(null, { status: 503 }));
+  await t.action(internal.edgeMaintenance.wakeWallet, {
+    clerkOrgId: reopened.owner.clerkOrgId,
+  });
+  const retry = await t.run((ctx) =>
+    ctx.db.system.query("_scheduled_functions").collect(),
+  );
+  expect(retry).toHaveLength(scheduled.length + 1);
+  expect(retry.at(-1)).toMatchObject({
+    args: [{ clerkOrgId: reopened.owner.clerkOrgId, attempt: 1 }],
+    scheduledTime: NOW + 1000,
+  });
+  await t.action(internal.edgeMaintenance.wakeWallet, {
+    clerkOrgId: reopened.owner.clerkOrgId,
+    attempt: 3,
+  });
+  expect(
+    await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect()),
+  ).toHaveLength(retry.length);
+  expect(network).toHaveBeenCalledTimes(2);
+  expect((await t.run((ctx) => ctx.db.get(f.walletId)))?.epoch).toBe(2);
 });

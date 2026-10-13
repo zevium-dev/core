@@ -5,6 +5,7 @@ import { z } from "zod";
 import { query, mutation, action, internalMutation } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import { requireAdmin } from "./lib/auth";
+import { retryReviewedPayment } from "./money/adjustments";
 import { abandonClose } from "./money/barrier";
 import { openCase, caseEvidence } from "./money/reconciliationCases";
 import { verifiedStripe } from "./lib/stripe";
@@ -62,6 +63,7 @@ export const payments = query({
         walletReversedCredits: p.reconciliation.walletReversedCredits,
         attempts: p.reconciliation.attempts ?? 0,
         state: p.reconciliation.state,
+        quarantineComplete: p.reconciliation.reviewLock?.complete === true,
       })),
     };
   },
@@ -144,17 +146,10 @@ export const retryPayment = mutation({
         at: Date.now(),
       }),
     );
-    await ctx.db.patch(p._id, {
-      reconciliation: {
-        ...p.reconciliation,
-        state: "retry",
-        attempts: 0,
-        nextAttemptAt: Date.now(),
-      },
-    });
+    const generation = await retryReviewedPayment(ctx, p);
     await ctx.scheduler.runAfter(0, internal.billing.reconcile, {
       paymentId: p._id,
-      generation: args.generation,
+      generation,
     });
     return { caseId: id, state: "retry" };
   },

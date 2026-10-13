@@ -58,3 +58,9 @@
 
 # Local task scratch and test runtime files.
 .tmp/
+/packages/cli/node_modules/
+/packages/cli/.turbo/
+
+/packages/cli/dist/
+
+/apps/web/public/cli/

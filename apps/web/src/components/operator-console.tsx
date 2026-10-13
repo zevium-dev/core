@@ -383,7 +383,10 @@ function Payment({
       <div className="space-y-4 pt-4">
         <p className="text-sm">
           Target reversal {row.targetCredits} credits; applied{" "}
-          {row.walletReversedCredits}. {row.attempts} attempts.
+          {row.walletReversedCredits}. {row.attempts} attempts.{" "}
+          {row.quarantineComplete
+            ? "Affected funds are locked."
+            : "Waiting for wallet drain and affected funds to be locked."}
         </p>
         <AuditNote
           id={`payment-${row.id}`}
@@ -392,7 +395,7 @@ function Payment({
         />
         <Operation
           label="Retry reconciliation"
-          disabled={reason.trim().length < 8}
+          disabled={!row.quarantineComplete || reason.trim().length < 8}
           run={() =>
             retry({ paymentId: row.id, generation: row.generation, reason })
           }
@@ -410,7 +413,7 @@ function Payments() {
   return (
     <Section
       title="Payments needing review"
-      description="Retry the same generation and saved cursor. Applied ledger effects remain idempotent."
+      description="Retry pauses wallet calls while verified adjustments are applied. Affected funds stay locked until reconciliation finishes."
     >
       {rows.results.map((row) => (
         <Payment key={row.id} row={row} />

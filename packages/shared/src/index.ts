@@ -140,3 +140,34 @@ export {
   type OAuthProviderId,
   type OAuthTokenStyle,
 } from "./oauth-providers.js";
+
+export {
+  generateSpecContract,
+  GenerationError,
+  GENERATOR_VERSION,
+  MAX_GENERATED_BYTES,
+  type GeneratedContract,
+  type GeneratedOperation,
+  type GeneratedFlag,
+  type JsonSchema,
+} from "./spec-generation/index.js";
+export {
+  generatedCallArguments,
+  generatedToolArguments,
+} from "./spec-generation/cli.js";
+
+export {
+  formValueFits,
+  schemaToForm,
+  initialFormValue,
+  validateFormValue,
+  operationParameters,
+  serializeRequestParameters,
+  isFormObject,
+  formPath,
+  type FormNode,
+  type FormSchema,
+  type FormIssue,
+  type FormValidation,
+  type RequestParameter,
+} from "./request-form.js";

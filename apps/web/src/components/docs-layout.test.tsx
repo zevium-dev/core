@@ -37,6 +37,7 @@ describe("documentation landmarks", () => {
         getParentRoute: () => root,
         path,
         component: source.options.component,
+        loader: () => ({ origin: "https://preview.example.test" }),
       });
       const router = createRouter({
         routeTree: root.addChildren([page]),
@@ -56,6 +57,16 @@ describe("documentation landmarks", () => {
           .getByRole("link", { name: "Skip to content" })
           .getAttribute("href"),
       ).toBe(`#${main.id}`);
+      if (path === "/docs/agents") {
+        expect(main.textContent).toContain(
+          "curl -fsSLo zevium https://preview.example.test/cli/zevium.mjs",
+        );
+        const download = within(main).getByRole("link", {
+          name: "the Zevium CLI",
+        });
+        expect(download.getAttribute("download")).toBe("zevium.mjs");
+        expect(download.getAttribute("href")).toBe("/cli/zevium.mjs");
+      }
       main.focus();
       expect(document.activeElement).toBe(main);
     },

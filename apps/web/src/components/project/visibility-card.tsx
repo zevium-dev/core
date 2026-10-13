@@ -1,3 +1,4 @@
+import { useNow } from "#/hooks/use-now";
 import type { ProjectView } from "#/lib/project-view";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
@@ -84,12 +85,13 @@ export function VisibilityCard({ project }: { project: ProjectView }) {
         toast.error(humanError(err, "Could not cancel retirement")),
     });
 
+  const now = useNow();
   const nextVisibility = project.visibility === "public" ? "private" : "public";
   const isPublishedPublic =
     project.status === "published" && project.visibility === "public";
   const retirementScheduled = project.deprecationStartedAt !== undefined;
   const parsedSunset = Date.parse(`${sunsetDate}T23:59:59.999Z`);
-  const minimumSunset = Date.now() + MIN_RETIREMENT_NOTICE_MS;
+  const minimumSunset = now + MIN_RETIREMENT_NOTICE_MS;
   const retirementMessageLength = retirementMessage.trim().length;
   const sunsetError =
     sunsetDate !== "" &&
@@ -204,7 +206,7 @@ export function VisibilityCard({ project }: { project: ProjectView }) {
                       type="date"
                       value={sunsetDate}
                       onChange={(event) => setSunsetDate(event.target.value)}
-                      min={new Date(Date.now() + 7 * 86_400_000)
+                      min={new Date(now + 7 * 86_400_000)
                         .toISOString()
                         .slice(0, 10)}
                       aria-invalid={sunsetError !== null}

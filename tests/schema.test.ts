@@ -229,6 +229,7 @@ describe("accounting schema invariants", () => {
     const base = {
       ...compatibility,
       walletId: id("wallets"),
+      spendable: true,
       grantedCredits: 1,
       movedInCredits: 0,
       movedOutCredits: 0,

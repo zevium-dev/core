@@ -1,5 +1,6 @@
 {
   "name": "@zevium/shared",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "sideEffects": false,
@@ -13,7 +14,7 @@
   },
   "devDependencies": {
     "typescript": "^5.9.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.3"
   },
   "dependencies": {
     "zod": "^4.6.5"

@@ -7,7 +7,7 @@ import {
   MAX_FUNDING_SLICES,
 } from "../../contracts/money";
 import { add, appendWalletEntry, getWallet, money } from "./walletLedger";
-import { lotState, sourceRow } from "./lots";
+import { lotState, lotSpendable, sourceRow } from "./lots";
 import { finishClose, requestClose, requireDrained } from "./barrier";
 export async function beginDustMerge(
   ctx: MutationCtx,
@@ -19,6 +19,7 @@ export async function beginDustMerge(
   if (!lot) throw new ConvexError("Funding lot not found");
   if (lot.merge && lot.merge.state !== "complete") return lot;
   if (
+    !lot.spendable ||
     !lot.remainingCredits ||
     lot.remainingCredits >= threshold ||
     (lot.expiresAt !== undefined && lot.expiresAt <= Date.now())
@@ -84,7 +85,7 @@ export async function moveDustPage(
     });
   for (const source of page.page) {
     const amount = source.remainingCredits;
-    if (!amount) continue;
+    if (!amount || source.state === "locked") continue;
     const result = await appendWalletEntry(ctx, {
       walletId: lot.walletId,
       kind: "lot_move",
@@ -102,6 +103,9 @@ export async function moveDustPage(
     if (!result.applied)
       throw new ConvexError("Merge cursor conflicts with journal");
     const existing = await sourceRow(ctx, target._id, source.originLotId);
+    // Locks cover every row of a payment at once; a mixed origin would unlock silently.
+    if (existing?.state === "locked")
+      throw new ConvexError("Locked funding source cannot merge");
     if (existing) {
       await ctx.db.patch(existing._id, {
         creditsIn: add(existing.creditsIn, amount),
@@ -141,10 +145,12 @@ export async function moveDustPage(
     await ctx.db.patch(target._id, {
       remainingCredits: add(to.remainingCredits, amount),
       movedInCredits: add(to.movedInCredits, amount),
+      spendable: true,
       state: "available",
     });
   }
   await ctx.db.patch(lotId, {
+    spendable: await lotSpendable(ctx, lotId),
     merge: {
       ...lot.merge,
       state: page.isDone ? "complete" : "moving",

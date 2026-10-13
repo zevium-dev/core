@@ -71,3 +71,5 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-11 | [Legacy wallet cutover data](2026-10-11-legacy-wallet-discard.md)                                    | accepted; v6 sign-off pending          |
 | 2026-10-11 | [Connected accounts are the OAuth priority (API only)](2026-10-11-connected-accounts-oauth.md)       | accepted; build choices superseded     |
 | 2026-10-11 | [Zevium owns one OAuth client per provider](2026-10-11-zevium-owned-oauth-clients.md)                | accepted; 37th table pending sign-off  |
+| 2026-10-13 | [CLI ships as a plain Node script](2026-10-13-cli-node-script.md)                                    | accepted; built, owner release pending |
+| 2026-10-13 | [CLI supports Node 22 LTS](2026-10-13-cli-node-22-lts.md)                                            | accepted (built)                       |

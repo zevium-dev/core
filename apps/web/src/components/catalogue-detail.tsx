@@ -1,3 +1,9 @@
+import {
+  serializeRequestParameters,
+  validateFormValue,
+  type RequestParameter,
+} from "@zevium/shared";
+import { SchemaField, SchemaBody } from "#/components/schema-form";
 import { CopyButton } from "#/components/copy-button";
 import { formatDate } from "#/lib/format";
 import {
@@ -9,14 +15,13 @@ import {
   TableCell,
 } from "#/components/ui/table";
 import { convexQuery } from "@convex-dev/react-query";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useHydrated } from "@tanstack/react-router";
 import { PackageX, TriangleAlert } from "lucide-react";
 import {
   Suspense,
   useCallback,
-  useEffect,
-  useEffectEvent,
+  useSyncExternalStore,
   useMemo,
   useState,
   type FormEvent,
@@ -73,8 +78,6 @@ import type { ApiDetailSearch } from "#/lib/catalogue-detail-search";
 import { creditsLabel } from "#/lib/credits-label";
 import { resolveGatewayOrigin, tryItBaseUrl } from "#/lib/landing";
 import {
-  appendQueryParameters,
-  buildRequestPath,
   parsePublishedEndpoints,
   readableSuccessResponse,
   sanitizedGatewayErrorResponse,
@@ -117,7 +120,7 @@ function gatewayBaseUrl(): string {
 }
 
 function parseExtraHeaders(raw: string): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers = new Map<string, string>();
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (trimmed === "") continue;
@@ -125,9 +128,9 @@ function parseExtraHeaders(raw: string): Record<string, string> {
     if (colon <= 0) continue;
     const key = trimmed.slice(0, colon).trim();
     const value = trimmed.slice(colon + 1).trim();
-    if (key.length > 0) headers[key] = value;
+    if (key.length > 0) headers.set(key, value);
   }
-  return headers;
+  return Object.fromEntries(headers);
 }
 
 function invalidHeaderLine(raw: string): boolean {
@@ -157,10 +160,6 @@ function buildCurl(opts: {
     parts.push(`  -d ${shellQuote(opts.body)}`);
   }
   return parts.join(" \\\n");
-}
-
-function parameterInputId(endpointId: string, parameter: ApiParameter): string {
-  return `try-${endpointId}-${parameter.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
 function liveCostLabel(endpoint: EndpointRow | null): string {
@@ -467,7 +466,7 @@ function EndpointDocs({
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="flex flex-col gap-5">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">Mock · 0 credits</Badge>
                 {ep.freeTier !== undefined ? (
@@ -655,6 +654,62 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
+function readStoredApiKey() {
+  try {
+    const stored = sessionStorage.getItem(API_KEY_STORAGE);
+    return stored && stored.length <= 4096 ? stored : "";
+  } catch {
+    return "";
+  }
+}
+const emptyStoredApiKey = () => "";
+function subscribeStoredApiKey(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+/** call_api accepts JSON-serializable bodies; keep non-JSON text verbatim. */
+function mcpBody(text: string, contentType: string): unknown {
+  if (!contentType.toLowerCase().includes("json")) return text;
+  try {
+    const value: unknown = JSON.parse(text);
+    // call_api passes strings through and treats null as absent.
+    return typeof value === "string" || value === null ? text : value;
+  } catch {
+    return text;
+  }
+}
+
+/** "body/items/0" → "Request body › items › 1"; "query:limit" → "limit (query)". */
+function issueLabel(path: string, parameters: RequestParameter[]): string {
+  if (path === "apiKey") return "API key";
+  if (path === "headers") return "Headers";
+  const parameter = parameters.find(
+    (p) => path === p.key || path.startsWith(`${p.key}/`),
+  );
+  const [root = "", ...segments] = path.split("/");
+  const head = parameter
+    ? `${parameter.name} (${parameter.location})`
+    : root === "body"
+      ? "Request body"
+      : root;
+  return [
+    head,
+    ...segments.map((segment) => {
+      const name = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+      return /^\d+$/.test(name) ? `item ${Number(name) + 1}` : name;
+    }),
+  ].join(" › ");
+}
+
+function initialBodyText(endpoint: ApiEndpoint): string {
+  if (!endpoint.requestContentType.toLowerCase().includes("json"))
+    return endpoint.requestBodyExample;
+  return endpoint.form.bodyInitial === undefined
+    ? ""
+    : JSON.stringify(endpoint.form.bodyInitial, null, 2);
+}
+
 export function TryItPanel({
   userId,
   publisherHandle,
@@ -680,41 +735,41 @@ export function TryItPanel({
     endpoints.find((e) => e.id === endpointId) ?? endpoints[0] ?? null;
 
   const [parameterValues, setParameterValues] = useState<
-    Record<string, string>
-  >({});
+    Record<string, unknown>
+  >(() =>
+    Object.fromEntries(
+      (endpoint?.form.parameters ?? []).map((p) => [p.key, p.initialValue]),
+    ),
+  );
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState(
-    endpoint?.requestBodyExample ?? "{\n  \n}",
+    endpoint ? initialBodyText(endpoint) : "",
   );
-  const [apiKey, setApiKey] = useState("");
-  const [sending, setSending] = useState(false);
+  const storedApiKey = useSyncExternalStore(
+    subscribeStoredApiKey,
+    readStoredApiKey,
+    emptyStoredApiKey,
+  );
+  const [apiKeyEdit, setApiKey] = useState<string | null>(null);
+  const apiKey = apiKeyEdit ?? storedApiKey;
   const [result, setResult] = useState<PlayResult | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const mock = mode === "mock";
 
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(API_KEY_STORAGE);
-      if (stored && stored.length <= 4096) setApiKey(stored);
-    } catch {
-      // sessionStorage may be blocked
+  const [previousEndpoint, setPreviousEndpoint] = useState(endpoint?.id);
+  if (previousEndpoint !== endpoint?.id) {
+    setPreviousEndpoint(endpoint?.id);
+    if (endpoint) {
+      setParameterValues(
+        Object.fromEntries(
+          endpoint.form.parameters.map((p) => [p.key, p.initialValue]),
+        ),
+      );
+      setBodyText(initialBodyText(endpoint));
+      setErrors({});
+      setResult(null);
     }
-  }, []);
-
-  const resetEndpoint = useEffectEvent(() => {
-    if (!endpoint) return;
-    setParameterValues((previous) => {
-      const next: Record<string, string> = {};
-      for (const parameter of endpoint.parameters) {
-        next[parameter.key] = previous[parameter.key] ?? parameter.initialValue;
-      }
-      return next;
-    });
-    setBodyText(endpoint.requestBodyExample);
-    setErrors({});
-    setResult(null);
-  });
-  useEffect(() => resetEndpoint(), [endpoint?.id]);
+  }
 
   const onApiKeyChange = useCallback((value: string) => {
     setApiKey(value);
@@ -729,17 +784,18 @@ export function TryItPanel({
     }
   }, []);
 
-  const requestUrl = useMemo(() => {
-    if (!endpoint) return "";
-    const path = buildRequestPath(endpoint.path, parameterValues);
-    const base = tryItBaseUrl(gatewayBaseUrl(), mock);
-    const suffix = path.startsWith("/") ? path : `/${path}`;
-    return appendQueryParameters(
-      `${base}/${publisherHandle}/${projectSlug}${suffix}`,
-      endpoint.parameters,
-      parameterValues,
-    );
-  }, [endpoint, parameterValues, publisherHandle, projectSlug, mock]);
+  const serialized = useMemo(
+    () =>
+      endpoint
+        ? serializeRequestParameters(
+            endpoint.path,
+            endpoint.form.parameters,
+            parameterValues,
+          )
+        : { path: "", headers: {}, errors: [] },
+    [endpoint, parameterValues],
+  );
+  const requestUrl = `${tryItBaseUrl(gatewayBaseUrl(), mock)}/${publisherHandle}/${projectSlug}${serialized.path}`;
 
   const returnPath = useMemo(() => {
     const search = new URLSearchParams({
@@ -753,142 +809,189 @@ export function TryItPanel({
   const needsBody =
     endpoint !== null &&
     endpoint.requestBodyDeclared &&
-    (endpoint.method === "post" ||
-      endpoint.method === "put" ||
-      endpoint.method === "patch");
+    endpoint.method !== "get" &&
+    endpoint.method !== "head";
 
-  async function onSend(e: FormEvent) {
-    e.preventDefault();
-    if (!hydrated || !endpoint || sending) return;
-    const nextErrors: Record<string, string> = {};
-    for (const parameter of endpoint.parameters) {
-      if (
-        parameter.required &&
-        (parameterValues[parameter.key]?.trim() ?? "") === ""
+  const validation = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const warnings: string[] = [];
+    if (!endpoint) return { errors, warnings };
+    for (const p of endpoint.form.parameters) {
+      const checked = validateFormValue(
+        p.schema,
+        parameterValues[p.key],
+        endpoint.form.document,
+        p.required,
+        p.key,
+      );
+      for (const issue of checked.errors) errors[issue.path] = issue.message;
+      warnings.push(
+        ...checked.warnings.map((issue) => `${p.name}: ${issue.message}`),
+      );
+    }
+    for (const issue of serialized.errors) errors[issue.path] = issue.message;
+    if (needsBody) {
+      if (!bodyText.trim() && endpoint.requestBodyRequired)
+        errors.body = "Request body is required.";
+      else if (
+        bodyText.trim() &&
+        endpoint.requestContentType.toLowerCase().includes("json")
       ) {
-        nextErrors[parameter.key] = `${parameter.name} is required.`;
+        try {
+          const checked = validateFormValue(
+            endpoint.form.bodySchema,
+            JSON.parse(bodyText),
+            endpoint.form.document,
+            endpoint.requestBodyRequired,
+            "body",
+          );
+          for (const issue of checked.errors)
+            errors[issue.path] = issue.message;
+          warnings.push(
+            ...checked.warnings.map(
+              (issue) =>
+                `${issueLabel(issue.path, endpoint.form.parameters)}: ${issue.message}`,
+            ),
+          );
+        } catch {
+          errors.body = "Body must be valid JSON.";
+        }
       }
     }
-    if (invalidHeaderLine(headersText)) {
-      nextErrors.headers = "Each header must use the format Name: value.";
-    }
-    if (!mock && apiKey.trim() === "") {
-      nextErrors.apiKey = "API key is required for a live call.";
-    }
-    if (needsBody && endpoint.requestBodyRequired && bodyText.trim() === "") {
-      nextErrors.body = "Request body is required.";
-    } else if (
-      needsBody &&
-      bodyText.trim() !== "" &&
-      endpoint.requestContentType.toLowerCase().includes("json")
-    ) {
+    return { errors, warnings: [...new Set(warnings)] };
+  }, [endpoint, parameterValues, serialized, needsBody, bodyText]);
+
+  function requestHeaders(withKey: boolean) {
+    const headers = new Headers(parseExtraHeaders(headersText));
+    for (const [name, value] of Object.entries(serialized.headers))
+      headers.set(name, value);
+    // The gateway credential is owned by the live-call key field, never the spec.
+    headers.delete("authorization");
+    headers.delete("x-api-key");
+    headers.delete("payment-signature");
+    if (!mock)
+      headers.set(
+        "Authorization",
+        withKey ? `Bearer ${apiKey.trim()}` : "Bearer YOUR_API_KEY",
+      );
+    if (needsBody && bodyText.trim() && !headers.has("content-type"))
+      headers.set("Content-Type", endpoint!.requestContentType);
+    return Object.fromEntries(headers.entries());
+  }
+  let previewHeaders: Record<string, string> = {};
+  let headerError = "";
+  try {
+    previewHeaders = requestHeaders(false);
+  } catch {
+    headerError = "Enter valid HTTP header names and values.";
+  }
+  const send = useMutation({
+    retry: false,
+    mutationFn: async ({
+      url,
+      init,
+      isMock,
+    }: {
+      url: string;
+      init: RequestInit;
+      isMock: boolean;
+    }): Promise<PlayResult> => {
+      const t0 = performance.now();
       try {
-        JSON.parse(bodyText);
+        const res = await fetch(url, init);
+        const text = await res.text();
+        return {
+          status: res.status,
+          statusText: res.statusText,
+          ms: Math.round(performance.now() - t0),
+          body: text,
+          mock: isMock,
+          contentType: res.headers.get("content-type"),
+          requestId: res.headers.get("x-zevium-request-id") ?? undefined,
+        };
       } catch {
-        nextErrors.body = "Body must be valid JSON.";
+        return {
+          status: 0,
+          statusText: "Network error",
+          ms: Math.round(performance.now() - t0),
+          body: "The browser could not reach the gateway.",
+          mock: isMock,
+          contentType: null,
+        };
       }
+    },
+    onSuccess: setResult,
+  });
+  const isPending = send.isPending;
+  function onSend(e: FormEvent) {
+    e.preventDefault();
+    if (!hydrated || !endpoint || isPending) return;
+    const nextErrors = { ...validation.errors };
+    if (invalidHeaderLine(headersText))
+      nextErrors.headers = "Each header must use the format Name: value.";
+    if (headerError) nextErrors.headers = headerError;
+    if (!mock && apiKey.trim() === "")
+      nextErrors.apiKey = "API key is required for a live call.";
+    let headers: Record<string, string> = {};
+    try {
+      headers = requestHeaders(true);
+    } catch {
+      if (!headerError) nextErrors.apiKey = "Enter a valid API key.";
     }
     setErrors(nextErrors);
-    const firstError = Object.keys(nextErrors)[0];
-    if (firstError !== undefined) {
-      const parameter = endpoint.parameters.find(
-        (candidate) => candidate.key === firstError,
-      );
-      const targetId = parameter
-        ? parameterInputId(endpoint.id, parameter)
-        : firstError === "apiKey"
-          ? "api-key"
-          : firstError === "body"
-            ? "try-body"
-            : "try-headers";
-      document.getElementById(targetId)?.focus();
+    const first = Object.keys(nextErrors)[0];
+    if (first) {
+      const control = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-form-path]"),
+      ).find((element) => element.dataset.formPath === first);
+      (
+        control ??
+        document.getElementById(
+          first === "apiKey"
+            ? "api-key"
+            : first === "headers"
+              ? "try-headers"
+              : "try-body",
+        )
+      )?.focus();
       return;
     }
-
-    const headers = parseExtraHeaders(headersText);
-    for (const parameter of endpoint.parameters) {
-      if (parameter.location !== "header") continue;
-      const value = parameterValues[parameter.key]?.trim() ?? "";
-      if (value !== "") headers[parameter.name] = value;
-    }
-    const key = apiKey.trim();
-    if (!mock) {
-      headers.Authorization = `Bearer ${key}`;
-    }
-
-    const init: RequestInit = {
-      method: endpoint.method.toUpperCase(),
-      headers,
-    };
-    let body: string | undefined;
-    if (needsBody && bodyText.trim().length > 0) {
-      body = bodyText;
-      if (
-        headers["Content-Type"] === undefined &&
-        headers["content-type"] === undefined
-      ) {
-        headers["Content-Type"] = endpoint.requestContentType;
-      }
-      init.body = body;
-    }
-
-    setSending(true);
     setResult(null);
-    const t0 = performance.now();
-    try {
-      const res = await fetch(requestUrl, init);
-      const text = await res.text();
-      const ms = Math.round(performance.now() - t0);
-      setResult({
-        status: res.status,
-        statusText: res.statusText,
-        ms,
-        body: text,
-        mock,
-        contentType: res.headers.get("content-type"),
-        requestId: res.headers.get("x-zevium-request-id") ?? undefined,
-      });
-    } catch {
-      const ms = Math.round(performance.now() - t0);
-      setResult({
-        status: 0,
-        statusText: "Network error",
-        ms,
-        body: "The browser could not reach the gateway.",
-        mock,
-        contentType: null,
-      });
-    } finally {
-      setSending(false);
-    }
-  }
-
-  function curlText() {
-    if (!endpoint) return "";
-    const headers = parseExtraHeaders(headersText);
-    for (const parameter of endpoint.parameters) {
-      if (parameter.location !== "header") continue;
-      const value = parameterValues[parameter.key]?.trim() ?? "";
-      if (value !== "") headers[parameter.name] = value;
-    }
-    if (!mock) headers.Authorization = "Bearer YOUR_API_KEY";
-    let body: string | undefined;
-    if (needsBody && bodyText.trim().length > 0) {
-      body = bodyText;
-      if (
-        headers["Content-Type"] === undefined &&
-        headers["content-type"] === undefined
-      ) {
-        headers["Content-Type"] = endpoint.requestContentType;
-      }
-    }
-    return buildCurl({
-      method: endpoint.method,
+    send.mutate({
       url: requestUrl,
-      headers,
-      body,
+      isMock: mock,
+      init: {
+        method: endpoint.method.toUpperCase(),
+        headers,
+        ...(needsBody && bodyText.trim() ? { body: bodyText } : {}),
+      },
     });
   }
+  function curlText() {
+    return endpoint
+      ? buildCurl({
+          method: endpoint.method,
+          url: requestUrl,
+          headers: previewHeaders,
+          body: needsBody && bodyText.trim() ? bodyText : undefined,
+        })
+      : "";
+  }
+  const { authorization: _auth, ...mcpHeaders } = previewHeaders;
+  const mcpText = JSON.stringify(
+    {
+      org: publisherHandle,
+      project: projectSlug,
+      method: endpoint?.method.toUpperCase(),
+      path: serialized.path,
+      headers: mcpHeaders,
+      ...(needsBody && bodyText.trim()
+        ? { body: mcpBody(bodyText, previewHeaders["content-type"] ?? "") }
+        : {}),
+    },
+    null,
+    2,
+  );
 
   if (endpoints.length === 0) {
     return (
@@ -923,8 +1026,11 @@ export function TryItPanel({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form method="post" onSubmit={onSend}>
-          <fieldset disabled={!hydrated || sending} className="space-y-5">
+        <form method="post" noValidate onSubmit={onSend}>
+          <fieldset
+            disabled={!hydrated || isPending}
+            className="flex flex-col gap-5"
+          >
             <FieldGroup className="gap-3">
               <Field>
                 <FieldLabel id="playground-mode-label">Environment</FieldLabel>
@@ -975,7 +1081,7 @@ export function TryItPanel({
               </div>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <FieldGroup>
               <Field className="sm:col-span-2">
                 <FieldLabel htmlFor="try-endpoint">Operation</FieldLabel>
                 <Select
@@ -1002,58 +1108,26 @@ export function TryItPanel({
                 </FieldDescription>
               </Field>
 
-              {endpoint?.parameters.map((parameter) => {
-                const inputId = parameterInputId(endpoint.id, parameter);
-                const error = errors[parameter.key];
-                const descriptionId = `${inputId}-description`;
-                const errorId = `${inputId}-error`;
-                return (
-                  <Field key={parameter.key} data-invalid={Boolean(error)}>
-                    <FieldLabel htmlFor={inputId}>
-                      {parameter.name}
-                      <span className="font-normal text-muted-foreground">
-                        {parameter.location}
-                        {parameter.required ? " · required" : ""}
-                      </span>
-                    </FieldLabel>
-                    <Input
-                      id={inputId}
-                      name={parameter.key}
-                      value={parameterValues[parameter.key] ?? ""}
-                      onChange={(event) => {
-                        setParameterValues((previous) => ({
-                          ...previous,
-                          [parameter.key]: event.target.value,
-                        }));
-                        if (error) {
-                          setErrors((previous) => {
-                            const next = { ...previous };
-                            delete next[parameter.key];
-                            return next;
-                          });
-                        }
-                      }}
-                      placeholder={`${parameter.type} value`}
-                      className="font-mono text-sm"
-                      aria-invalid={Boolean(error)}
-                      aria-describedby={
-                        [
-                          parameter.description ? descriptionId : null,
-                          error ? errorId : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" ") || undefined
-                      }
-                    />
-                    {parameter.description ? (
-                      <FieldDescription id={descriptionId}>
-                        {parameter.description}
-                      </FieldDescription>
-                    ) : null}
-                    <FieldError id={errorId}>{error}</FieldError>
-                  </Field>
-                );
-              })}
+              {endpoint?.form.parameters.map((parameter) => (
+                <SchemaField
+                  document={endpoint.form.document}
+                  key={`${endpoint.id}:${parameter.key}`}
+                  node={parameter.node}
+                  label={`${parameter.name} (${parameter.location})`}
+                  required={parameter.required}
+                  path={parameter.key}
+                  description={parameter.description}
+                  value={parameterValues[parameter.key]}
+                  errors={errors}
+                  onChange={(value) => {
+                    setParameterValues((previous) => ({
+                      ...previous,
+                      [parameter.key]: value,
+                    }));
+                    setErrors({});
+                  }}
+                />
+              ))}
 
               {!mock ? (
                 <Field
@@ -1149,47 +1223,69 @@ export function TryItPanel({
                 <FieldError>{errors.headers}</FieldError>
               </Field>
 
-              {needsBody ? (
-                <Field
-                  className="sm:col-span-2"
-                  data-invalid={Boolean(errors.body)}
-                >
-                  <FieldLabel htmlFor="try-body">
-                    Request body
-                    <span className="font-normal text-muted-foreground">
-                      {endpoint?.requestContentType}
-                      {endpoint?.requestBodyRequired ? " · required" : ""}
-                    </span>
-                  </FieldLabel>
-                  <Textarea
-                    id="try-body"
-                    name="request-body"
-                    autoComplete="off"
-                    value={bodyText}
-                    onChange={(e) => {
-                      setBodyText(e.target.value);
-                      if (errors.body) {
-                        setErrors((previous) => {
-                          const next = { ...previous };
-                          delete next.body;
-                          return next;
-                        });
-                      }
-                    }}
-                    rows={6}
-                    spellCheck={false}
-                    className="min-h-24 font-mono text-xs"
-                    aria-invalid={Boolean(errors.body)}
-                    aria-describedby="try-body-help"
-                  />
-                  <FieldDescription id="try-body-help">
-                    Seeded from examples or schema defaults in the published
-                    spec.
-                  </FieldDescription>
-                  <FieldError>{errors.body}</FieldError>
-                </Field>
+              {needsBody && endpoint ? (
+                <SchemaBody
+                  document={endpoint.form.document}
+                  key={endpoint.id}
+                  node={endpoint.form.bodyNode}
+                  text={bodyText}
+                  onChange={(text) => {
+                    setBodyText(text);
+                    setErrors({});
+                  }}
+                  errors={errors}
+                  required={endpoint.requestBodyRequired}
+                  contentType={endpoint.requestContentType}
+                />
               ) : null}
-            </div>
+            </FieldGroup>
+            {Object.keys(errors).length > 0 && (
+              <FieldError>
+                <ul>
+                  {Object.entries(errors).map(([path, message]) => (
+                    <li key={path}>
+                      {issueLabel(path, endpoint?.form.parameters ?? [])}:{" "}
+                      {message}
+                    </li>
+                  ))}
+                </ul>
+              </FieldError>
+            )}
+            {validation.warnings.length > 0 && (
+              <FieldDescription>
+                Validation is incomplete: {validation.warnings.join(" ")}
+              </FieldDescription>
+            )}
+            <Tabs defaultValue="curl">
+              <TabsList aria-label="Request preview">
+                <TabsTrigger value="curl">curl</TabsTrigger>
+                <TabsTrigger value="mcp">MCP call_api</TabsTrigger>
+              </TabsList>
+              <TabsContent value="curl">
+                <pre
+                  className="max-h-80 overflow-auto rounded-md border p-3 text-xs"
+                  aria-label="curl preview"
+                >
+                  {curlText()}
+                </pre>
+              </TabsContent>
+              <TabsContent value="mcp">
+                <FieldDescription>
+                  call_api always makes a live, metered call. Authenticate the
+                  MCP connection with your Zevium key.{" "}
+                  {mock
+                    ? "These arguments describe the equivalent live request; MCP has no mock mode."
+                    : "Your key is never included in this preview."}
+                </FieldDescription>
+                <pre
+                  className="max-h-80 overflow-auto rounded-md border p-3 text-xs"
+                  aria-label="MCP call_api arguments"
+                >
+                  {mcpText}
+                </pre>
+                <CopyButton text={mcpText} label="Copy MCP arguments" />
+              </TabsContent>
+            </Tabs>
 
             <div className="rounded-md border bg-muted/30 px-3 py-2">
               <p className="text-xs text-muted-foreground">Request URL</p>
@@ -1197,8 +1293,8 @@ export function TryItPanel({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" disabled={sending || !endpoint}>
-                {sending
+              <Button type="submit" disabled={isPending || !endpoint}>
+                {isPending
                   ? "Sending…"
                   : mock
                     ? "Send mock · 0 credits"
@@ -1220,7 +1316,7 @@ export function TryItPanel({
             </div>
 
             <div className="min-h-[24rem]" role="status" aria-live="polite">
-              {sending ? (
+              {isPending ? (
                 <div className="space-y-3 rounded-md border p-4">
                   <Skeleton className="h-5 w-48" />
                   <Skeleton className="h-72 w-full" />

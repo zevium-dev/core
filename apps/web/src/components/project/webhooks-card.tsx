@@ -2,7 +2,7 @@ import type { ProjectView } from "#/lib/project-view";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, Eye, EyeOff, Webhook } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { Button } from "#/components/ui/button";
@@ -34,29 +34,24 @@ export function WebhooksCard({ project }: { project: ProjectView }) {
   const [activeEdit, setActive] = useState<boolean | undefined>();
   const active = activeEdit ?? endpoint?.active ?? true;
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
-  const revealedSecretVersionRef = useRef<number | null>(null);
+  const [revealedSecretVersion, setRevealedSecretVersion] = useState<
+    number | null
+  >(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
-  // Revoke a displayed secret only when a newer version supersedes it.
-  useEffect(() => {
-    if (endpoint !== null) {
-      // A rotation response is the only reveal of its version. Its realtime
-      // metadata update must not erase that response before it can be copied.
-      const revealedVersion = revealedSecretVersionRef.current;
-      if (
-        revealedVersion !== null &&
-        endpoint.secretVersion > revealedVersion
-      ) {
-        revealedSecretVersionRef.current = null;
-        setRevealedSecret(null);
-        setCopiedSecret(false);
-      }
-    } else if (endpointQuery.isSuccess) {
-      revealedSecretVersionRef.current = null;
-      setRevealedSecret(null);
-      setCopiedSecret(false);
-    }
-  }, [endpoint, endpointQuery.isSuccess, project._id]);
+  // The rotation response survives its matching realtime echo, but never a
+  // newer generation or deletion. Clear before rendering a superseded secret.
+  if (
+    revealedSecret !== null &&
+    ((revealedSecretVersion !== null &&
+      endpoint !== null &&
+      endpoint.secretVersion > revealedSecretVersion) ||
+      (endpoint === null && endpointQuery.isSuccess))
+  ) {
+    setRevealedSecretVersion(null);
+    setRevealedSecret(null);
+    setCopiedSecret(false);
+  }
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
   const revealMut = useConvexMutation(api.webhooks.revealSecret);
@@ -69,7 +64,7 @@ export function WebhooksCard({ project }: { project: ProjectView }) {
         toast.error("Secret was already revealed. Rotate it to get a new one.");
         return;
       }
-      revealedSecretVersionRef.current = endpoint?.secretVersion ?? null;
+      setRevealedSecretVersion(endpoint?.secretVersion ?? null);
       setRevealedSecret(result.secret);
     },
     onError: (err: unknown) =>
@@ -80,7 +75,7 @@ export function WebhooksCard({ project }: { project: ProjectView }) {
     mutationFn: () =>
       rotateMut({ projectId: project._id, graceSeconds: 60 * 60 }),
     onSuccess: (result) => {
-      revealedSecretVersionRef.current = result.secretVersion;
+      setRevealedSecretVersion(result.secretVersion);
       setRevealedSecret(result.secret);
       setCopiedSecret(false);
       revealMutation.reset();
@@ -238,7 +233,7 @@ export function WebhooksCard({ project }: { project: ProjectView }) {
                   size="icon"
                   onClick={() => {
                     if (revealedSecret !== null) {
-                      revealedSecretVersionRef.current = null;
+                      setRevealedSecretVersion(null);
                       setRevealedSecret(null);
                       setCopiedSecret(false);
                       revealMutation.reset();

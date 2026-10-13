@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createIsomorphicFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 
 import { AgentInstall } from "#/components/agent-install";
 import { DocsCodeBlock } from "#/components/docs-code-block";
@@ -9,7 +11,12 @@ import {
   tryItBaseUrl,
 } from "#/lib/landing";
 
+const currentOrigin = createIsomorphicFn()
+  .server(() => new URL(getRequest().url).origin)
+  .client(() => window.location.origin);
+
 export const Route = createFileRoute("/docs/agents")({
+  loader: () => ({ origin: currentOrigin() }),
   head: () => ({
     meta: [
       { title: "Agents · Zevium Docs" },
@@ -27,8 +34,10 @@ const GATEWAY = resolveGatewayOrigin(
   import.meta.env.VITE_GATEWAY_URL as string | undefined,
 );
 const DISCOVERY_URL = discoveryEndpointUrl(GATEWAY);
+const LISTING_DOCS_URL = `${new URL("/docs/", GATEWAY).href}{publisherHandle}/{projectSlug}`;
 
 function DocsAgentsPage() {
+  const { origin } = Route.useLoaderData();
   return (
     <DocsPage
       title="Agents"
@@ -45,6 +54,39 @@ function DocsAgentsPage() {
         <a href="/llms.txt">Agent-readable setup guide (llms.txt)</a>
       </p>
 
+      <h2>Install the CLI</h2>
+      <p>
+        Download{" "}
+        <a href="/cli/zevium.mjs" download="zevium.mjs">
+          the Zevium CLI
+        </a>
+        , a single Node.js script. Requires Node.js 22.12.0 or newer; no package
+        install is needed.
+      </p>
+      <DocsCodeBlock
+        lang="bash"
+        code={`curl -fsSLo zevium ${origin}/cli/zevium.mjs && chmod +x zevium
+./zevium --help
+./zevium <publisher> <project>
+# Set ZEVIUM_API_KEY in your environment before execution.
+./zevium <publisher> <project> <command> [flags]`}
+      />
+      <p>
+        Use publisher and project slugs from the catalogue; read their generated
+        docs for command names and flags. Move the file onto your PATH to run
+        <code> zevium</code> from any directory. On Windows, download the same
+        file as <code>zevium.mjs</code> and run{" "}
+        <code>node zevium.mjs --help</code>. Re-download to update.
+      </p>
+      <p>
+        Docs and help need no key. Execution uses authenticated, credit-gated
+        <code> call_api</code>; set <code>ZEVIUM_API_KEY</code> and fund your
+        organization first. <code>ZEVIUM_GATEWAY_URL</code> selects a different
+        gateway (default: <code>https://gateway.zevium.dev</code>). Generator
+        major 1 is supported; unknown majors stop before execution and ask you
+        to update.
+      </p>
+
       <h2>Discovery index</h2>
       <p>
         A machine-readable catalogue of published APIs with per-endpoint pricing
@@ -52,6 +94,16 @@ function DocsAgentsPage() {
         Crawl it directly:
       </p>
       <DocsCodeBlock lang="bash" code={`curl "${DISCOVERY_URL}"`} />
+
+      <h2>Listing reference in Markdown</h2>
+      <p>
+        Every public API has a generated Markdown reference built from its
+        published spec: operations, inputs, prices, free tier, and any
+        operations that cannot be called through generated tools. The same
+        converter produces the tool definitions returned by{" "}
+        <code>get_api_docs</code>.
+      </p>
+      <DocsCodeBlock lang="bash" code={`curl "${LISTING_DOCS_URL}"`} />
 
       <h2>Tools</h2>
       <p>Search for an API first, read its reference, then call an endpoint:</p>

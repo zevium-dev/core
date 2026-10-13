@@ -43,7 +43,8 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 
 ## Build queue — updated 2026-10-11
 
-- **P1 #440:** isolate payment `needs_review` locks to the affected original sources and reopen unrelated wallet funds; current whole-wallet freeze is pending owner sign-off. → [wallet-billing](../features/wallet-billing.md)
+- **Built — P1 #456:** immediate wallet reopen checkpoint refresh; next-call epoch regression replaces alarm-dependent acceptance. → [gateway](../features/gateway.md)
+- **Built — P1 #440:** scoped payment `needs_review` source quarantine implemented; unrelated funds reopen after drain. Owner policy sign-off remains required before activation. → [wallet-billing](../features/wallet-billing.md)
 
 Small, decided items. Each links to its decision; build in any order unless noted.
 
@@ -72,26 +73,26 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 | 7b  | #322–#326 Agent distribution: `llms.txt`, OAuth on `/mcp`, Claude Connectors Directory, MCP Registry, one-click installs (2026-10-10) | [agent-surface](../features/agent-surface.md)                                                          |
 | 7d  | #313 #314 House listings through permitted sources, ordinary publisher 95/5; RapidAPI excluded; optional cap P2 #429                  | [publishing-specs](../features/publishing-specs.md)                                                    |
 | 7e  | #425 Hide/disable per-token LLM listings, retain code                                                                                 | [pricing](../features/pricing.md)                                                                      |
-| 7f  | #428 Spec → MCP/CLI/docs converter; link existing MCP #110, SDKs #350 remain P2                                                       | [agent-surface](../features/agent-surface.md)                                                          |
+| 7f  | #428 converter + #451 Node CLI built (owner release pending); listing-scoped MCP #110, SDKs #350 P2                                   | [agent-surface](../features/agent-surface.md)                                                          |
 | 7g  | #426 Signup personal-org-only $1 grant, once per user                                                                                 | [accounts-orgs](../features/accounts-orgs.md)                                                          |
 | 7h  | #353 #430 Rebuild authority/lots, traceable dust merge, daily release and breakage accounting                                         | [wallet-billing](../features/wallet-billing.md)                                                        |
 
 ### P1 — the agent-first bet + trust plumbing
 
-| #   | Item                                                                              | Feature                                                         |
-| --- | --------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 8   | Org-scoped wallets                                                                | [wallet-billing](../features/wallet-billing.md)                 |
-| 9   | Per-API agent tooling + machine-readable discovery/pricing index                  | [agent-surface](../features/agent-surface.md)                   |
-| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109            | [machine-payments](../features/machine-payments.md)             |
-| 11  | Free tier enforcement (publisher-funded) + tiered pricing                         | [pricing](../features/pricing.md)                               |
-| 12  | Spend caps, threshold alerts, budget webhooks                                     | [wallet-billing](../features/wallet-billing.md)                 |
-| 13  | Key-management API with zero-downtime rotation                                    | [api-keys](../features/api-keys.md)                             |
-| 14  | Mock/sandbox mode                                                                 | [mock-sandbox](../features/mock-sandbox.md)                     |
-| 15  | Deprecation/unpublish lifecycle                                                   | [listing-lifecycle](../features/listing-lifecycle.md)           |
-| 16  | Publisher webhooks                                                                | [webhooks-notifications](../features/webhooks-notifications.md) |
-| 16a | #427 OpenAPI-generated Try it form; current raw-text input replaced in follow-up  | [mock-sandbox](../features/mock-sandbox.md)                     |
-| 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                 | [agent-surface](../features/agent-surface.md)                   |
-| 16c | #351 Connected accounts (YouTube, TikTok, Instagram); activation #445, media #444 | [connected-accounts](../features/connected-accounts.md)         |
+| #   | Item                                                                                                      | Feature                                                         |
+| --- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 8   | Org-scoped wallets                                                                                        | [wallet-billing](../features/wallet-billing.md)                 |
+| 9   | Per-API agent tooling + machine-readable discovery/pricing index                                          | [agent-surface](../features/agent-surface.md)                   |
+| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109                                    | [machine-payments](../features/machine-payments.md)             |
+| 11  | Free tier enforcement (publisher-funded) + tiered pricing                                                 | [pricing](../features/pricing.md)                               |
+| 12  | Spend caps, threshold alerts, budget webhooks                                                             | [wallet-billing](../features/wallet-billing.md)                 |
+| 13  | Key-management API with zero-downtime rotation                                                            | [api-keys](../features/api-keys.md)                             |
+| 14  | Mock/sandbox mode                                                                                         | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 15  | Deprecation/unpublish lifecycle                                                                           | [listing-lifecycle](../features/listing-lifecycle.md)           |
+| 16  | Publisher webhooks                                                                                        | [webhooks-notifications](../features/webhooks-notifications.md) |
+| 16a | #427 OpenAPI-generated Try it form — built; typed controls, validation, raw fallback and request previews | [mock-sandbox](../features/mock-sandbox.md)                     |
+| 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                                         | [agent-surface](../features/agent-surface.md)                   |
+| 16c | #351 Connected accounts (YouTube, TikTok, Instagram); activation #445, media #444                         | [connected-accounts](../features/connected-accounts.md)         |
 
 ### P2 — cutting edge
 
@@ -106,7 +107,7 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 | —   | Verified reviews                                                                                                                      | [reviews](../features/reviews.md)                       |
 | —   | #350 Generated SDKs                                                                                                                   | [landing-docs](../features/landing-docs.md)             |
 | —   | #109 x402 activation deferred; feature-off follow-up P1 #424 and enablement runbook                                                   | [machine-payments](../features/machine-payments.md)     |
-| —   | #429 Optional $100/month total house subsidy cap, only if simple; otherwise skip                                                      | [publishing-specs](../features/publishing-specs.md)     |
+| —   | #429 Optional $100/month total house subsidy cap — assessed and skipped 2026-10-11; upstream-cost evidence needs broader changes      | [publishing-specs](../features/publishing-specs.md)     |
 
 Several P1/P2 items shipped ahead of their tag (payouts via Stripe Connect, mock mode, webhooks, free-tier enforcement, verified reviews). Feature notes carry the real status.
 

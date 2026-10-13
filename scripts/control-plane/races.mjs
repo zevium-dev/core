@@ -83,6 +83,17 @@ const financeHarness = readFileSync(
   .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
   .replace('"./measureDb"', '"../tests/measureDb"');
 writeFileSync(new URL("convex/financeRaces.ts", scratch), financeHarness);
+const sourceLocksHarness = readFileSync(
+  new URL("../../tests/sourceLocksRacesHarness.ts", import.meta.url),
+  "utf8",
+)
+  .replaceAll('"../convex/', '"./')
+  .replace('"./moneyFixtures"', '"../tests/moneyFixtures"')
+  .replace('"./financeFixtures"', '"../tests/financeFixtures"');
+writeFileSync(
+  new URL("convex/sourceLocksRaces.ts", scratch),
+  sourceLocksHarness,
+);
 const readHarness = readFileSync(
   new URL("../../tests/readRacesHarness.ts", import.meta.url),
   "utf8",
@@ -177,6 +188,7 @@ if (!process.env.NEXT_EDGE_ONLY) {
   run(["run", "moneyRaces:races"]);
 
   run(["run", "financeRaces:races"]);
+  run(["run", "sourceLocksRaces:races"]);
 
   // Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
   function result(args) {

@@ -11,6 +11,8 @@ export function stripeConfig() {
 }
 export function stripeClient() {
   return new Stripe(stripeConfig().key, {
+    // SDK v23 types describe Endive; keep our tested Dahlia wire contract.
+    // @ts-expect-error Intentional older Stripe API version.
     apiVersion: STRIPE_API_VERSION,
     maxNetworkRetries: 0,
     timeout: 15_000,

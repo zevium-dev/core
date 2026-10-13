@@ -38,6 +38,7 @@ export const seed = internalMutation({
       walletId: wallet,
       sourceRef: `source_${runId}`,
       sourceKind: "promo",
+      spendable: false,
       grantedCredits: 0,
       movedInCredits: 0,
       movedOutCredits: 0,

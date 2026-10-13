@@ -376,9 +376,27 @@ try {
   assert.equal(state.wallet.balance, 95);
   assert.equal(state.wallet.close.edgeFinalSequence, 1);
   assert.ok(state.wallet.close.ackAt);
+  const installedBefore = JSON.parse(
+    (await post("/test/wallet", { orgId: slow.orgId, action: "pause" }))
+      .state[0].data,
+  );
+  assert.equal(installedBefore.sealed, true);
+  assert.equal(installedBefore.checkpoint.gateState, "closing");
+  assert.ok(installedBefore.checkpoint.validUntil > Date.now());
   await convex("finish", { walletId: slow.walletId, id: "close-inflight" });
-  await flush(slow);
-  assert.equal((await call(slow)).status, 200);
+  const reopenedCall = await call(slow);
+  console.log("Immediate post-finish admission status", reopenedCall.status);
+  assert.equal(reopenedCall.status, 200);
+  const installedAfter = JSON.parse(
+    (await post("/test/wallet", { orgId: slow.orgId, action: "inspect" }))
+      .state[0].data,
+  );
+  assert.equal(
+    installedAfter.checkpoint.epoch,
+    installedBefore.checkpoint.epoch + 1,
+  );
+  assert.equal(installedAfter.checkpoint.gateState, "open");
+  assert.equal(installedAfter.sealed, false);
   await flush(slow);
   console.log("inflight drain passed");
   // Expired authority fails closed when the bounded cold refresh fails.
@@ -412,6 +430,74 @@ try {
   assert.equal(state.usage[0].billingOutcome, "exception");
   assert.equal(state.wallet.settledThroughEdgeSequence, 1);
   console.log("exceptions passed");
+  // Lock only after an admitted call settles; survive restart with other funding usable.
+  const scoped = await convex("seed", {
+    run: `edge-scoped-${run}`,
+    paid: true,
+  });
+  const scopedEntered = waitForUpstream();
+  const scopedCall = fetch(
+    `http://127.0.0.1:${worker.port}/gateway/${scoped.handle}/echo/echo?slow`,
+    { method: "POST", headers: { authorization: `Bearer ${scoped.secret}` } },
+  );
+  const scopedEarly = await Promise.race([
+    scopedEntered.then(() => null),
+    scopedCall,
+  ]);
+  assert.equal(
+    scopedEarly,
+    null,
+    `Scoped admission failed: ${scopedEarly?.status}`,
+  );
+  await convex("review", { paymentId: scoped.paymentId });
+  assert.equal(
+    await convex("advanceRefund", { paymentId: scoped.paymentId }),
+    "waiting",
+  );
+  release();
+  assert.equal((await scopedCall).status, 200);
+  await waitDrain(scoped);
+  assert.equal(
+    await convex("advanceRefund", { paymentId: scoped.paymentId }),
+    "done",
+  );
+  state = await convex("inspect", { walletId: scoped.walletId });
+  assert.equal(state.wallet.gateState, "open");
+  assert.equal(state.wallet.lockedCredits, 99995);
+  assert.equal(state.wallet.balance, 99995);
+  const blockedCalls = calls;
+  const lockedResponse = await call(scoped);
+  console.log("Immediate scoped reopen status", lockedResponse.status);
+  assert.equal(lockedResponse.status, 402);
+  assert.equal(calls, blockedCalls);
+  const unrelatedPayment = await convex("reviewCredits", {
+    walletId: scoped.walletId,
+  });
+  await flush(scoped);
+  assert.equal((await call(scoped)).status, 200); // promotional source
+  await flush(scoped);
+  await worker.stop();
+  await start();
+  const restarted = await call(scoped);
+  console.log("Restart cold admission status", restarted.status);
+  assert.equal(restarted.status, 200); // unrelated paid source after SQLite restart
+  await flush(scoped);
+  state = await convex("inspect", { walletId: scoped.walletId });
+  assert.equal(state.wallet.lockedCredits, 99995);
+  assert.equal(state.wallet.balance, 100090);
+  assert.equal(state.usage.length, 3);
+  assert.equal(state.usage[2].fundingSlices[0].paymentId, unrelatedPayment);
+  assert.ok(
+    state.cases.some(
+      (c) =>
+        c.rowKind === "case" &&
+        c.paymentId === scoped.paymentId &&
+        c.status === "open",
+    ),
+  );
+  console.log(
+    "Scoped payment quarantine, in-flight settlement and restart passed",
+  );
   // Kill workerd after durable admission, while upstream has not returned.
   const crash = await convex("seed", { run: `edge-crash-${run}` });
   const crashWait = waitForUpstream();

@@ -1,3 +1,4 @@
+import { useNow } from "#/hooks/use-now";
 import type { ProjectView } from "#/lib/project-view";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
@@ -45,10 +46,11 @@ export function DangerZone({ project }: { project: ProjectView }) {
     },
   });
 
+  const now = useNow();
   const canDelete = deleteConfirm.trim() === project.slug;
   const canRemoveProject =
     project.status !== "published" ||
-    (project.sunsetAt !== undefined && Date.now() >= project.sunsetAt);
+    (project.sunsetAt !== undefined && now >= project.sunsetAt);
   return (
     <Card className="border-destructive/40">
       <CardHeader>

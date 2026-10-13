@@ -8,5 +8,3 @@ self.onmessage = (event: MessageEvent<{ text: string }>) => {
 
 // Module loading is outside the parser CPU budget.
 self.postMessage({ ready: true });
-
-export {};

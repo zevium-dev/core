@@ -1,6 +1,6 @@
 # Catalogue and search
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Status: root cutover and generated Try it form implemented; owner activation pending · Updated: 2026-10-12
 > Code: `convex/{catalogue,search,lib/catalogue}.ts`, `apps/web/src/components/{catalogue-browser,catalogue-detail}.tsx`, `apps/web/src/lib/catalogue-search.server.ts`, `tests/readSurfaces.test.ts`
 > Related: [quality-signals](quality-signals.md), [reviews](reviews.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [pricing](pricing.md), [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [landing-docs](landing-docs.md), [web-app](../architecture/web-app.md)
 
@@ -44,6 +44,10 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 - Browse actions open `/app/catalogue`; listing cards open `/app/catalogue/{org}/{api}`. Search, filters, API reference, playground, and back navigation keep the dashboard sidebar. Public catalogue URLs remain shareable outside the app.
 
 ## Tech
+
+URL drafts reset during render only when the committed value changes; debounce callbacks use `useEffectEvent` in `apps/web/src/lib/catalogue-search.ts`. Playground parameters/body reset on endpoint identity changes, with initial defaults ready on first render; stored API-key hydration uses `useSyncExternalStore` in `apps/web/src/components/catalogue-detail.tsx`.
+
+The detail playground derives typed parameters and JSON body controls from the immutable published operation (#427). `apps/web/src/lib/openapi-reference.ts` attaches the shared form model; `apps/web/src/components/schema-form.tsx` renders it. Supported shapes, raw fallback and validation limits are owned by [mock-sandbox](mock-sandbox.md#generated-request-form-427).
 
 Catalogue price chips and detail labels contain only scalar per-call prices; dead `hasTokenPricing` / `tokenPricing` display branches are removed. Code: `apps/web/src/lib/catalogue-card.ts` and `apps/web/src/components/catalogue-detail.tsx`.
 

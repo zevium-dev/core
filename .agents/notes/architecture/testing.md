@@ -67,3 +67,15 @@ Run `pnpm ci:pr` before opening a PR; commit only when requested.
 `VITEST_MAX_WORKERS=2 pnpm ci:control-plane` checks the frozen 221-entry completion map, offline activation configuration, guarded anonymous schema/codegen, real OCC and 10,001-bucket reconciliation, and real local Worker/Convex acceptance using production migration declarations. Local scratch belongs under ignored `.tmp/`; set `TMPDIR` there for full local checks. No shared Convex target or provider configuration is needed. `packages/control-plane-next` and `ci:next` are deleted.
 
 Optional local browser hold: `CUTOVER_BROWSER=1 NEXT_EDGE_ONLY=1 CUTOVER_CLERK_ISSUER=<existing HTTPS Clerk issuer> pnpm test:races` keeps its guarded backend and Worker on port 8787 for up to 30 minutes after HTTP acceptance. The scratch `browser-runtime.json` contains private fixture data, never an artifact; creating `browser-done` there closes both services. Run only the web package's dev server with the loopback Convex URL, localhost gateway, and existing Clerk development credentials. There is no browser auth bypass. Provider-backed payments/webhooks remain an independent owner gate: [runbook](convex-activation.md).
+
+## Dependency compatibility (2026-10-11)
+
+Combined dependency update supersedes #305, #306, #307, #308, and #309. Oxlint 1.86.0 enables React purity/ref/effect diagnostics; fixes use guarded state reconciliation, commit-phase refs, external-store subscriptions, and a stable sidebar skeleton width. No lint rules are disabled. Activity keys only its call-list subtree by filter window, so pagination shares one timestamp per window and filter selects keep focus.
+
+Vitest is split by workspace: root (Convex suite), `apps/web`, and `packages/shared` run Vitest 5.0.3; `apps/gateway` stays on Vitest 4.1.11 because `@cloudflare/vitest-pool-workers` (0.22.0 and latest 0.23.0) declares `vitest`/`@vitest/runner`/`@vitest/snapshot` `^4.1.0`. A gateway probe on Vitest 5.0.3 failed before discovery (`SyntaxError: Unexpected identifier 'file'` inside workerd, zero tests). pnpm resolves each manifest's own Vitest, so the gateway pool sees v4. Bump gateway Vitest when the Worker pool supports v5; do not suppress errors or remove Worker tests.
+
+[v5 migration guide](https://vitest.dev/guide/migration.html) review: no coverage provider, `test.projects`, `sequential` APIs, removed entrypoints, or reporter artifacts are used. `clearMocks` now defaults on; all suites pass with it. `maxWorkers` and `VITEST_MAX_WORKERS` remain supported; scripts cap workers at two. Root Convex config stays explicit (`vitest.convex.config.ts`); workspace suites run from their own package configs.
+
+Counts (files/tests). Baseline `origin/develop` CI: shared 6/105, gateway 15/124, web 79/459, Convex 15/185 = 115/873. After: shared 6/105, gateway 15/124, web 80/461 (+2 highlighter regressions), Convex 16/187 (+2 Stripe SDK regressions) = 117/877. Node script tests unchanged.
+
+Migration evidence and sources: [dependency majors session](../sessions/2026-10-11-dependency-majors.md).
