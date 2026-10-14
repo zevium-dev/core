@@ -52,15 +52,12 @@ async function send(
       headers,
       ...(body === undefined ? {} : { body }),
     });
-    const parsed = parseTokenResponse(
+    return parseTokenResponse(
       response.status,
       response.contentType,
       response.body,
       Date.now(),
     );
-    return parsed.ok
-      ? parsed
-      : { ok: false, grantRejected: parsed.failure.grantRejected };
   } catch {
     return { ok: false, grantRejected: false };
   }
@@ -74,20 +71,14 @@ async function postTokenForm(
   grant: Record<string, string>,
 ): Promise<TokenResult> {
   const form = new URLSearchParams(grant);
-  const headers: Record<string, string> = {
-    ...HEADERS,
-    "content-type": "application/x-www-form-urlencoded",
-  };
-  if (provider.tokenAuthMethod === "client_secret_basic") {
-    // RFC 6749 §2.3.1: form-encode each part before joining.
-    const user = encodeURIComponent(client.clientId);
-    const pass = encodeURIComponent(client.clientSecret);
-    headers.authorization = `Basic ${btoa(`${user}:${pass}`)}`;
-  } else {
-    form.set(provider.clientIdParam, client.clientId);
-    form.set("client_secret", client.clientSecret);
-  }
-  return await send("POST", new URL(url), headers, form.toString());
+  form.set(provider.clientIdParam, client.clientId);
+  form.set("client_secret", client.clientSecret);
+  return await send(
+    "POST",
+    new URL(url),
+    { ...HEADERS, "content-type": "application/x-www-form-urlencoded" },
+    form.toString(),
+  );
 }
 
 /** Instagram-style GET grant (long-lived swap or refresh). */

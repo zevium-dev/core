@@ -10,13 +10,6 @@
 
 export type OAuthProviderId = "youtube" | "tiktok" | "instagram";
 
-/**
- * - `standard`: RFC 6749 code and refresh-token grants.
- * - `instagram`: the code grant returns a 1-hour token that is swapped for a
- *   60-day one; refresh sends that token itself (no refresh token).
- */
-export type OAuthTokenStyle = "standard" | "instagram";
-
 export type OAuthProvider = {
   id: OAuthProviderId;
   /** Display name used in errors and consent copy. */
@@ -34,9 +27,11 @@ export type OAuthProvider = {
   authorizeParams: Readonly<Record<string, string>>;
   /** PKCE S256 on the authorization request. */
   pkce: boolean;
-  tokenAuthMethod: "client_secret_post" | "client_secret_basic";
-  tokenStyle: OAuthTokenStyle;
-  /** `instagram` style: long-lived swap and refresh endpoints. */
+  /**
+   * Instagram style: the code grant returns a 1-hour token that is swapped for
+   * a 60-day one; refresh sends that token itself (no refresh token). Absent
+   * for standard RFC 6749 code and refresh-token grants.
+   */
   longLived?: { exchangeUrl: string; refreshUrl: string };
   /**
    * Best-effort revocation on disconnect: which token to send, and whether to
@@ -74,8 +69,6 @@ export const OAUTH_PROVIDERS: Readonly<Record<OAuthProviderId, OAuthProvider>> =
       // Without offline + consent Google omits the refresh token on reconnect.
       authorizeParams: { access_type: "offline", prompt: "consent" },
       pkce: true,
-      tokenAuthMethod: "client_secret_post",
-      tokenStyle: "standard",
       // Revoking the refresh token ends the whole grant.
       revoke: {
         url: "https://oauth2.googleapis.com/revoke",
@@ -102,8 +95,6 @@ export const OAUTH_PROVIDERS: Readonly<Record<OAuthProviderId, OAuthProvider>> =
       authorizeParams: {},
       // TikTok's web flow takes no code challenge (desktop-only, hex-encoded).
       pkce: false,
-      tokenAuthMethod: "client_secret_post",
-      tokenStyle: "standard",
       revoke: {
         url: "https://open.tiktokapis.com/v2/oauth/revoke/",
         token: "access",
@@ -127,8 +118,6 @@ export const OAUTH_PROVIDERS: Readonly<Record<OAuthProviderId, OAuthProvider>> =
       clientIdParam: "client_id",
       authorizeParams: {},
       pkce: false,
-      tokenAuthMethod: "client_secret_post",
-      tokenStyle: "instagram",
       longLived: {
         exchangeUrl: "https://graph.instagram.com/access_token",
         refreshUrl: "https://graph.instagram.com/refresh_access_token",

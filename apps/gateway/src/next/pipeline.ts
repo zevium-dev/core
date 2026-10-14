@@ -3,7 +3,7 @@ import { nextOAuth } from "./oauth";
 import type { AdmissionInput } from "./wallet";
 import { z } from "zod";
 import {
-  CONNECTION_USED_HEADER,
+  CONNECTION_HEADER,
   sha256Hex,
   matchOperation,
   joinUpstreamUrl,
@@ -480,7 +480,7 @@ async function execute(
   const headers = filterResponseHeaders(forwarded.response.headers);
   headers.set("x-zevium-request-id", id);
   headers.set("x-zevium-cost", String(result.admission.heldCredits));
-  if (connection) headers.set(CONNECTION_USED_HEADER, connection.id);
+  if (connection) headers.set(CONNECTION_HEADER, connection.id);
   if (result.admission.pricingDecision === "free_tier")
     headers.set("x-zevium-free-tier", "1");
   applyDeprecationHeaders(headers, p, route);

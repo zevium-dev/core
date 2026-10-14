@@ -8,6 +8,7 @@ import {
   isSafeReturnUrl,
   isSchemeName,
   normalizeConnectionLabel,
+  sha256Hex,
 } from "@zevium/shared";
 
 import { validInternalSecret } from "../contracts/transport";
@@ -87,12 +88,6 @@ async function sha256(input: string): Promise<Uint8Array> {
   );
 }
 
-export async function stateHash(state: string): Promise<string> {
-  return [...(await sha256(state))]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function random(bytes: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(bytes));
 }
@@ -158,7 +153,7 @@ export function registerConnectionRoutes(http: HttpRouter): void {
           ...(body.returnUrl === undefined
             ? {}
             : { returnUrl: body.returnUrl as string }),
-          stateHash: await stateHash(state),
+          stateHash: await sha256Hex(state),
           ...(verifier === null
             ? {}
             : {
@@ -206,7 +201,7 @@ export function registerConnectionRoutes(http: HttpRouter): void {
       }
       return json(
         await ctx.runAction(internal.connectionsNode.completeAuthorization, {
-          stateHash: await stateHash(body.state),
+          stateHash: await sha256Hex(body.state),
           ...(body.code === undefined ? {} : { code: body.code as string }),
           ...(body.error === undefined ? {} : { error: body.error as string }),
         }),

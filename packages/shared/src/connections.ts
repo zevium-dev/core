@@ -17,10 +17,11 @@ import {
   type OAuthProviderId,
 } from "./oauth-providers.js";
 
-/** Request header that selects a connection; stripped before the upstream. */
+/**
+ * Request header that selects a connection (stripped before the upstream);
+ * also the response header naming the connection a call used.
+ */
 export const CONNECTION_HEADER = "x-zevium-connection";
-/** Response header naming the connection a call used. */
-export const CONNECTION_USED_HEADER = "x-zevium-connection";
 /** Fixed path, on the gateway origin, providers redirect back to. */
 export const CONNECTION_CALLBACK_PATH = "/connections/callback";
 /** Pending authorizations expire quickly; the link is a bearer capability. */
@@ -124,13 +125,6 @@ export function isSafeReturnUrl(value: unknown): value is string {
   );
 }
 
-function rawSecuritySchemes(
-  spec: Pick<ParsedOpenApiSpec, "components">,
-): Record<string, unknown> {
-  const schemes = spec.components?.securitySchemes;
-  return isRecord(schemes) ? schemes : {};
-}
-
 /**
  * True when the raw scheme is an authorization-code `oauth2` scheme that
  * names a provider. Other OAuth schemes are documentation only, as before.
@@ -145,20 +139,46 @@ function isConnectedAccountScheme(raw: unknown): boolean {
   );
 }
 
+type CollectedSchemes = {
+  schemes: ConnectedAccountScheme[];
+  issues: OAuthSchemeIssue[];
+  byName: ReadonlyMap<string, ConnectedAccountScheme>;
+};
+
+const NO_SCHEMES: CollectedSchemes = {
+  schemes: [],
+  issues: [],
+  byName: new Map(),
+};
+// Keyed by the `securitySchemes` object: publish validation and every gateway
+// call ask per operation, and parsed specs are cached and never mutated.
+const collected = new WeakMap<object, CollectedSchemes>();
+
 /**
  * Validate every provider-bound scheme. Returns usable schemes plus issues; a
- * scheme with any issue is left out of `schemes`.
+ * scheme with any issue is left out of `schemes`. Results are shared; don't
+ * mutate them.
  */
 export function collectOAuthSchemes(
   spec: Pick<ParsedOpenApiSpec, "components">,
-): {
-  schemes: ConnectedAccountScheme[];
-  issues: OAuthSchemeIssue[];
-} {
+): CollectedSchemes {
+  const raw = spec.components?.securitySchemes;
+  if (!isRecord(raw)) return NO_SCHEMES;
+  let result = collected.get(raw);
+  if (result === undefined) {
+    result = validateOAuthSchemes(raw);
+    collected.set(raw, result);
+  }
+  return result;
+}
+
+function validateOAuthSchemes(
+  securitySchemes: Record<string, unknown>,
+): CollectedSchemes {
   const schemes: ConnectedAccountScheme[] = [];
   const issues: OAuthSchemeIssue[] = [];
   let count = 0;
-  for (const [name, raw] of Object.entries(rawSecuritySchemes(spec))) {
+  for (const [name, raw] of Object.entries(securitySchemes)) {
     if (!isConnectedAccountScheme(raw)) continue;
     count += 1;
     const path = `$.components.securitySchemes["${name}"]`;
@@ -220,7 +240,11 @@ export function collectOAuthSchemes(
       message: `At most ${MAX_OAUTH_SCHEMES} connected-account schemes`,
     });
   }
-  return { schemes, issues };
+  return {
+    schemes,
+    issues,
+    byName: new Map(schemes.map((scheme) => [scheme.name, scheme])),
+  };
 }
 
 /**
@@ -251,13 +275,6 @@ export function collectConnectionUpstreamIssues(
     }));
 }
 
-export function findOAuthScheme(
-  spec: Pick<ParsedOpenApiSpec, "components">,
-  name: string,
-): ConnectedAccountScheme | null {
-  return collectOAuthSchemes(spec).schemes.find((s) => s.name === name) ?? null;
-}
-
 function effectiveSecurity(
   spec: Pick<ParsedOpenApiSpec, "security">,
   operation: OpenApiOperation,
@@ -286,14 +303,6 @@ function oauthEntries(
   });
 }
 
-function schemeMap(
-  spec: Pick<ParsedOpenApiSpec, "components">,
-): Map<string, ConnectedAccountScheme> {
-  return new Map(
-    collectOAuthSchemes(spec).schemes.map((scheme) => [scheme.name, scheme]),
-  );
-}
-
 /**
  * Connected account an operation needs, or `null` for none. OpenAPI security
  * is a list of alternatives; the connection is required only when every
@@ -303,7 +312,7 @@ export function operationConnection(
   spec: Pick<ParsedOpenApiSpec, "components" | "security">,
   operation: OpenApiOperation,
 ): ConnectionRequirement | null {
-  const schemes = schemeMap(spec);
+  const schemes = collectOAuthSchemes(spec).byName;
   if (schemes.size === 0) return null;
   const alternatives = effectiveSecurity(spec, operation);
   let found: { scheme: ConnectedAccountScheme; scopes: string[] } | undefined;
@@ -332,7 +341,7 @@ export function collectOperationConnectionIssues(
   operation: OpenApiOperation,
   path: string,
 ): OAuthSchemeIssue[] {
-  const schemes = schemeMap(spec);
+  const schemes = collectOAuthSchemes(spec).byName;
   if (schemes.size === 0) return [];
   const used = new Set<string>();
   for (const alternative of effectiveSecurity(spec, operation)) {
@@ -404,13 +413,6 @@ export type OAuthTokenSet = {
   scopes: string[] | null;
 };
 
-export type OAuthTokenError = {
-  /** RFC 6749 error code when the provider sent one. */
-  error: string | null;
-  /** True when the grant itself is dead (reconnect needed). */
-  grantRejected: boolean;
-};
-
 function parseBody(
   contentType: string,
   body: string,
@@ -422,26 +424,21 @@ function parseBody(
     const value: unknown = JSON.parse(body);
     return isRecord(value) ? value : null;
   } catch {
-    // GitHub-style providers answer form-encoded without saying so.
-    const params = new URLSearchParams(body);
-    return params.has("access_token") || params.has("error")
-      ? Object.fromEntries(params)
-      : null;
+    return null;
   }
 }
 
 /**
  * Parse a token endpoint response (RFC 6749 §5). Only bearer tokens are
  * accepted; providers that omit `token_type` are treated as bearer.
+ * `grantRejected` means the grant itself is dead (reconnect needed).
  */
 export function parseTokenResponse(
   status: number,
   contentType: string,
   body: string,
   now: number,
-):
-  | { ok: true; tokens: OAuthTokenSet }
-  | { ok: false; failure: OAuthTokenError } {
+): { ok: true; tokens: OAuthTokenSet } | { ok: false; grantRejected: boolean } {
   const parsed = parseBody(contentType, body);
   // Instagram's code grant wraps the token in `data: [{...}]`.
   const value =
@@ -453,7 +450,7 @@ export function parseTokenResponse(
       : parsed;
   const error =
     typeof value?.error === "string"
-      ? value.error.slice(0, 64)
+      ? value.error
       : // Graph-style errors: code 190 means the token itself is dead.
         isRecord(value?.error) && value.error.code === 190
         ? "invalid_grant"
@@ -461,13 +458,10 @@ export function parseTokenResponse(
   if (status < 200 || status >= 300 || value === null || error !== null) {
     return {
       ok: false,
-      failure: {
-        error,
-        grantRejected:
-          error === "invalid_grant" ||
-          error === "unauthorized_client" ||
-          error === "invalid_client",
-      },
+      grantRejected:
+        error === "invalid_grant" ||
+        error === "unauthorized_client" ||
+        error === "invalid_client",
     };
   }
   const accessToken = value.access_token;
@@ -480,7 +474,7 @@ export function parseTokenResponse(
     (tokenType !== undefined &&
       (typeof tokenType !== "string" || tokenType.toLowerCase() !== "bearer"))
   ) {
-    return { ok: false, failure: { error: null, grantRejected: false } };
+    return { ok: false, grantRejected: false };
   }
   const refresh = value.refresh_token;
   const expiresIn = Number(value.expires_in);

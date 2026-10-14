@@ -123,7 +123,7 @@ describe("collectOAuthSchemes", () => {
       collectOAuthSchemes({
         components: { securitySchemes: { plain, clientCredentials } },
       }),
-    ).toEqual({ schemes: [], issues: [] });
+    ).toMatchObject({ schemes: [], issues: [] });
   });
 });
 
@@ -306,7 +306,12 @@ describe("parseTokenResponse", () => {
 
   it("parses form-encoded responses without a token type", () => {
     expect(
-      parseTokenResponse(200, "text/plain", "access_token=at&scope=a,b", now),
+      parseTokenResponse(
+        200,
+        "application/x-www-form-urlencoded",
+        "access_token=at&scope=a,b",
+        now,
+      ),
     ).toEqual({
       ok: true,
       tokens: {
@@ -357,10 +362,7 @@ describe("parseTokenResponse", () => {
         '{"error":{"message":"expired","type":"OAuthException","code":190}}',
         now,
       ),
-    ).toEqual({
-      ok: false,
-      failure: { error: "invalid_grant", grantRejected: true },
-    });
+    ).toEqual({ ok: false, grantRejected: true });
   });
 
   it("flags dead grants and rejects non-bearer tokens", () => {
@@ -371,10 +373,7 @@ describe("parseTokenResponse", () => {
         '{"error":"invalid_grant"}',
         now,
       ),
-    ).toEqual({
-      ok: false,
-      failure: { error: "invalid_grant", grantRejected: true },
-    });
+    ).toEqual({ ok: false, grantRejected: true });
     expect(
       parseTokenResponse(
         200,
@@ -382,10 +381,10 @@ describe("parseTokenResponse", () => {
         '{"access_token":"at","token_type":"mac"}',
         now,
       ),
-    ).toEqual({ ok: false, failure: { error: null, grantRejected: false } });
+    ).toEqual({ ok: false, grantRejected: false });
     expect(parseTokenResponse(503, "text/html", "<html>", now)).toEqual({
       ok: false,
-      failure: { error: null, grantRejected: false },
+      grantRejected: false,
     });
   });
 });

@@ -54,7 +54,6 @@ export const connectionTables = {
       "scheme",
       "status",
     ])
-    .index("by_project", ["projectId"])
     .index("by_status_expiry", ["status", "pendingExpiresAt"])
     .index("by_status_updated", ["status", "updatedAt"])
     .index("by_status_renew", ["status", "renewAt"]),

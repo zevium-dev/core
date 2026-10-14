@@ -7,6 +7,7 @@ import {
   type ConnectedAccountScheme,
   type ConnectionView,
   type OAuthProviderId,
+  type ParsedOpenApiSpec,
 } from "@zevium/shared";
 
 import { internal } from "./_generated/api";
@@ -110,25 +111,14 @@ export function renewAtFor(
     : accessExpiresAt - ahead;
 }
 
-/** Latest published spec's provider-bound schemes for a live project. */
-async function publishedScheme(
+/** Live (published, not retired) project and its parsed latest spec. */
+async function publishedProject(
   ctx: QueryCtx,
   projectId: Id<"projects">,
-): Promise<ConnectedAccountScheme[] | null> {
-  const spec = await publishedSpec(ctx, projectId);
-  if (spec === null) return null;
-  try {
-    return collectOAuthSchemes(parseSpec(spec)).schemes;
-  } catch {
-    return [];
-  }
-}
-
-/** Latest published spec text of a live (published, not retired) project. */
-async function publishedSpec(
-  ctx: QueryCtx,
-  projectId: Id<"projects">,
-): Promise<string | null> {
+): Promise<{
+  project: Doc<"projects">;
+  spec: ParsedOpenApiSpec | null;
+} | null> {
   const project = await ctx.db.get(projectId);
   if (
     project === null ||
@@ -138,7 +128,13 @@ async function publishedSpec(
   ) {
     return null;
   }
-  return (await ctx.db.get(project.latestVersionId))?.spec ?? null;
+  const text = (await ctx.db.get(project.latestVersionId))?.spec;
+  if (text === undefined) return null;
+  try {
+    return { project, spec: parseSpec(text) };
+  } catch {
+    return { project, spec: null };
+  }
 }
 
 async function byPublicId(
@@ -168,11 +164,13 @@ export const prepareStart = internalQuery({
       return { ok: false, error: "organization_unavailable" };
     }
     const projectId = ctx.db.normalizeId("projects", args.projectId);
-    const schemes = projectId ? await publishedScheme(ctx, projectId) : null;
-    if (projectId === null || schemes === null) {
-      return { ok: false, error: "project_not_found" };
+    const live = projectId ? await publishedProject(ctx, projectId) : null;
+    if (live === null) return { ok: false, error: "project_not_found" };
+    const { project, spec } = live;
+    const schemes = spec ? collectOAuthSchemes(spec).schemes : [];
+    if (spec === null || schemes.length === 0) {
+      return { ok: false, error: "no_oauth_scheme" };
     }
-    if (schemes.length === 0) return { ok: false, error: "no_oauth_scheme" };
     let scheme: ConnectedAccountScheme | undefined;
     if (args.scheme !== undefined) {
       scheme = schemes.find((s) => s.name === args.scheme);
@@ -183,7 +181,7 @@ export const prepareStart = internalQuery({
       return { ok: false, error: "scheme_required" };
     }
     // Tokens are issued to Zevium's provider apps: house listings only.
-    if (!(await ctx.db.get(projectId))!.houseOperated) {
+    if (!project.houseOperated) {
       return { ok: false, error: "publisher_not_allowed" };
     }
     const client = providerClient(getOAuthProvider(scheme.provider)!);
@@ -206,10 +204,7 @@ export const prepareStart = internalQuery({
       scheme: scheme.name,
       provider: scheme.provider,
       clientId: client.clientId,
-      scopes: requestedScopes(
-        parseSpec((await publishedSpec(ctx, projectId))!),
-        scheme,
-      ),
+      scopes: requestedScopes(spec, scheme),
     };
   },
 });
@@ -582,32 +577,28 @@ export const cleanup = internalMutation({
   args: {},
   handler: async (ctx): Promise<number> => {
     const now = Date.now();
-    let removed = 0;
-    for (const status of ["pending", "exchanging"] as const) {
-      const rows = await ctx.db
-        .query("oauthConnections")
-        .withIndex("by_status_expiry", (q) =>
-          q.eq("status", status).lt("pendingExpiresAt", now - 60 * 60 * 1000),
-        )
-        .take(CLEANUP_BATCH);
-      for (const row of rows) {
-        await ctx.db.delete(row._id);
-        removed += 1;
-      }
-    }
-    for (const status of ["failed", "revoked"] as const) {
-      const rows = await ctx.db
-        .query("oauthConnections")
-        .withIndex("by_status_updated", (q) =>
-          q.eq("status", status).lt("updatedAt", now - CONNECTION_TOMBSTONE_MS),
-        )
-        .take(CLEANUP_BATCH);
-      for (const row of rows) {
-        await ctx.db.delete(row._id);
-        removed += 1;
-      }
-    }
-    return removed;
+    const query = () => ctx.db.query("oauthConnections");
+    const batches = await Promise.all([
+      ...(["pending", "exchanging"] as const).map((status) =>
+        query()
+          .withIndex("by_status_expiry", (q) =>
+            q.eq("status", status).lt("pendingExpiresAt", now - 60 * 60 * 1000),
+          )
+          .take(CLEANUP_BATCH),
+      ),
+      ...(["failed", "revoked"] as const).map((status) =>
+        query()
+          .withIndex("by_status_updated", (q) =>
+            q
+              .eq("status", status)
+              .lt("updatedAt", now - CONNECTION_TOMBSTONE_MS),
+          )
+          .take(CLEANUP_BATCH),
+      ),
+    ]);
+    const rows = batches.flat();
+    for (const row of rows) await ctx.db.delete(row._id);
+    return rows.length;
   },
 });
 

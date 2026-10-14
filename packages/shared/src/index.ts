@@ -108,13 +108,11 @@ export {
   CONNECTION_CALLBACK_PATH,
   CONNECTION_HEADER,
   CONNECTION_PENDING_TTL_MS,
-  CONNECTION_USED_HEADER,
   MAX_CONNECTION_LABEL_LENGTH,
   OAUTH_PROVIDER_EXTENSION,
   buildAuthorizationUrl,
   collectConnectionUpstreamIssues,
   collectOAuthSchemes,
-  findOAuthScheme,
   isConnectionId,
   isSafeReturnUrl,
   isSchemeName,
@@ -127,7 +125,6 @@ export {
   type ConnectionStatus,
   type ConnectionTokenFailure,
   type ConnectionView,
-  type OAuthTokenError,
   type OAuthTokenSet,
 } from "./connections.js";
 
@@ -138,7 +135,6 @@ export {
   isProviderApiHost,
   type OAuthProvider,
   type OAuthProviderId,
-  type OAuthTokenStyle,
 } from "./oauth-providers.js";
 
 export {
