@@ -74,4 +74,16 @@ crons.interval(
   internal.specImportLimits.cleanup,
   {},
 );
+/** Abandoned connection links and old failed or revoked connections. */
+crons.hourly(
+  "cleanup-oauth-connections",
+  { minuteUTC: 45 },
+  internal.connections.cleanup,
+);
+/** Long-lived connected-account tokens that would lapse unused. */
+crons.hourly(
+  "renew-oauth-connections",
+  { minuteUTC: 50 },
+  internal.connections.scheduleRenewals,
+);
 export default crons;

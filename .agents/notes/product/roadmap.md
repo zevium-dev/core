@@ -92,6 +92,7 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 | 16  | Publisher webhooks                                                                                        | [webhooks-notifications](../features/webhooks-notifications.md) |
 | 16a | #427 OpenAPI-generated Try it form — built; typed controls, validation, raw fallback and request previews | [mock-sandbox](../features/mock-sandbox.md)                     |
 | 16b | #110 Listing-scoped MCP generated tools, coordinated with P0 #428                                         | [agent-surface](../features/agent-surface.md)                   |
+| 16c | #351 Connected accounts (YouTube, TikTok, Instagram); activation #445, media #444                         | [connected-accounts](../features/connected-accounts.md)         |
 
 ### P2 — cutting edge
 

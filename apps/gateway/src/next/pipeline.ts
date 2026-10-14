@@ -2,7 +2,12 @@ import { InternalHttpCatalogueSearch } from "../catalogue-search";
 import { nextOAuth } from "./oauth";
 import type { AdmissionInput } from "./wallet";
 import { z } from "zod";
-import { sha256Hex, matchOperation, joinUpstreamUrl } from "@zevium/shared";
+import {
+  CONNECTION_HEADER,
+  sha256Hex,
+  matchOperation,
+  joinUpstreamUrl,
+} from "@zevium/shared";
 import {
   snapshot,
   keyPolicy,
@@ -28,6 +33,12 @@ import { paymentRequiredResponse } from "../payment-required";
 import { jsonError } from "../errors";
 import { assertSafeUpstreamTarget } from "../upstream-safety";
 import { forward } from "../forward";
+import {
+  InternalHttpConnections,
+  resolveCallConnection,
+  type ConnectionsBackend,
+  type ConnectionsDeps,
+} from "../connections";
 import { filterResponseHeaders } from "../headers";
 import { applyDeprecationHeaders } from "../deprecation";
 import type { WorkerDeps } from "../index";
@@ -91,6 +102,56 @@ async function routeEvidence(
   return {
     payload: value.payload,
     validUntil: Math.min(p.expiresAt, org.expiresAt),
+  };
+}
+function keyUsable(key: z.infer<typeof keyPolicy>, now: number) {
+  return !(
+    key.lifecycle === "disabled" ||
+    (key.expiresAt !== undefined && key.expiresAt <= now) ||
+    (key.graceUntil !== undefined && key.graceUntil <= now)
+  );
+}
+// One backend per isolate so its token cache survives across requests.
+let connectionsBackend: {
+  siteUrl: string;
+  backend: ConnectionsBackend;
+} | null = null;
+function nextConnections(env: NextEnv): ConnectionsBackend | undefined {
+  if (!env.CONVEX_SITE_URL || !env.GATEWAY_INTERNAL_SECRET) return undefined;
+  if (connectionsBackend?.siteUrl !== env.CONVEX_SITE_URL)
+    connectionsBackend = {
+      siteUrl: env.CONVEX_SITE_URL,
+      backend: new InternalHttpConnections({
+        siteUrl: env.CONVEX_SITE_URL,
+        internalSecret: env.GATEWAY_INTERNAL_SECRET,
+      }),
+    };
+  return connectionsBackend.backend;
+}
+/** `/connections` management on signed key and route evidence. */
+export function nextConnectionsDeps(env: NextEnv): ConnectionsDeps {
+  return {
+    authenticate: async (secret) => {
+      try {
+        const e = await keyEvidence(env, secret);
+        if (!e) return { status: "invalid" };
+        if (!keyUsable(e.key, Date.now())) return { status: "disabled" };
+        return { status: "ok", orgId: e.orgId, keyId: e.key.keyId };
+      } catch {
+        return { status: "unavailable" };
+      }
+    },
+    specSource: {
+      getPublishedSpec: async (handle, slug, consumer) => {
+        const e = await routeEvidence(env, handle, slug, consumer);
+        if (!e) return null;
+        const route = published(e.payload);
+        return e.payload.retired
+          ? { ...route, retiredAt: e.payload.retiredAt ?? 0 }
+          : route;
+      },
+    },
+    connections: nextConnections(env),
   };
 }
 function published(p: RoutePayload): PublishedSpec {
@@ -210,13 +271,7 @@ async function execute(
   try {
     evidence = await keyEvidence(env, secret ?? "", authenticatedKey);
     if (!evidence) return payment("invalid_api_key", "Invalid API key");
-    if (
-      evidence.key.lifecycle === "disabled" ||
-      (evidence.key.expiresAt !== undefined &&
-        evidence.key.expiresAt <= Date.now()) ||
-      (evidence.key.graceUntil !== undefined &&
-        evidence.key.graceUntil <= Date.now())
-    )
+    if (!keyUsable(evidence.key, Date.now()))
       return jsonError(403, "key_disabled", "API key is disabled", id);
     routeInfo = await routeEvidence(
       env,
@@ -301,6 +356,20 @@ async function execute(
       id,
     );
   }
+  // Operations bound to a provider run with the caller's connected account.
+  // Resolved before admission, so every connection failure costs 0.
+  const connection = await resolveCallConnection({
+    request,
+    spec: getParsedSpec(p),
+    operation: matched.operation,
+    upstreamUrl,
+    backend: nextConnections(env),
+    orgId: evidence.orgId,
+    projectId: p.projectId,
+    api: `${route.publisherHandle}/${route.projectSlug}`,
+    requestId: id,
+  });
+  if (connection instanceof Response) return connection;
   if (!env.NEXT_WALLET)
     return jsonError(
       503,
@@ -393,6 +462,7 @@ async function execute(
         scopes: evidence.key.scopes,
       },
       upstreamUrl,
+      ...(connection ? { connection } : {}),
     },
     undefined,
     prepareResponse,
@@ -410,6 +480,7 @@ async function execute(
   const headers = filterResponseHeaders(forwarded.response.headers);
   headers.set("x-zevium-request-id", id);
   headers.set("x-zevium-cost", String(result.admission.heldCredits));
+  if (connection) headers.set(CONNECTION_HEADER, connection.id);
   if (result.admission.pricingDecision === "free_tier")
     headers.set("x-zevium-free-tier", "1");
   applyDeprecationHeaders(headers, p, route);

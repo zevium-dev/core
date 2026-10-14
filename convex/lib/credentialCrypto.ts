@@ -3,7 +3,8 @@ import { z } from "zod";
 import type { Doc } from "../_generated/dataModel";
 type Envelope = Doc<"upstreamCredentials">["envelope"];
 export type SecretBinding = {
-  purpose: "upstream-credential" | "webhook-signing-secret";
+  purpose:
+    "upstream-credential" | "webhook-signing-secret" | "oauth-connection";
   resource: string;
   generation: number;
 };
@@ -125,6 +126,18 @@ export async function decryptSecret(
   } catch {
     throw new ConvexError("Stored credential is unavailable");
   }
+}
+
+/** Connection secrets, bound to the connection and field (no swapping). */
+export function connectionSecretBinding(
+  connectionId: string,
+  field: "access" | "refresh" | "verifier",
+): SecretBinding {
+  return {
+    purpose: "oauth-connection",
+    resource: `${connectionId}:${field}`,
+    generation: 1,
+  };
 }
 
 export function webhookBinding(

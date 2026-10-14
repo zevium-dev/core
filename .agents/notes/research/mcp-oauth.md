@@ -15,7 +15,7 @@ OAuth shows up in four places in an agent-first, pay-per-call gateway:
 | #   | Role                                                                                                    | Direction                                  | Zevium today                                                                                                  | Recommendation                                                    |
 | --- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | R1  | Sign-in to the product (GitHub, Google)                                                                 | Zevium is an OAuth **client** of identity  | Clerk: email+password and Google                                                                              | Config only: enable GitHub in Clerk                               |
-| R2  | **Connected accounts**: a consumer links its own third-party account and the gateway injects that token | Zevium is an OAuth **client** of upstreams | Nothing (#351, exploring)                                                                                     | **P2**: only once publisher APIs act _on the consumer's_ account  |
+| R2  | **Connected accounts**: a consumer links its own third-party account and the gateway injects that token | Zevium is an OAuth **client** of upstreams | Prioritized 2026-10-11; built in PR (#351): Zevium-owned clients for YouTube, TikTok, Instagram               | See [provider research](connected-accounts-providers.md)          |
 | R3  | **OAuth for MCP clients**: "click to connect" from Claude, ChatGPT, Cursor                              | Clerk **issues**; gateway verifies         | **Built in #401**: Clerk is the authorization server, the gateway is the resource server. Off until activated | **P0**: activate, run live acceptance, close gaps G2–G8 (§1)      |
 | R4  | The same authorization server for another first-party client (e.g. a spreadsheet add-on)                | Clerk issues tokens                        | n/a                                                                                                           | Reusable after R3, but needs its own client, resource and consent |
 
@@ -243,7 +243,9 @@ credentials** (machine-to-machine) or expiring tokens.
 - Keep "the spec is the source of truth": publishers can declare the scheme in OpenAPI
   `securitySchemes`, but secret material lives only in upstream credentials, never in the spec.
 
-### 5.3 P2: consumer-connected accounts (R2, #351)
+### 5.3 Consumer-connected accounts (R2, #351)
+
+> Update 2026-10-11: prioritized and built as Zevium-owned provider clients. Current research: [connected-accounts-providers](connected-accounts-providers.md); design: [design/connected-accounts](../design/connected-accounts.md). Text below is the original requirement sketch.
 
 Only relevant if Zevium lists APIs that act **on the consumer's own third-party account**, e.g. a
 publisher wraps Google Ads and each consumer org must authorise its own Ads account. Feature
@@ -287,14 +289,14 @@ live dashboard first; current provider config is not recorded in the repo.
 
 ## 7. Proposed phases
 
-| Phase     | Scope                                                                            | Exit criteria                                                                                    |
-| --------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 0         | Activation + live acceptance (G1, G8)                                            | §4 results recorded in agent-surface; Claude.ai and Claude Code connect and make a paid call     |
-| 1         | G2 identity fix + G3 `key` argument removal                                      | No `invalid_token` for usable tokens; `call_api` schema has no `key`                             |
-| 2         | G4 consent page with balances, G5 grant management, G6 who-pays output           | User sees balances at consent and can list and disconnect grants                                 |
-| 3         | G7 annotations + MCP OAuth e2e                                                   | Directory submission ready; `e2e/05-mcp-oauth.sh` green                                          |
-| 4         | Publisher upstream `oauth2_client_credentials` with off-path, serialized refresh | Publisher connection test passes against an OAuth upstream; gateway never sees the client secret |
-| 5 (later) | Consumer-connected accounts + 428 remediation (#351)                             | Only with real publisher demand                                                                  |
+| Phase | Scope                                                                            | Exit criteria                                                                                    |
+| ----- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 0     | Activation + live acceptance (G1, G8)                                            | §4 results recorded in agent-surface; Claude.ai and Claude Code connect and make a paid call     |
+| 1     | G2 identity fix + G3 `key` argument removal                                      | No `invalid_token` for usable tokens; `call_api` schema has no `key`                             |
+| 2     | G4 consent page with balances, G5 grant management, G6 who-pays output           | User sees balances at consent and can list and disconnect grants                                 |
+| 3     | G7 annotations + MCP OAuth e2e                                                   | Directory submission ready; `e2e/05-mcp-oauth.sh` green                                          |
+| 4     | Publisher upstream `oauth2_client_credentials` with off-path, serialized refresh | Publisher connection test passes against an OAuth upstream; gateway never sees the client secret |
+| 5     | Consumer-connected accounts (#351), prioritized 2026-10-11                       | Built in PR; activation needs provider app reviews                                               |
 
 Notes to update when built: [agent-surface](../features/agent-surface.md) (MCP OAuth tech, gaps
 closed), [api-keys](../features/api-keys.md) (MCP key rule), [accounts-orgs](../features/accounts-orgs.md)

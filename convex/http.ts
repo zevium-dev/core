@@ -18,6 +18,7 @@ import { Webhook } from "svix";
 import { z } from "zod";
 import { canonicalJson, sha256Hex } from "@zevium/shared";
 import { httpAction } from "./_generated/server";
+import { registerConnectionRoutes } from "./connectionsHttp";
 import { internal } from "./_generated/api";
 const text = z.string().min(1).max(4096);
 const timestamp = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -416,4 +417,5 @@ for (const path of ["/gateway-search", "/web-search"] as const)
       }
     }),
   });
+registerConnectionRoutes(router);
 export default router;

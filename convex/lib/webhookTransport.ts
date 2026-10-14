@@ -38,6 +38,8 @@ type OpenedResponse = {
 };
 
 export type PinnedRequest = {
+  /** Defaults to POST; GET sends no body. */
+  method?: "GET" | "POST";
   url: URL;
   address: string;
   family: 4 | 6;
@@ -122,12 +124,15 @@ function headerCount(headers: IncomingHttpHeaders): number {
   );
 }
 
-async function consumeBoundedResponse(response: OpenedResponse): Promise<void> {
+async function consumeBoundedResponse(
+  response: OpenedResponse,
+): Promise<Uint8Array[]> {
   if (headerCount(response.headers) > WEBHOOK_MAX_HEADERS) {
     response.abort();
     throw fail("Webhook response has too many headers", false);
   }
   let bytes = 0;
+  const chunks: Uint8Array[] = [];
   try {
     for await (const chunk of response.body) {
       bytes += chunk.byteLength;
@@ -135,10 +140,12 @@ async function consumeBoundedResponse(response: OpenedResponse): Promise<void> {
         response.abort();
         throw fail("Webhook response body is too large", false);
       }
+      chunks.push(chunk);
     }
   } finally {
     response.cleanup();
   }
+  return chunks;
 }
 
 function requestError(
@@ -180,7 +187,7 @@ async function openNodePinnedRequest(
       hostname,
       port: input.url.port || 443,
       path: `${input.url.pathname}${input.url.search}`,
-      method: "POST",
+      method: input.method ?? "POST",
       headers: input.headers,
       servername: isIP(hostname) ? undefined : hostname,
       lookup: createPinnedLookup(input.address, input.family),
@@ -246,7 +253,7 @@ async function openNodePinnedRequest(
         },
       });
     });
-    request.end(input.body);
+    request.end(input.method === "GET" ? undefined : input.body);
   });
 }
 
@@ -302,4 +309,43 @@ export async function deliverPinnedHttps(
     }
     currentUrl = nextUrl;
   }
+}
+
+/**
+ * One HTTPS request to an OAuth provider endpoint: same DNS pinning,
+ * public-address and size limits as webhooks. Redirects are not followed; an
+ * endpoint that redirects is treated as a failed response.
+ */
+export async function requestPinnedHttpsForBody(
+  input: {
+    method: "GET" | "POST";
+    url: URL;
+    headers: Readonly<Record<string, string>>;
+    body?: string;
+  },
+  dependencies: WebhookTransportDependencies = NODE_DEPENDENCIES,
+): Promise<{ status: number; contentType: string; body: string }> {
+  const deadlineAt = dependencies.now() + WEBHOOK_DEADLINE_MS;
+  const pinned = await resolveAndValidate(
+    input.url,
+    dependencies.resolveHostname,
+    deadlineAt,
+    dependencies.now,
+  );
+  const response = await dependencies.openPinnedRequest({
+    method: input.method,
+    url: input.url,
+    address: pinned.address,
+    family: pinned.family,
+    headers: input.headers,
+    body: input.body ?? "",
+    deadlineAt,
+  });
+  const chunks = await consumeBoundedResponse(response);
+  const contentType = response.headers["content-type"];
+  return {
+    status: response.statusCode,
+    contentType: typeof contentType === "string" ? contentType : "",
+    body: Buffer.concat(chunks).toString("utf8"),
+  };
 }

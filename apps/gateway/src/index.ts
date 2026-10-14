@@ -1,5 +1,5 @@
 import { handleListingDocs } from "./generated-contract";
-import { nextDeps } from "./next/pipeline";
+import { nextConnectionsDeps, nextDeps } from "./next/pipeline";
 import { wakeWallet, readWalletFailure } from "./next/wake";
 import type { NextEnv } from "./next/snapshots";
 export { EdgeOAuthDO } from "./next/oauth";
@@ -24,6 +24,7 @@ import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
+import { handleConnectionsRequest, type ConnectionsDeps } from "./connections";
 
 import { applyGatewaySecurityHeaders } from "./security-headers";
 
@@ -61,6 +62,8 @@ export type WorkerDeps = PipelineDeps & {
   oauthVerifier?: McpOAuthVerifier;
   /** Credential-free source for discovery, docs, and keyless mocks. */
   publicSpecSource: PublicSpecSource;
+  /** Test-only override for `/connections`; production builds it from env. */
+  connectionsDeps?: ConnectionsDeps;
 };
 
 // Test-mode singletons (module scope per isolate). Production never sets GATEWAY_TEST_MODE.
@@ -163,6 +166,7 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
  * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
+ * - /connections — connected-account management + provider callback
  * - /internal/next-wake — authenticated wallet coordination
  * - /health
  */
@@ -312,6 +316,14 @@ async function dispatchRequest(
       ctx,
       route,
     );
+  }
+
+  if (parts[0] === "connections") {
+    const response = await handleConnectionsRequest(
+      request,
+      testDeps?.connectionsDeps ?? nextConnectionsDeps(env),
+    );
+    if (response) return response;
   }
 
   const mockRoute = parseMockPath(url.pathname);

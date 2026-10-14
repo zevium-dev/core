@@ -29,6 +29,7 @@ One required AES-GCM envelope binds purpose/resource/generation/key version. Can
 - 2026-07-19 — Gateway injects publisher upstream credentials on forwarded calls (commit `a1026c1`).
 - 2026-08-12 — Dual-envelope (`sealed*` v2 + legacy `ciphertext`) encryption with AAD binding (commit `1657325`, "harden control-plane trust boundaries").
 - 2026-10-10 — House listings will store Zevium's own aggregator keys (treg, RapidAPI) as publisher credentials. [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
+- 2026-10-11 — Consumer OAuth tokens (connected accounts) reuse this keyring with their own bindings; Zevium's provider client secrets live only in Convex env (`OAUTH_<CLIENT>_CLIENT_SECRET`), never in upstream headers or tables. [connected-accounts](connected-accounts.md)
 - 2026-10-10 — Consumer-side OAuth tokens (connected accounts) may reuse this envelope encryption; exploring. [decision](../decisions/2026-10-10-no-byok-connected-accounts.md)
 
 ## Open questions

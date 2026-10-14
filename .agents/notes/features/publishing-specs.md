@@ -64,8 +64,11 @@ Optional house subsidy cap #429: assessed and skipped on 2026-10-11 under the ow
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
+- **Connected-account schemes**: `oauth2` + `authorizationCode` + `x-zevium-oauth-provider` are validated on save/publish (known provider, registry endpoints, provider-allowed scopes, `servers[0].url` host among the provider's API hosts, ≤ 4 schemes, one per operation). Other OAuth schemes stay documentation only. [connected-accounts](connected-accounts.md)
+
 ## Decisions
 
+- 2026-10-11 — ACCEPTED: `oauth2` authorization-code schemes with `x-zevium-oauth-provider` declare connected accounts; endpoints come from Zevium's registry. [Decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md).
 - 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
 
 - 2026-10-11 — ACCEPTED: Publisher spec is the contract; generated surfaces #428, existing MCP #110, form playground #427. Zevium writes house specs. [Decision](../decisions/2026-10-11-openapi-as-contract.md).

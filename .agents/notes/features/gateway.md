@@ -45,8 +45,11 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
+- **Connected accounts**: `/connections` (API key) and `/connections/callback`. In the call pipeline, operations bound to a provider (`x-zevium-oauth-provider`) resolve the caller org's connection before wallet admission (failures cost 0), refuse upstream hosts outside the provider's API hosts (422), and `forward()` sets `Authorization: Bearer`. [connected-accounts](connected-accounts.md)
+
 ## Decisions
 
+- 2026-10-11 — ACCEPTED: connected accounts (API only); Zevium owns one OAuth client per provider; tokens only to provider API hosts. [Decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md).
 - 2026-10-11 — ACCEPTED and built in PR #441: bounded synchronous single-flight cold fills; 1s issuance-only clock skew. Negative results do not retain polling identities; idle state cleanup and per-isolate cold budgets bound abuse. [Decision](../decisions/2026-10-11-edge-cold-fill-and-clock-skew.md).
 
 - 2026-10-11 — ACCEPTED: DO spend authority and 30s snapshot design; freeze/drain before negative adjustments, no fixed-price consumer debt. #353/#430. [Decision](../decisions/2026-10-11-edge-authority-and-lots.md).

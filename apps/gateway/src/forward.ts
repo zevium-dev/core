@@ -13,6 +13,8 @@ export async function forward(
     published: PublishedSpec;
     verified: VerifiedKey;
     upstreamUrl: URL;
+    /** Caller's connected account; its token replaces any publisher auth. */
+    connection?: { id: string; accessToken: string };
   },
   fetchImpl: typeof fetch = fetch,
   prepareResponse?: (response: Response) => Promise<Response>,
@@ -21,6 +23,12 @@ export async function forward(
   const upstreamHeaders = filterRequestHeaders(request.headers);
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
     upstreamHeaders.set(name, value);
+  }
+  if (admission.connection) {
+    upstreamHeaders.set(
+      "authorization",
+      `Bearer ${admission.connection.accessToken}`,
+    );
   }
   const idempotencyKey = upstreamHeaders.get("idempotency-key");
   if (idempotencyKey !== null) {

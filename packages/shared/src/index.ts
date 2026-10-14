@@ -105,6 +105,39 @@ export {
 export { synthesize } from "./mock.js";
 
 export {
+  CONNECTION_CALLBACK_PATH,
+  CONNECTION_HEADER,
+  CONNECTION_PENDING_TTL_MS,
+  MAX_CONNECTION_LABEL_LENGTH,
+  OAUTH_PROVIDER_EXTENSION,
+  buildAuthorizationUrl,
+  collectConnectionUpstreamIssues,
+  collectOAuthSchemes,
+  isConnectionId,
+  isSafeReturnUrl,
+  isSchemeName,
+  normalizeConnectionLabel,
+  operationConnection,
+  parseTokenResponse,
+  requestedScopes,
+  type ConnectedAccountScheme,
+  type ConnectionRequirement,
+  type ConnectionStatus,
+  type ConnectionTokenFailure,
+  type ConnectionView,
+  type OAuthTokenSet,
+} from "./connections.js";
+
+export {
+  OAUTH_PROVIDERS,
+  getOAuthProvider,
+  isOAuthProviderId,
+  isProviderApiHost,
+  type OAuthProvider,
+  type OAuthProviderId,
+} from "./oauth-providers.js";
+
+export {
   generateSpecContract,
   GenerationError,
   GENERATOR_VERSION,
