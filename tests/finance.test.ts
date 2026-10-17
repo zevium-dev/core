@@ -30,7 +30,7 @@ import {
 import { requestClose, finishClose } from "../convex/money/barrier";
 import { grantLot } from "../convex/money/lots";
 import { beginDustMerge, moveDustPage } from "../convex/money/dust";
-import { internal } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import { NOW, SECRET, organization } from "./fixtures";
 import type { Id } from "../convex/_generated/dataModel";
 import {
@@ -1582,5 +1582,189 @@ describe("Checkout fee legal gate", () => {
         }),
     ).rejects.toThrow("Org admin or owner role required");
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("quotes principal, estimated fee and total before payment; misconfigured fee blocks the pack", async () => {
+    const t = harness();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", organization("checkout-quote"));
+    });
+    const admin = t.withIdentity({
+      subject: "user_quote",
+      org_id: "org_checkout-quote",
+      org_role: "org:admin",
+    });
+    const pack10 = async () =>
+      (await admin.query(api.billing.getBillingState, {})).packs.find(
+        (p) => p.packId === "pack_10",
+      );
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "");
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_CENTS", "42");
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "price_fee");
+    vi.stubEnv("NEXT_STRIPE_PRICE_PACK_10", "");
+    expect(await pack10()).toMatchObject({ available: false });
+    vi.stubEnv("NEXT_STRIPE_PRICE_PACK_10", "price_credits");
+    expect(await pack10()).toMatchObject({
+      priceCents: 1000,
+      feeCents: 0,
+      totalCents: 1000,
+      available: true,
+    });
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "true");
+    expect(await pack10()).toMatchObject({
+      priceCents: 1000,
+      credits: 100000,
+      feeCents: 42,
+      totalCents: 1042,
+      available: true,
+    });
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "");
+    expect(await pack10()).toMatchObject({ available: false });
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "price_fee");
+    vi.stubEnv("NEXT_STRIPE_PRICE_PACK_10", "");
+    expect(await pack10()).toMatchObject({ available: false });
+  });
+  describe("createCheckout verifies Stripe prices before opening Checkout", () => {
+    const good = {
+      price_credits: { unit_amount: 1000 },
+      price_fee: { unit_amount: 42 },
+    } as const;
+    async function checkout(
+      feeEnabled: boolean,
+      priceChange?: {
+        id: keyof typeof good;
+        field: string;
+        value: unknown;
+      },
+    ) {
+      const t = harness();
+      await t.run(async (ctx) => {
+        await ctx.db.insert("organizations", {
+          ...organization("checkout-prices"),
+          stripeCustomerId: "cus_prices",
+        });
+      });
+      vi.stubEnv("NEXT_STRIPE_PRICE_PACK_10", "price_credits");
+      vi.stubEnv("NEXT_CARD_FEE_ENABLED", feeEnabled ? "true" : "");
+      vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_CENTS", "42");
+      vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "price_fee");
+      const prices: Record<string, Record<string, unknown>> = {};
+      for (const [id, p] of Object.entries(good))
+        prices[`/v1/prices/${id}`] = {
+          id,
+          object: "price",
+          active: true,
+          type: "one_time",
+          currency: "usd",
+          ...p,
+        };
+      if (priceChange)
+        prices[`/v1/prices/${priceChange.id}`]![priceChange.field] =
+          priceChange.value;
+      const responses: Record<string, Record<string, unknown>> = {
+        "/v1/account": { id: PLATFORM, default_currency: "usd" },
+        "/v1/balance": { livemode: false },
+        ...prices,
+      };
+      const sessionPosts: URLSearchParams[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init),
+            path = new URL(request.url).pathname;
+          if (request.method === "POST" && path === "/v1/checkout/sessions") {
+            sessionPosts.push(new URLSearchParams(await request.text()));
+            return Response.json({
+              id: "cs_prices",
+              object: "checkout.session",
+              url: "https://checkout.stripe.com/c/cs_prices",
+            });
+          }
+          const value = responses[path];
+          if (!value) throw new Error(`Unexpected fixture request ${path}`);
+          return Response.json(value);
+        }),
+      );
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const run = t
+        .withIdentity({
+          subject: "user_prices",
+          org_id: "org_checkout-prices",
+          org_role: "org:admin",
+        })
+        .action(api.billing.createCheckout, { packId: "pack_10" });
+      return { run, sessionPosts, error };
+    }
+    it.each([
+      ["inactive", "price_credits", "active", false, "inactive"],
+      ["recurring", "price_credits", "type", "recurring", "not one_time"],
+      ["wrong currency", "price_credits", "currency", "eur", "currency"],
+      [
+        "wrong credit amount",
+        "price_credits",
+        "unit_amount",
+        999,
+        "unit_amount",
+      ],
+      ["wrong fee amount", "price_fee", "unit_amount", 41, "unit_amount"],
+    ] as const)(
+      "%s price refuses Checkout with a generic error",
+      async (_name, id, field, value, check) => {
+        const { run, sessionPosts, error } = await checkout(true, {
+          id,
+          field,
+          value,
+        });
+        await expect(run).rejects.toThrow(
+          "Checkout is unavailable. Please try again.",
+        );
+        expect(sessionPosts).toHaveLength(0);
+        expect(error).toHaveBeenCalledWith("createCheckout failed", {
+          priceId: id,
+          check,
+        });
+      },
+    );
+    it("opens Checkout with credit and fee lines when the fee is enabled", async () => {
+      const { run, sessionPosts } = await checkout(true);
+      expect(await run).toMatchObject({
+        url: "https://checkout.stripe.com/c/cs_prices",
+      });
+      expect(sessionPosts).toHaveLength(1);
+      const body = sessionPosts[0]!;
+      expect(body.get("line_items[0][price]")).toBe("price_credits");
+      expect(body.get("line_items[1][price]")).toBe("price_fee");
+      expect(body.get("custom_text[submit][message]")).toContain(
+        "Estimated card fee",
+      );
+    });
+    it("opens Checkout with only the credit line when the fee is disabled", async () => {
+      const { run, sessionPosts } = await checkout(false);
+      expect(await run).toMatchObject({
+        url: "https://checkout.stripe.com/c/cs_prices",
+      });
+      expect(sessionPosts).toHaveLength(1);
+      const body = sessionPosts[0]!;
+      expect(body.get("line_items[0][price]")).toBe("price_credits");
+      expect(body.has("line_items[1][price]")).toBe(false);
+      expect(body.has("custom_text[submit][message]")).toBe(false);
+    });
+  });
+  it("replays the snapshotted price after fee configuration changes, crediting principal only", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx));
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "");
+    for (let i = 0; i < 2; i++)
+      expect(await t.run((ctx) => projectPaid(ctx, f.paid))).toBe(f.paymentId);
+    const p = (await t.run((ctx) => ctx.db.get(f.paymentId)))!;
+    expect(p).toMatchObject({
+      amountPaidCents: 1020,
+      creditFaceValueCents: 1000,
+      processingFeeChargedCents: 20,
+      processingFeeActualCents: 35,
+      credits: 100000,
+    });
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      100000,
+    );
   });
 });

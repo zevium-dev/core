@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkoutDisplay,
   checkoutPackButton,
+  checkoutPackPrice,
   checkoutStartFailureMessage,
   checkoutStateFromStatus,
   connectedAccountDisplay,
@@ -69,6 +70,12 @@ describe("checkoutDisplay", () => {
     });
   });
 
+  it("disables a pack whose fee quote is unavailable", () => {
+    expect(checkoutPackButton("pack_10", null, false, "$10", false)).toEqual({
+      disabled: true,
+      label: "Unavailable",
+    });
+  });
   it("uses a safe checkout-start error when no server message is available", () => {
     expect(checkoutStartFailureMessage()).toBe(
       "Could not start secure checkout.",
@@ -76,6 +83,27 @@ describe("checkoutDisplay", () => {
     expect(checkoutStartFailureMessage("  Checkout unavailable  ")).toBe(
       "Checkout unavailable",
     );
+  });
+});
+
+describe("checkoutPackPrice", () => {
+  it("shows principal, estimated fee and total before payment", () => {
+    expect(
+      checkoutPackPrice({ priceCents: 1000, feeCents: 59, totalCents: 1059 }),
+    ).toEqual({
+      total: "$10.59",
+      lines: [
+        { label: "Credits", amount: "$10.00" },
+        { label: "Estimated card fee", amount: "$0.59" },
+        { label: "Total", amount: "$10.59" },
+      ],
+    });
+  });
+
+  it("shows no fee lines while the card fee is disabled", () => {
+    expect(
+      checkoutPackPrice({ priceCents: 1000, feeCents: 0, totalCents: 1000 }),
+    ).toEqual({ total: "$10.00", lines: [] });
   });
 });
 

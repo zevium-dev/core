@@ -38,6 +38,26 @@ export const CREDIT_PACKS = [
   { id: "pack_50", amount: 5000, credits: 500000 },
   { id: "pack_100", amount: 10000, credits: 1000000 },
 ] as const;
+type PackId = (typeof CREDIT_PACKS)[number]["id"];
+/**
+ * Single pack quote for billing state and Checkout. Legal #318 gate: the fee is
+ * off unless the owner enables it, configured per pack and never recalculated
+ * against the actual charge. null means the pack is misconfigured (no credit
+ * price, or an enabled fee without amount/price), so it cannot be sold.
+ */
+export function packQuote(packId: PackId) {
+  const key = packId.toUpperCase();
+  const creditPriceId = process.env[`NEXT_STRIPE_PRICE_${key}`];
+  if (!creditPriceId) return null;
+  const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
+  if (!enabled)
+    return { creditPriceId, enabled, feeCents: 0, feeLinePriceId: undefined };
+  const feeCents = Number(process.env[`NEXT_STRIPE_FEE_${key}_CENTS`]);
+  const feeLinePriceId = process.env[`NEXT_STRIPE_FEE_${key}_PRICE`];
+  if (!Number.isSafeInteger(feeCents) || feeCents <= 0 || !feeLinePriceId)
+    return null;
+  return { creditPriceId, enabled, feeCents, feeLinePriceId };
+}
 export const prepareCheckoutIntent = internalMutation({
   args: { packId: pack, customerId: v.string() },
   handler: async (ctx, args) => {
@@ -46,25 +66,14 @@ export const prepareCheckoutIntent = internalMutation({
     if (org.stripeCustomerId !== args.customerId)
       throw new ConvexError("Checkout customer mismatch");
     const selected = CREDIT_PACKS.find((p) => p.id === args.packId)!;
-    const stripeCreditPriceId =
-      process.env[`NEXT_STRIPE_PRICE_${args.packId.toUpperCase()}`];
-    if (!stripeCreditPriceId) throw new ConvexError("Credit pack unavailable");
-    // Legal #318 gate. Estimate is configured, never recalculated against the actual charge.
-    const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
-    const fee = enabled
-      ? Number(
-          process.env[`NEXT_STRIPE_FEE_${args.packId.toUpperCase()}_CENTS`],
-        )
-      : 0;
-    const feeLinePriceId = enabled
-      ? process.env[`NEXT_STRIPE_FEE_${args.packId.toUpperCase()}_PRICE`]
-      : undefined;
-    if (
-      !Number.isSafeInteger(fee) ||
-      fee < 0 ||
-      (enabled && (!feeLinePriceId || fee === 0))
-    )
-      throw new ConvexError("Fee quote unavailable");
+    const quote = packQuote(args.packId);
+    if (!quote) throw new ConvexError("Credit pack unavailable");
+    const {
+      creditPriceId: stripeCreditPriceId,
+      feeCents: fee,
+      feeLinePriceId,
+      enabled,
+    } = quote;
     const now = Date.now();
     const id = await ctx.db.insert("checkoutIntents", {
       organizationId: org._id,
@@ -116,6 +125,14 @@ export const attachCheckoutSession = internalMutation({
     });
   },
 });
+class CheckoutPriceMismatch extends Error {
+  constructor(
+    readonly priceId: string,
+    readonly check: string,
+  ) {
+    super("Stripe price does not match configured amount");
+  }
+}
 export const createCheckout = action({
   args: { packId: pack },
   handler: async (
@@ -138,6 +155,29 @@ export const createCheckout = action({
         internal.billing.prepareCheckoutIntent,
         { ...args, customerId },
       );
+      // Paid webhook rejects any line that differs from the intent and grants
+      // nothing, so a misconfigured env must fail here, before money moves.
+      const lines = [
+        [intent.stripeCreditPriceId, intent.creditFaceValueCents],
+        ...(intent.feeLinePriceId
+          ? [[intent.feeLinePriceId, intent.processingFeeQuotedCents] as const]
+          : []),
+      ] as const;
+      const prices = await Promise.all(
+        lines.map(([id]) => stripe.prices.retrieve(id)),
+      );
+      prices.forEach((p, i) => {
+        const failed = !p.active
+          ? "inactive"
+          : p.type !== "one_time"
+            ? "not one_time"
+            : p.currency !== intent.currency
+              ? "currency"
+              : p.unit_amount !== lines[i]![1]
+                ? "unit_amount"
+                : null;
+        if (failed) throw new CheckoutPriceMismatch(lines[i]![0], failed);
+      });
       const session = await stripe.checkout.sessions.create(
         {
           mode: "payment",
@@ -148,7 +188,7 @@ export const createCheckout = action({
                 custom_text: {
                   submit: {
                     message:
-                      "Processing fee is an estimate. Your total will not change after payment.",
+                      "Estimated card fee is included. Your total will not change after payment.",
                   },
                 },
               }
@@ -173,7 +213,16 @@ export const createCheckout = action({
         sessionId: session.id,
       });
       return { url: session.url, checkoutIntentId: intent._id };
-    } catch {
+    } catch (e) {
+      // Ids and check names only: Stripe error bodies stay out of logs.
+      console.error(
+        "createCheckout failed",
+        e instanceof CheckoutPriceMismatch
+          ? { priceId: e.priceId, check: e.check }
+          : e instanceof ConvexError
+            ? { reason: String(e.data) }
+            : { error: e instanceof Error ? e.name : "unknown" },
+      );
       throw new ConvexError("Checkout is unavailable. Please try again.");
     }
   },
@@ -461,11 +510,17 @@ export const getBillingState = query({
         lockedCredits: wallet?.lockedCredits ?? 0,
       },
       packs: access.capabilities.manageBilling
-        ? CREDIT_PACKS.map((p) => ({
-            packId: p.id,
-            priceCents: p.amount,
-            credits: p.credits,
-          }))
+        ? CREDIT_PACKS.map((p) => {
+            const feeCents = packQuote(p.id)?.feeCents;
+            return {
+              packId: p.id,
+              priceCents: p.amount,
+              credits: p.credits,
+              available: feeCents !== undefined,
+              feeCents: feeCents ?? 0,
+              totalCents: p.amount + (feeCents ?? 0),
+            };
+          })
         : [],
       checkout,
       payments: payments.map((p) => ({
