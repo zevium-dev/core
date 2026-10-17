@@ -129,7 +129,7 @@ Per-surface spec:
 | Theme toggle                    | instant swap; icon rotates 90° over `instant`. Fix current hydration mismatch                                                            |
 | Skeletons                       | shadcn `<Skeleton>` shimmer; skeleton→content = crossfade `fast`, layout-stable (skeleton matches final dimensions exactly — zero shift) |
 
-Landing page only (delight budget): magnetic cursor-pull on primary CTA + social links (`SPRING.cursor`, strength ≤0.3, off for reduced motion + touch), hero copy staggered entrance (`DUR.slow`, stagger 0.15s), one `<NumberTicker>` stat row. That's the whole budget — no orbs, no beams, no ripples, no word-rotate.
+Landing page only (delight budget): magnetic cursor-pull on primary CTA + social links (`SPRING.cursor`, strength ≤0.3, off for reduced motion + touch), hero copy staggered entrance (`DUR.slow`, stagger 0.15s), one `<NumberTicker>` stat row. That's the whole budget — no orbs, no beams, no ripples, no word-rotate. Owner exception 2026-10-17: the one-shot WIP illustrations on `/privacy`, `/terms`, `/support` (`DUR.slow`, stagger-indexed sequencing; [decision](../decisions/2026-10-17-legal-pages-wip.md)).
 
 ## Loading & perceived speed
 

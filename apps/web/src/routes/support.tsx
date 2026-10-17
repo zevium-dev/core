@@ -21,7 +21,7 @@ function SupportPage() {
   return (
     <WipPage
       title="Support"
-      lede="We're building a full help center. Until then, email reaches the team directly."
+      lede="We're building a full help center. Until then, email us or start with the docs."
       illustration="support"
     >
       <div className="flex flex-wrap justify-center gap-3">

@@ -1,6 +1,6 @@
 # Legal and support pages ship as work in progress
 
-> Date: 2026-10-17 · Status: accepted (built, not committed) · Decided by: owner
+> Date: 2026-10-17 · Status: accepted (built) · Decided by: owner
 
 ## Decision
 
@@ -25,7 +25,7 @@ today: how to contact Zevium.
 - Footer links to all three pages from landing, docs and the pages themselves
   (shared `SiteFooter`).
 
-## Follow-ups (owner)
+## Follow-ups (owner) — #463
 
 - Confirm or replace `SUPPORT_EMAIL`, and make sure the inbox receives mail
   before the directory submission.

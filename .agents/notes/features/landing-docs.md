@@ -23,7 +23,7 @@ Public front door and integration help. Landing page pitches the agent-first mar
 ### Privacy, terms and support — `/privacy`, `/terms`, `/support`
 
 - Public pages required by the Claude Connectors Directory listing. Each is marked "In progress": a short illustration plays once, then the page says the policy is being finalized and how to reach Zevium by email. No legal text yet
-- Support offers "Email support" and "Read the docs"
+- Support offers "Email {SUPPORT_EMAIL}" and "Read the docs"; real policy text and inbox confirmation tracked in #463
 
 ### Integrate (leaving the app)
 
