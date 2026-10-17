@@ -108,7 +108,7 @@ PY
 
 Owner verifies the CLI target and deploy-key scope, then runs `pnpm exec convex import --replace-all --deployment "$ACTIVATION_CONVEX_DEPLOYMENT" .tmp/empty-control-plane.zip`. Keep the confirmation prompt. Do this separately for each approved disposable deployment. Do not use a broad public clear mutation or relax schema validation. Inspect component queues separately: stop/cancel old scheduled/provider/email jobs before the wipe, and explicitly clear disposable component data through the component dashboard/import scope where required. A root import must not be assumed to clear external provider state or all component queues.
 
-Set Convex runtime variables on that exact target, then push **root** schema/functions: owner-selected development uses `pnpm exec convex dev --once`; production uses its scoped `CONVEX_DEPLOY_KEY` and `pnpm exec convex deploy`. Inspect the target before confirming. Generated bindings must match the reviewed tree. Verify 36 application tables plus 28 component tables and no registry/machine-payment/release-proof tables.
+Set Convex runtime variables on that exact target, then push **root** schema/functions: owner-selected development uses `pnpm exec convex dev --once`; production uses its scoped `CONVEX_DEPLOY_KEY` and `pnpm exec convex deploy`. Inspect the target before confirming. Generated bindings must match the reviewed tree. Verify 38 application tables (`contracts/tables.json`) plus 28 component tables and no registry/machine-payment/release-proof tables.
 
 ## 6. Deploy Worker migrations, then web
 

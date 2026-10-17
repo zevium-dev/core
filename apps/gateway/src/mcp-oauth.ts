@@ -9,7 +9,15 @@ import {
 
 export const MCP_SCOPES = ["user:org:read", "zevium:mcp:execute"];
 export type McpOAuthConfig = { issuer: string; resource: string };
-export type McpOAuthOutcome = VerifyOutcome | { status: "insufficient_scope" };
+/** `keyless`: a verified user/org with no usable API key. The session stays
+ * authenticated so clients don't loop on invalid_token; paid tools explain.
+ * `keyState`: `provisioning` while Convex auto-creates the member's key (first
+ * connect); `disabled` when the member's current key is disabled. */
+export type KeylessState = "missing" | "provisioning" | "disabled";
+export type McpIdentityOutcome =
+  VerifyOutcome | { status: "keyless"; orgId: string; keyState: KeylessState };
+export type McpOAuthOutcome =
+  McpIdentityOutcome | { status: "insufficient_scope" };
 export interface McpOAuthVerifier {
   verify(token: string): Promise<McpOAuthOutcome>;
 }
@@ -286,7 +294,7 @@ export class ClerkMcpOAuthVerifier implements McpOAuthVerifier {
   async #resolveIdentity(
     userId: string,
     orgId: string,
-  ): Promise<VerifyOutcome> {
+  ): Promise<McpIdentityOutcome> {
     try {
       const res = await this.#fetch(`${this.options.siteUrl}/mcp-identity`, {
         method: "POST",
@@ -301,12 +309,20 @@ export class ClerkMcpOAuthVerifier implements McpOAuthVerifier {
       if (!res.ok) return { status: "unavailable" };
       const value: unknown = await res.json();
       if (value === null) return { status: "invalid" };
-      if (
-        !record(value) ||
-        value.orgId !== orgId ||
-        typeof value.keyId !== "string" ||
-        !value.keyId
-      )
+      if (!record(value) || value.orgId !== orgId)
+        return { status: "unavailable" };
+      if (value.keyId === null)
+        return {
+          status: "keyless",
+          orgId,
+          keyState:
+            value.disabled === true
+              ? "disabled"
+              : value.provisioning === true
+                ? "provisioning"
+                : "missing",
+        };
+      if (typeof value.keyId !== "string" || !value.keyId)
         return { status: "unavailable" };
       const key: VerifiedKey = {
         orgId,

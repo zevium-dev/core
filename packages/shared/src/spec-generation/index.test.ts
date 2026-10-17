@@ -43,7 +43,7 @@ describe("published spec generation", () => {
     expect(generate(reversed(representativeSpec))).toEqual(generate());
     expect(generate()).toEqual(generate());
   });
-  it("preserves string and null JSON bodies through call_api raw-body semantics", () => {
+  it("preserves string and null JSON bodies through call_api_write raw-body semantics", () => {
     const operation = generate(withBody({ type: ["string", "null"] }))
       .operations[0]!;
     expect(

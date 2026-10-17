@@ -1,6 +1,6 @@
 # Machine payments (x402)
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-17
 > Code: `apps/gateway/test/cutover.test.ts`, `convex/schema/`, `packages/shared/src/edge/`
 > Related: [wallet-billing](wallet-billing.md), [gateway](gateway.md), [agent-surface](agent-surface.md), [dual rail](../decisions/2026-10-10-dual-rail-keys-and-x402.md), [expiry](../decisions/2026-10-10-anonymous-wallet-expiry.md)
 
@@ -19,7 +19,7 @@ Current behavior: keyless paid calls receive normal auth-required recovery, with
 
 1. Call `/gateway/:publisher/:project/*` without credentials. When explicitly enabled and configured, the 402 includes a $1 x402 offer and existing create-key, top-up, and docs actions.
 2. Retry with the signed payment proof. Confirmed settlement funds the payer's wallet; the same request runs through the normal metered pipeline.
-3. Save the returned wallet session and send it as a Bearer credential on later HTTP calls or MCP `call_api` calls. The session lasts 24 hours and accesses public APIs only.
+3. Save the returned wallet session and send it as a Bearer credential on later HTTP calls or MCP `call_api_read`/`call_api_write` calls. The session lasts 24 hours and accesses public APIs only.
 4. Empty wallets receive another payable 402. Another payment from the same payer restores access to all remaining unexpired funds. A repeated payment cannot fund twice and does not issue another session.
 
 ## Tech

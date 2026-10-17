@@ -5,14 +5,24 @@
  *   initialize, tools/list, tools/call, ping, notifications/initialized
  *
  * Tools:
- *   search_apis  — catalogue search with compact pricing
- *   get_api_docs — call reference + pricing + usage notes
- *   call_api     — metered execute via the SAME pipeline (no side door)
+ *   search_apis    — catalogue search with compact pricing
+ *   get_api_docs   — call reference + pricing + usage notes
+ *   call_api_read  — metered GET/HEAD via the SAME pipeline (no side door)
+ *   call_api_write — metered POST/PUT/PATCH/DELETE/… via the same pipeline
  *
- * call_api REQUIRES a verified OAuth identity or a consumer API key from Authorization /
- * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
+ * call_api_* REQUIRE a verified OAuth identity or a consumer API key from the
+ * Authorization / x-api-key header. Secrets never travel as tool arguments.
+ * They reuse handleGatewayRequest.
  */
 
+import {
+  CALL_API_READ,
+  CALL_API_READ_METHODS,
+  CALL_API_WRITE,
+  CALL_API_WRITE_METHODS,
+  callApiTool,
+  type CallApiTool,
+} from "@zevium/shared";
 import { type CatalogueSource } from "./catalogue-source";
 import { apiDocsFromSpec } from "./mcp-api-docs";
 import { getGeneratedContract, generationFailure } from "./generated-contract";
@@ -20,6 +30,8 @@ import { callParameterSchemas, callTarget } from "./mcp-call-params";
 import { paymentRequiredResponse } from "./payment-required";
 import type { CatalogueSearchSource } from "./catalogue-search";
 import { extractApiKey } from "./key-verifier";
+import { METHOD_OVERRIDE_HEADERS } from "./headers";
+import type { KeylessState } from "./mcp-oauth";
 import {
   handleGatewayRequest,
   type GatewayRoute,
@@ -48,6 +60,9 @@ export type McpDeps = {
   pipeline: PipelineDeps;
   pipelineEnv: PipelineEnv;
   gatewayOrigin: string;
+  /** Verified OAuth session whose user has no usable key in the consented org.
+   * See `KeylessState`; a created or re-enabled key applies on identity refresh. */
+  keylessOAuth?: { keyState: KeylessState };
 };
 
 type JsonRpcId = string | number | null;
@@ -73,15 +88,98 @@ type JsonRpcFailure = {
 
 type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
 
+type ToolAnnotations = {
+  title: string;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
+
 type ToolDef = {
   name: string;
+  title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations: ToolAnnotations;
 };
+
+/** Catalogue reads touch only Zevium-owned listing data. */
+const CATALOGUE_READ = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+/** Both execute tools spend credits and reach third-party upstreams. Only the
+ * write tool may change upstream state; neither is idempotent (each call bills). */
+function callApiToolDef(name: CallApiTool): ToolDef {
+  const read = name === CALL_API_READ;
+  const title = read
+    ? "Call API: read (spends credits)"
+    : "Call API: write (spends credits)";
+  return {
+    name,
+    title,
+    annotations: {
+      title,
+      readOnlyHint: read,
+      destructiveHint: !read,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    description: read
+      ? "Call a GET or HEAD endpoint of a published API using prepaid credits. Use call_api_write for any other method. The MCP connection's OAuth session or Zevium API key pays; a funded wallet is required. A fully buffered 2xx upstream response settles the endpoint price; failed tool results release the reservation."
+      : "Call a POST, PUT, PATCH, DELETE, OPTIONS or TRACE endpoint of a published API using prepaid credits. This may create, change or delete data at the third-party API. Use call_api_read for GET or HEAD. The MCP connection's OAuth session or Zevium API key pays; a funded wallet is required. A fully buffered 2xx upstream response settles the endpoint price; failed tool results release the reservation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        org: {
+          type: "string",
+          description: "Public publisher handle from the catalogue URL",
+        },
+        project: { type: "string", description: "API / project slug" },
+        method: {
+          type: "string",
+          enum: read ? [...CALL_API_READ_METHODS] : [...CALL_API_WRITE_METHODS],
+          description: read
+            ? "HTTP method; defaults to GET"
+            : "HTTP method of the endpoint",
+        },
+        path: {
+          type: "string",
+          description:
+            "Endpoint path or template, e.g. /things/{id}. May include an encoded query string. Use pathParams for placeholders and query for query parameters.",
+        },
+        ...callParameterSchemas,
+        ...(read
+          ? {}
+          : {
+              body: {
+                description:
+                  "Optional request body (string or JSON-serializable)",
+              },
+            }),
+        headers: {
+          type: "object",
+          description:
+            "Optional extra headers to forward upstream. Method-override headers (X-HTTP-Method-Override, X-HTTP-Method, X-Method-Override) are refused; set method instead.",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: read
+        ? ["org", "project", "path"]
+        : ["org", "project", "method", "path"],
+    },
+  };
+}
 
 const TOOLS: ToolDef[] = [
   {
     name: "search_apis",
+    title: "Search APIs",
+    annotations: { title: "Search APIs", ...CATALOGUE_READ },
     description:
       "Search the Zevium public API catalogue semantically. Returns relevance-ranked matches with pricing summaries. Use get_api_docs for endpoint prices and schemas. Keyword fallback is flagged as degraded.",
     inputSchema: {
@@ -99,6 +197,8 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: "get_api_docs",
+    title: "Get API docs",
+    annotations: { title: "Get API docs", ...CATALOGUE_READ },
     description:
       "Read parameters, request/response schemas and examples, prices, and usage notes for one published API. Use the publisher handle and project slug returned by search_apis.",
     inputSchema: {
@@ -116,45 +216,8 @@ const TOOLS: ToolDef[] = [
       required: ["org", "project"],
     },
   },
-  {
-    name: "call_api",
-    description:
-      "Call an API endpoint using prepaid credits. Authenticate the MCP request with OAuth or a Zevium API key. OAuth uses the connected organization and existing key cap; omit the key argument. A funded wallet is required. A fully buffered 2xx upstream response settles the endpoint price; failed tool results release the reservation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        org: {
-          type: "string",
-          description: "Public publisher handle from the catalogue URL",
-        },
-        project: { type: "string", description: "API / project slug" },
-        method: {
-          type: "string",
-          description: "HTTP method (GET, POST, …)",
-        },
-        path: {
-          type: "string",
-          description:
-            "Endpoint path or template, e.g. /things/{id}. May include an encoded query string. Use pathParams for placeholders and query for query parameters.",
-        },
-        ...callParameterSchemas,
-        body: {
-          description: "Optional request body (string or JSON-serializable)",
-        },
-        headers: {
-          type: "object",
-          description: "Optional extra headers to forward upstream",
-          additionalProperties: { type: "string" },
-        },
-        key: {
-          type: "string",
-          description:
-            "Optional API key override (ak_… or zev_…). Prefer Authorization on the MCP request.",
-        },
-      },
-      required: ["org", "project", "method", "path"],
-    },
-  },
+  callApiToolDef(CALL_API_READ),
+  callApiToolDef(CALL_API_WRITE),
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -299,8 +362,10 @@ async function handleSearchApis(
     return toolError("query must be a string of at most 200 characters");
   }
   const query = args.query.trim();
-  const secret = extractApiKey(request);
+  // Keyless OAuth searches anonymously; its bearer is not an API key.
+  const secret = deps.keylessOAuth ? null : extractApiKey(request);
   if (
+    !deps.keylessOAuth &&
     !deps.pipeline.authenticatedKey &&
     secret === null &&
     (request.headers.has("authorization") || request.headers.has("x-api-key"))
@@ -410,9 +475,9 @@ async function handleGetApiDocs(
         "Credits are prepaid on the consumer org wallet; zero balance returns 402.",
         "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
         "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec. Per-token execution is unavailable.",
-        "publisherData.generated contains versioned MCP definitions, CLI flags, Markdown and unsupported-operation diagnostics. Generated names are not registered tools. Execute through call_api using operation.call plus generated input fields; merge headers and JSON-stringify string/null body values. Listing-scoped tool registration remains separate.",
-        "Use search_apis to find a match, get_api_docs to read its reference, and call_api to execute an endpoint.",
-        "Use call_api pathParams for documented {name} path placeholders and query for query parameters (scalars or arrays of repeated values). An encoded query string in path is also supported; query entries replace same-name inline values. For other serialization styles, pre-serialize per the reference. Send body with the documented Content-Type header.",
+        "publisherData.generated contains versioned MCP definitions, CLI flags, Markdown and unsupported-operation diagnostics. Generated names are not registered tools. Execute through operation.call.tool with the other operation.call fields plus generated input fields; merge headers and JSON-stringify string/null body values. Listing-scoped tool registration remains separate.",
+        "Use search_apis to find a match, get_api_docs to read its reference, then call_api_read for GET/HEAD endpoints or call_api_write for every other method.",
+        "Use call_api_read/call_api_write pathParams for documented {name} path placeholders and query for query parameters (scalars or arrays of repeated values). An encoded query string in path is also supported; query entries replace same-name inline values. For other serialization styles, pre-serialize per the reference. Send body with the documented Content-Type header.",
         "Local component refs use publisherData.components. External and non-component refs, security metadata, response links/headers, and content encoding metadata are omitted; no references are fetched.",
       ],
     };
@@ -442,6 +507,7 @@ async function handleGetApiDocs(
 }
 
 async function handleCallApi(
+  tool: CallApiTool,
   deps: McpDeps,
   args: Record<string, unknown>,
   mcpRequest: Request,
@@ -449,20 +515,62 @@ async function handleCallApi(
   signal: AbortSignal,
   onResponsePrepared: () => void,
 ): Promise<unknown> {
+  // Secrets must not enter model context; refuse rather than silently ignore.
+  if (args.key !== undefined)
+    return toolError(
+      "Tool arguments cannot carry API keys. Authenticate the MCP connection with OAuth or an Authorization header instead.",
+    );
+
+  if (deps.keylessOAuth) {
+    const keys = new URL(
+      "/app/settings/keys",
+      deps.pipelineEnv.APP_ORIGIN ?? "https://zevium.dev",
+    ).href;
+    const { keyState } = deps.keylessOAuth;
+    const response = paymentRequiredResponse(
+      crypto.randomUUID(),
+      keyState === "provisioning"
+        ? "Zevium is creating the API key for this connection. Retry in about 15 seconds."
+        : keyState === "disabled"
+          ? `Your API key for this organization is disabled — re-enable or rotate it at ${keys}`
+          : `No API key for this organization — create one at ${keys}`,
+      {
+        reason:
+          keyState === "provisioning"
+            ? "oauth_key_provisioning"
+            : keyState === "disabled"
+              ? "oauth_key_disabled"
+              : "oauth_missing_api_key",
+      },
+      deps.pipelineEnv.APP_ORIGIN,
+    );
+    if (keyState === "provisioning") response.headers.set("Retry-After", "15");
+    return paymentToolError(response);
+  }
+
   const org = asString(args.org);
   const project = asString(args.project);
-  const methodRaw = asString(args.method);
+  const methodRaw =
+    asString(args.method) ?? (tool === CALL_API_READ ? "GET" : undefined);
   const pathRaw = asString(args.path);
 
   if (!org || !project || !methodRaw || !pathRaw) {
-    return toolError("org, project, method, and path are required");
+    return toolError(
+      tool === CALL_API_READ
+        ? "org, project, and path are required"
+        : "org, project, method, and path are required",
+    );
+  }
+  const methodTool = callApiTool(methodRaw);
+  if (methodTool !== tool) {
+    return toolError(
+      methodTool === null
+        ? "Unsupported HTTP method"
+        : `${tool} does not accept ${methodRaw.toUpperCase()}; use ${methodTool}`,
+    );
   }
 
-  // Key from tool arg, else MCP request Authorization / x-api-key.
-  let key = asString(args.key);
-  if (!key) {
-    key = extractApiKey(mcpRequest) ?? undefined;
-  }
+  const key = extractApiKey(mcpRequest) ?? undefined;
   if (key && !key.startsWith("ak_") && !key.startsWith("zev_")) {
     return paymentToolError(
       paymentRequiredResponse(
@@ -473,12 +581,6 @@ async function handleCallApi(
         },
         deps.pipelineEnv.APP_ORIGIN,
       ),
-    );
-  }
-
-  if (deps.pipeline.authenticatedKey && args.key !== undefined) {
-    return toolError(
-      "OAuth calls use the connected organization key; omit the key argument",
     );
   }
 
@@ -510,8 +612,16 @@ async function handleCallApi(
   if (isRecord(args.headers)) {
     for (const [hk, hv] of Object.entries(args.headers)) {
       if (typeof hv === "string" && hv.length > 0) {
-        // Never let tool headers clobber the consumer key.
         const lower = hk.toLowerCase();
+        // The upstream would run the overridden method, bypassing the
+        // read/write split; refuse so the agent picks the right tool instead.
+        if (METHOD_OVERRIDE_HEADERS.has(lower))
+          return toolError(
+            tool === CALL_API_READ
+              ? `call_api_read cannot send ${hk}; use call_api_write with the intended method`
+              : `Method override headers are not supported; set method instead of ${hk}`,
+          );
+        // Never let tool headers clobber the consumer key.
         if (
           lower === "authorization" ||
           lower === "x-api-key" ||
@@ -663,8 +773,10 @@ async function dispatchTool(
       return handleSearchApis(deps, args, mcpRequest);
     case "get_api_docs":
       return handleGetApiDocs(deps, args);
-    case "call_api":
+    case CALL_API_READ:
+    case CALL_API_WRITE:
       return handleCallApi(
+        name,
         deps,
         args,
         mcpRequest,

@@ -18,6 +18,7 @@ import {
   revokeKey,
   rotationDto,
   membershipRemoved,
+  membershipRemovedAt,
   type Key,
   type Rotation,
 } from "./lib/keys";
@@ -469,6 +470,11 @@ export const resolveMcpIdentity = internalQuery({
   handler: async (ctx, args) => {
     const org = await getOrganization(ctx, args.orgId);
     if (!org || !(await isActive(ctx, org))) return null;
+    const removedAt = await membershipRemovedAt(
+      ctx,
+      org.clerkOrgId,
+      args.userId,
+    );
     const rows = await ctx.db
       .query("apiKeys")
       .withIndex("by_org_owner", (q) =>
@@ -478,22 +484,25 @@ export const resolveMcpIdentity = internalQuery({
           .eq("ownerUserId", args.userId),
       )
       .collect();
-    const keys: Key[] = [];
-    for (const row of rows)
-      if (
+    // A key verified after the latest removal proves a re-join; without one, a
+    // removed member's token is invalid so the client re-authenticates.
+    const keys = rows.filter(
+      (row): row is Key =>
         row.kind === "key" &&
         currentKey(row) &&
-        row.lifecycle === "active" &&
-        !(await membershipRemoved(
-          ctx,
-          org.clerkOrgId,
-          args.userId,
-          row.verifiedAt,
-        ))
-      )
-        keys.push(row);
-    return keys.length === 1
-      ? { orgId: org.clerkOrgId, keyId: keys[0]!.keyId }
-      : null;
+        (removedAt === undefined || row.verifiedAt > removedAt),
+    );
+    if (removedAt !== undefined && keys.length === 0) return null;
+    // insertKey keeps one current key per member per org; if that invariant is
+    // ever broken, the oldest key wins so the paying key never flips between
+    // requests. No usable key is a keyless session, not an invalid token:
+    // answering invalid_token loops OAuth clients through refresh/re-auth.
+    const key = keys
+      .filter((row) => row.lifecycle === "active")
+      .sort((a, b) => a._creationTime - b._creationTime)[0];
+    if (key) return { orgId: org.clerkOrgId, keyId: key.keyId };
+    return keys.length > 0
+      ? { orgId: org.clerkOrgId, keyId: null, disabled: true }
+      : { orgId: org.clerkOrgId, keyId: null };
   },
 });

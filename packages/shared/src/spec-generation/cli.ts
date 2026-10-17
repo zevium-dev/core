@@ -1,6 +1,6 @@
 import type { GeneratedOperation } from "./index.js";
 
-/** Bind generated flags to the existing MCP call_api contract, never an upstream URL. */
+/** Bind generated flags to operation.call.tool arguments, never an upstream URL. */
 export function generatedCallArguments(
   operation: GeneratedOperation,
   org: string,
@@ -52,7 +52,13 @@ export function generatedToolArguments(
   project: string,
   values: Record<string, unknown>,
 ): Record<string, unknown> {
-  const args: Record<string, unknown> = { org, project, ...operation.call };
+  // operation.call.tool names the MCP tool; it is not an argument. Fixed headers merge below.
+  const args: Record<string, unknown> = {
+    org,
+    project,
+    method: operation.call.method,
+    path: operation.call.path,
+  };
   for (const key of Object.keys(values)) {
     if (!["pathParams", "query", "headers", "body"].includes(key))
       throw new Error("Unknown input field");
@@ -64,7 +70,7 @@ export function generatedToolArguments(
     if (location === "body") {
       if (Object.hasOwn(values, "body")) {
         if (!flags.length) throw new Error("Unexpected body");
-        // call_api treats strings as raw bytes and null as no body. Preserve JSON semantics.
+        // call_api_* treat strings as raw bytes and null as no body. Preserve JSON semantics.
         args.body =
           typeof values.body === "string" || values.body === null
             ? JSON.stringify(values.body)
