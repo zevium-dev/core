@@ -1,3 +1,6 @@
+/** $1 = 10,000 credits (.agents/notes/features/pricing.md). One global constant, never per-API. */
+export const CREDITS_PER_DOLLAR = 10_000;
+
 /** Hard economic boundary: no single call can consume over a $100 credit pack. */
 export const MAX_ENDPOINT_COST_CREDITS = 1_000_000;
 

@@ -122,10 +122,10 @@ path    — endpoint path from the spec (e.g. /v1/summarize)`}
           support requests.
         </li>
         <li>
-          <code>x-zevium-cost</code> — endpoint cost in credits (<code>0</code>{" "}
-          on a free-tier call, which also sets{" "}
-          <code>x-zevium-free-tier: 1</code>
-          ).
+          <code>x-zevium-cost</code> — credits charged for this call. Only 2xx
+          responses are charged, so any other status reports <code>0</code>. A
+          free-tier call also reports <code>0</code> and sets{" "}
+          <code>x-zevium-free-tier: 1</code>.
         </li>
         <li>
           <code>Deprecation</code> / <code>Sunset</code> — signal a migration

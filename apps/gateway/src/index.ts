@@ -1,3 +1,4 @@
+import { llmsResponse } from "@zevium/shared";
 import { handleListingDocs } from "./generated-contract";
 import { nextConnectionsDeps, nextDeps } from "./next/pipeline";
 import { wakeWallet, readWalletFailure } from "./next/wake";
@@ -166,6 +167,7 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
  * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api_read + call_api_write)
+ * - /llms.txt — agent setup guide, same text as the web app's /llms.txt
  * - /connections — connected-account management + provider callback
  * - /internal/next-wake — authenticated wallet coordination
  * - /health
@@ -213,6 +215,22 @@ async function dispatchRequest(
       },
       { status: specConfigReady ? 200 : 503 },
     );
+  }
+
+  if (url.pathname === "/llms.txt") {
+    if (request.method !== "GET" && request.method !== "HEAD")
+      return new Response(null, {
+        status: 405,
+        headers: { allow: "GET, HEAD, OPTIONS" },
+      });
+    // Same fallback as payment recovery links when APP_ORIGIN is unset.
+    const response = llmsResponse({
+      web: env.APP_ORIGIN ?? "https://zevium.dev",
+      gateway: url.origin,
+    });
+    // Public and origin-derived only; same freshness as /discovery.
+    response.headers.set("cache-control", "public, max-age=60");
+    return response;
   }
 
   // GET /discovery — public machine-readable index

@@ -309,6 +309,21 @@ async function paymentToolError(response: Response) {
   );
 }
 
+/** Allowlisted fields of a Zevium-generated (never upstream) error body. */
+async function platformErrorFields(response: Response): Promise<{
+  error?: string;
+  connect?: Record<string, unknown>;
+  list?: Record<string, unknown>;
+}> {
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!isRecord(body)) return {};
+  return {
+    ...(typeof body.error === "string" ? { error: body.error } : {}),
+    ...(isRecord(body.connect) ? { connect: body.connect } : {}),
+    ...(isRecord(body.list) ? { list: body.list } : {}),
+  };
+}
+
 async function readLimitedText(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number,
@@ -707,26 +722,34 @@ async function handleCallApi(
     if (response.status === 402 && !receivedUpstreamResponse) {
       return paymentToolError(response);
     }
-    const platformRateLimited =
-      response.status === 429 && !receivedUpstreamResponse;
-    // Never forward upstream error bodies, headers, or exception details.
+    // Zevium-generated failures carry a safe code plus connect/list recovery
+    // requests; upstream bodies, headers, and exception details never pass.
+    const platform = receivedUpstreamResponse
+      ? undefined
+      : await platformErrorFields(response);
+    const platformRateLimited = response.status === 429 && !!platform;
     const message =
       response.status === 402
         ? "A valid API key with sufficient credits is required."
         : response.status === 403
-          ? "This API call is not permitted. Check your API key and spending limit."
-          : platformRateLimited
-            ? "Too many requests for this API key. Wait before retrying."
-            : response.status === 404
-              ? "The API or endpoint is unavailable."
-              : "The API call failed. Please try again.";
+          ? platform?.connect
+            ? "This endpoint needs the caller's connected account. Send the connect request with your key, have the user finish the returned authorization, then retry."
+            : "This API call is not permitted. Check your API key."
+          : response.status === 409 && platform
+            ? "Several connected accounts match. Pick a connection id from the list request and send it in the x-zevium-connection header."
+            : platformRateLimited
+              ? "Too many requests for this API key. Wait before retrying."
+              : response.status === 404
+                ? "The API or endpoint is unavailable."
+                : "The API call failed. Please try again.";
     return {
       ...textContent(
         JSON.stringify({
           status: response.status,
           requestId,
           cost: 0,
-          ...(platformRateLimited && response.headers.has("retry-after")
+          ...platform,
+          ...(platform && response.headers.has("retry-after")
             ? { retryAfterSeconds: Number(response.headers.get("retry-after")) }
             : {}),
           message,

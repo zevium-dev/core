@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { filterRequestHeaders, filterResponseHeaders } from "../src/headers";
+import { setChargeHeaders } from "../src/next/pipeline";
 
 describe("request header forwarding", () => {
   it("removes forwarding identity and reserved metadata without mutating input", () => {
@@ -141,5 +142,28 @@ describe("response header forwarding", () => {
     expect(result.has("x-zevium-free-tier")).toBe(false);
     result.set("x-zevium-free-tier", "1");
     expect(result.get("x-zevium-free-tier")).toBe("1");
+  });
+});
+
+describe("charge headers", () => {
+  it("report the settled charge on 2xx and zero when the hold is released", () => {
+    const paid = { heldCredits: 7, pricingDecision: "paid" };
+    const free = { heldCredits: 0, pricingDecision: "free_tier" };
+    for (const status of [200, 204, 299]) {
+      const headers = new Headers();
+      setChargeHeaders(headers, status, paid);
+      expect(headers.get("x-zevium-cost")).toBe("7");
+      expect(headers.has("x-zevium-free-tier")).toBe(false);
+      setChargeHeaders(headers, status, free);
+      expect(headers.get("x-zevium-free-tier")).toBe("1");
+    }
+    for (const status of [199, 304, 400, 404, 429, 500, 503]) {
+      const headers = new Headers();
+      setChargeHeaders(headers, status, paid);
+      expect(headers.get("x-zevium-cost")).toBe("0");
+      setChargeHeaders(headers, status, free);
+      // A non-2xx releases the hold, so no free-tier allowance was used.
+      expect(headers.has("x-zevium-free-tier")).toBe(false);
+    }
   });
 });

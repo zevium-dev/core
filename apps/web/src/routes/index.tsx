@@ -20,12 +20,8 @@ import {
 import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
-import {
-  discoveryEndpointUrl,
-  mcpEndpointUrl,
-  pickLandingTeasers,
-  resolveGatewayOrigin,
-} from "#/lib/landing";
+import { discoveryEndpointUrl, mcpEndpointUrl } from "@zevium/shared";
+import { pickLandingTeasers, resolveGatewayOrigin } from "#/lib/landing";
 import { STAGGER } from "#/lib/motion";
 
 const HOW_STEPS = [

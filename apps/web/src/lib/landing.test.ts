@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildMcpConfigSnippet,
   buildClaudeCodeInstall,
   buildCodexConfigSnippet,
-  buildCursorInstallUrl,
   discoveryEndpointUrl,
   mcpEndpointUrl,
+  tryItBaseUrl,
+} from "@zevium/shared";
+import {
+  buildMcpConfigSnippet,
+  buildCursorInstallUrl,
   pickLandingTeasers,
   resolveGatewayOrigin,
-  tryItBaseUrl,
 } from "./landing";
 
 describe("resolveGatewayOrigin", () => {

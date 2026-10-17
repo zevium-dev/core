@@ -5,11 +5,8 @@ import { getRequest } from "@tanstack/react-start/server";
 import { AgentInstall } from "#/components/agent-install";
 import { DocsCodeBlock } from "#/components/docs-code-block";
 import { DocsPage } from "#/components/docs-layout";
-import {
-  discoveryEndpointUrl,
-  resolveGatewayOrigin,
-  tryItBaseUrl,
-} from "#/lib/landing";
+import { discoveryEndpointUrl, tryItBaseUrl } from "@zevium/shared";
+import { resolveGatewayOrigin } from "#/lib/landing";
 
 const currentOrigin = createIsomorphicFn()
   .server(() => new URL(getRequest().url).origin)
