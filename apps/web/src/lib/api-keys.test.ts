@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  iat: undefined as number | undefined,
   list: vi.fn(),
   get: vi.fn(),
   create: vi.fn(),
@@ -13,6 +14,7 @@ vi.mock("@clerk/tanstack-react-start/server", () => ({
   auth: async () => ({
     userId: "user_qa",
     orgId: "org_qa",
+    sessionClaims: mocks.iat === undefined ? null : { iat: mocks.iat },
     getToken: async () => "session-token",
   }),
   clerkClient: async () => ({ apiKeys: mocks }),
@@ -81,6 +83,28 @@ describe("API key creation attribution", () => {
     );
     expect(result.name).toBe("QA agent");
     expect(mocks.revoke).not.toHaveBeenCalled();
+  });
+
+  it("stamps membership at session mint, before the provider creates the key", async () => {
+    vi.useFakeTimers({ now: 1_700_000_100_000 });
+    mocks.iat = 1_700_000_040;
+    mocks.create.mockImplementation(async () => {
+      // A removal webhook stamped during creation must postdate verifiedAt.
+      vi.setSystemTime(1_700_000_200_000);
+      return { id: "key_qa", name: "QA", secret: "s", createdAt: 1 };
+    });
+    try {
+      await createKey({ data: { name: "QA" } });
+    } finally {
+      vi.useRealTimers();
+      mocks.iat = undefined;
+    }
+    expect(mocks.mutation).toHaveBeenCalledWith(
+      api.keySettings.registerVerified,
+      expect.objectContaining({
+        projection: expect.objectContaining({ verifiedAt: 1_700_000_040_000 }),
+      }),
+    );
   });
 
   it("revokes the new key if attribution cannot be recorded", async () => {

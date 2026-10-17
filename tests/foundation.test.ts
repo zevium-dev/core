@@ -19,11 +19,11 @@ const modules = {
     import("../convex/_generated/server.js"),
 };
 describe("isolated schema and proven ports", () => {
-  it("has exactly 37 app tables with the frozen original-source and ownership indexes", () => {
+  it("has exactly 38 app tables with the frozen original-source and ownership indexes", () => {
     expect(Object.keys(schema.tables).sort()).toEqual(
       [...tables.application].sort(),
     );
-    expect(tables.application).toHaveLength(37);
+    expect(tables.application).toHaveLength(38);
     expect(Object.values(tables.components).flat()).toHaveLength(28);
     expect(JSON.stringify(schema.tables.fundingLotSources)).toContain(
       "by_payment",

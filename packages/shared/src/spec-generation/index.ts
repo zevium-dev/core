@@ -4,6 +4,7 @@ import {
   parseSpec,
   type HttpMethod,
 } from "../openapi.js";
+import { callApiTool, type CallApiTool } from "../mcp-call-tools.js";
 import {
   GenerationError,
   record,
@@ -15,7 +16,7 @@ export type { JsonSchema } from "./schema.js";
 
 // Wire-format major: additive optional fields retain this value; incompatible
 // shapes or call-binding semantics require a bump and explicit client support.
-export const GENERATOR_VERSION = 1;
+export const GENERATOR_VERSION = 2;
 export const MAX_GENERATED_BYTES = 196_608;
 const METHODS: HttpMethod[] = [
   "get",
@@ -49,8 +50,13 @@ export type GeneratedOperation = {
     inputSchema: Record<string, unknown>;
   };
   command: { name: string; flags: GeneratedFlag[] };
-  /** Fixed routing arguments; generated inputs map to existing call_api fields. */
-  call: { method: string; path: string; headers?: Record<string, string> };
+  /** Execution tool plus fixed routing arguments; generated inputs map to its fields. */
+  call: {
+    tool: CallApiTool;
+    method: string;
+    path: string;
+    headers?: Record<string, string>;
+  };
 };
 export type GeneratedContract = {
   generatorVersion: number;
@@ -270,11 +276,13 @@ export function generateSpecContract(input: {
                 );
           if (group.some((f) => f.required)) required.push(location);
         }
+        // Generator methods are all HTTP methods one of the two tools accepts.
+        const tool = callApiTool(method)!;
         const description = [
           text(op.summary),
           text(op.description),
           `Cost: ${pricing.cost} credits per successful call.${pricing.freeTier ? ` Free tier: ${pricing.freeTier} calls per day.` : ""}`,
-          `Published version: ${input.version}. Execute with call_api.`,
+          `Published version: ${input.version}. Execute with ${tool}.`,
         ]
           .filter(Boolean)
           .join("\n");
@@ -313,6 +321,7 @@ export function generateSpecContract(input: {
           },
           command: { name, flags },
           call: {
+            tool,
             method: method.toUpperCase(),
             path,
             ...(flags.some((f) => f.location === "body")

@@ -1,4 +1,7 @@
 import {
+  CALL_API_READ,
+  CALL_API_WRITE,
+  callApiTool,
   generatedCallArguments,
   type GeneratedOperation,
   isValidSlug,
@@ -7,7 +10,7 @@ import { z } from "zod";
 import { terminalText } from "./terminal.js";
 
 // This is a reviewed client compatibility pin, not the producer's latest version.
-const SUPPORTED_GENERATOR_MAJOR = 1;
+const SUPPORTED_GENERATOR_MAJOR = 2;
 
 const LIMIT = 1024 * 1024;
 const jsonSchema = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
@@ -37,20 +40,24 @@ const operationSchema = z.object({
       }),
     ),
   }),
-  call: z.object({
-    method: z.enum([
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-      "HEAD",
-      "TRACE",
-    ]),
-    path: z.string().startsWith("/"),
-    headers: z.record(z.string(), z.string()).optional(),
-  }),
+  call: z
+    .object({
+      tool: z.enum([CALL_API_READ, CALL_API_WRITE]),
+      method: z.enum([
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "TRACE",
+      ]),
+      path: z.string().startsWith("/"),
+      headers: z.record(z.string(), z.string()).optional(),
+    })
+    // A write method must never be sent through the read tool, or vice versa.
+    .refine((call) => callApiTool(call.method) === call.tool),
 });
 const docsSchema = z.object({
   publisherData: z.object({
@@ -235,5 +242,5 @@ async function run(
   if (!options.apiKey)
     throw new Error("Set ZEVIUM_API_KEY before executing a command");
   const args = generatedCallArguments(operation, org, project, flags);
-  return await rpc("call_api", args);
+  return await rpc(operation.call.tool, args);
 }

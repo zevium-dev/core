@@ -25,6 +25,17 @@ const HOP_BY_HOP: Record<string, true> = {
   "cdn-loop": true,
 };
 
+/**
+ * Method-override headers make some upstream frameworks run a different method
+ * than the one the gateway matched, priced and (for MCP) gated as read or
+ * write. The request method is the only method an upstream may see.
+ */
+export const METHOD_OVERRIDE_HEADERS: ReadonlySet<string> = new Set([
+  "x-http-method-override",
+  "x-http-method",
+  "x-method-override",
+]);
+
 // Connection options name additional hop-by-hop fields, case-insensitively.
 function connectionFields(source: Headers): Set<string> {
   return new Set(
@@ -37,7 +48,8 @@ function connectionFields(source: Headers): Set<string> {
 
 /**
  * Build a Headers object for the upstream request: copy request headers,
- * strip hop-by-hop, consumer auth, forwarding identity and internal metadata.
+ * strip hop-by-hop, consumer auth, method overrides, forwarding identity and
+ * internal metadata.
  * Drop host (fetch sets it from URL).
  */
 export function filterRequestHeaders(source: Headers): Headers {
@@ -48,6 +60,7 @@ export function filterRequestHeaders(source: Headers): Headers {
     if (Object.hasOwn(HOP_BY_HOP, lower) || nominated.has(lower)) return;
     // Only the gateway may supply platform metadata, after filtering.
     if (lower.startsWith("x-zevium-")) return;
+    if (METHOD_OVERRIDE_HEADERS.has(lower)) return;
     if (
       lower === "forwarded" ||
       lower.startsWith("x-forwarded-") ||

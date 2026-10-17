@@ -260,6 +260,46 @@ describe("broker-verified keys without registry identity", () => {
       (await admin.query(api.keySettings.getForOrg, {}))[0]!.lifecycle,
     ).toBe("revoked");
   });
+  it("resolves MCP identity as keyless or to the oldest current key", async () => {
+    const t = harness();
+    await seed(t);
+    const user = t.withIdentity(identity());
+    const resolve = () =>
+      t.query(internal.keySettings.resolveMcpIdentity, {
+        orgId: "org_one",
+        userId: "user_one",
+      });
+    // No key is a keyless session, never null (null means invalid_token).
+    expect(await resolve()).toEqual({ orgId: "org_one", keyId: null });
+    await user.mutation(
+      api.keySettings.registerVerified,
+      await signed(projection()),
+    );
+    expect(await resolve()).toEqual({ orgId: "org_one", keyId: "key_one" });
+    // insertKey forbids a second current key; force the broken invariant.
+    vi.setSystemTime(Date.now() + 1000);
+    await t.run(async (ctx) => {
+      const row = await ctx.db.query("apiKeys").first();
+      if (row?.kind !== "key") throw new Error("expected key row");
+      const { _id, _creationTime, ...rest } = row;
+      await ctx.db.insert("apiKeys", {
+        ...rest,
+        keyId: "key_newer",
+        secretSha256: "c".repeat(64),
+      });
+    });
+    expect(await resolve()).toEqual({ orgId: "org_one", keyId: "key_one" });
+    for (const keyId of ["key_one", "key_newer"])
+      await user.mutation(api.keySettings.setDisabled, {
+        keyId,
+        disabled: true,
+      });
+    expect(await resolve()).toEqual({
+      orgId: "org_one",
+      keyId: null,
+      disabled: true,
+    });
+  });
   it("does not complete failed, expired, disabled or revoked rotations", async () => {
     for (const state of ["failed", "expired", "disabled", "revoked"] as const) {
       const t = harness();

@@ -1,6 +1,6 @@
 # Connected accounts (act on behalf of a user)
 
-> Status: built on branch `feat/connected-accounts` (API only), PR pending review · Updated: 2026-10-11
+> Status: built on branch `feat/connected-accounts` (API only), PR pending review · Updated: 2026-10-17
 > Code: `packages/shared/src/oauth-providers.ts` (provider registry), `packages/shared/src/connections.ts`, `packages/shared/src/openapi.ts` (root `security`), `packages/shared/src/validate.ts`, `convex/connections.ts`, `convex/connectionsNode.ts`, `convex/connectionsHttp.ts`, `convex/lib/oauthProviderClients.ts`, `convex/lib/webhookTransport.ts` (`requestPinnedHttpsForBody`), `convex/lib/credentialCrypto.ts` (`connectionSecretBinding`), `convex/crons.ts`, `convex/schema/connections.ts`, `apps/gateway/src/connections.ts`, `apps/gateway/src/next/pipeline.ts`, `apps/gateway/src/forward.ts`, `apps/gateway/src/index.ts`
 > Related: [upstream-credentials](upstream-credentials.md), [gateway](gateway.md), [publishing-specs](publishing-specs.md), [api-keys](api-keys.md), [implementation](../design/connected-accounts.md), [research](../research/connected-accounts-providers.md), [decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md) · Issue #351
 
@@ -47,4 +47,4 @@ Full design: [design/connected-accounts.md](../design/connected-accounts.md).
 - Media hosting for Instagram (public URL) and large YouTube uploads: #444.
 - Bring-your-own client per org: #446. Opening provider schemes to third-party publishers.
 - Confirm step against link phishing (a link completed by the wrong person connects their account into the creator's org).
-- Per-auth-event fee or none (per-call only today). MCP `call_api` connection selection. Rate limiting on management routes. Owner sign-off on the 37th table.
+- Per-auth-event fee or none (per-call only today). MCP `call_api_read`/`call_api_write` connection selection. Rate limiting on management routes. Owner sign-off on the 37th table.

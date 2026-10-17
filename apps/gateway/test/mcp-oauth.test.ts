@@ -47,6 +47,9 @@ async function fixture(
   let revoked = false;
   let unavailable = false;
   let mapped = true;
+  let keyless = false;
+  let disabled = false;
+  let provisioning = false;
   const identityRequests: unknown[] = [];
   const remote = vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
@@ -68,7 +71,18 @@ async function fixture(
       return Response.json(options.userInfo ?? { sub: userId, org_id: orgId });
     if (url.endsWith("/mcp-identity")) {
       identityRequests.push(JSON.parse(String(init?.body)));
-      return Response.json(mapped ? { orgId, keyId } : null);
+      return Response.json(
+        mapped
+          ? keyless
+            ? {
+                orgId,
+                keyId: null,
+                provisioning,
+                ...(disabled && { disabled }),
+              }
+            : { orgId, keyId }
+          : null,
+      );
     }
     throw new Error("unexpected OAuth fetch");
   });
@@ -155,6 +169,11 @@ async function fixture(
     unmap: () => {
       mapped = false;
     },
+    setKeyless: (value: boolean, creating = false, off = false) => {
+      keyless = value;
+      provisioning = creating;
+      disabled = off;
+    },
   };
 }
 async function request(
@@ -179,13 +198,13 @@ async function request(
   await waitOnExecutionContext(ctx);
   return response;
 }
-function call(path = "/paid", extra = {}) {
+function call(path = "/paid", extra = {}, name = "call_api_read") {
   return {
     jsonrpc: "2.0",
     id: 1,
     method: "tools/call",
     params: {
-      name: "call_api",
+      name,
       arguments: {
         org: "publisher",
         project: "api",
@@ -349,7 +368,7 @@ describe("Clerk MCP OAuth resource server", () => {
     expect((await g.verifier.verify(short)).status).toBe("invalid");
   });
 
-  it("fails closed on dependency outages, missing keys, and cross-org mapping", async () => {
+  it("fails closed on dependency outages, unmapped identities, and cross-org mapping", async () => {
     const f = await fixture();
     const token = await f.token();
     expect((await f.verifier.verify(token)).status).toBe("ok");
@@ -364,6 +383,215 @@ describe("Clerk MCP OAuth resource server", () => {
       (await request("/mcp", await h.token({ org_id: "org_other" }), call()))
         .status,
     ).toBe(503);
+  });
+
+  it("keeps keyless sessions authenticated and explains the missing key", async () => {
+    const f = await fixture();
+    f.setKeyless(true);
+    const token = await f.token();
+    expect(await f.verifier.verify(token)).toEqual({
+      status: "keyless",
+      orgId: f.orgId,
+      keyState: "missing",
+    });
+    const tools = await request("/mcp", token, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    });
+    expect(tools.status).toBe(200);
+    const search = await request("/mcp", token, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "search_apis", arguments: { query: "demo" } },
+    });
+    expect(search.status).toBe(200);
+    expect(
+      ((await search.json()) as { result: { isError?: boolean } }).result
+        .isError,
+    ).toBeUndefined();
+    expect(f.search).toHaveBeenCalledWith("demo", undefined);
+    const docs = await request("/mcp", token, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "get_api_docs",
+        arguments: { org: "publisher", project: "api" },
+      },
+    });
+    expect(
+      ((await docs.json()) as { result: { isError?: boolean } }).result.isError,
+    ).toBeUndefined();
+    for (const extra of [{}, { key: "zev_oauth_api_key" }]) {
+      const res = await request("/mcp", token, call("/paid", extra));
+      expect(res.status).toBe(200);
+      const { result } = (await res.json()) as {
+        result: { isError: boolean; content: { text: string }[] };
+      };
+      expect(result.isError).toBe(true);
+      if ("key" in extra) {
+        expect(result.content[0]!.text).toBe(
+          "Tool arguments cannot carry API keys. Authenticate the MCP connection with OAuth or an Authorization header instead.",
+        );
+        continue;
+      }
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+        status: 402,
+        cost: 0,
+        reason: "oauth_missing_api_key",
+        message:
+          "No API key for this organization — create one at https://zevium.dev/app/settings/keys",
+        recovery: expect.stringContaining("no reconnect needed"),
+        actions: { createKey: "https://zevium.dev/app/settings/keys" },
+      });
+    }
+    expect(f.upstream).not.toHaveBeenCalled();
+    // A key created later applies after the bounded identity cache, same token.
+    f.setKeyless(false);
+    f.advance();
+    expect(await f.verifier.verify(token)).toMatchObject({ status: "ok" });
+  });
+
+  it("tells keyless sessions to retry while their first key is auto-created", async () => {
+    const f = await fixture();
+    f.setKeyless(true, true);
+    const token = await f.token();
+    expect(await f.verifier.verify(token)).toEqual({
+      status: "keyless",
+      orgId: f.orgId,
+      keyState: "provisioning",
+    });
+    const res = await request("/mcp", token, call());
+    const { result } = (await res.json()) as {
+      result: { isError: boolean; content: { text: string }[] };
+    };
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      status: 402,
+      cost: 0,
+      reason: "oauth_key_provisioning",
+      retryAfterSeconds: 15,
+      recovery: expect.stringContaining("no reconnect needed"),
+    });
+    expect(f.upstream).not.toHaveBeenCalled();
+    f.setKeyless(false);
+    f.advance();
+    expect(await f.verifier.verify(token)).toMatchObject({ status: "ok" });
+  });
+
+  it("points members whose key is disabled at re-enable or rotate", async () => {
+    const f = await fixture();
+    f.setKeyless(true, false, true);
+    const token = await f.token();
+    expect(await f.verifier.verify(token)).toEqual({
+      status: "keyless",
+      orgId: f.orgId,
+      keyState: "disabled",
+    });
+    const res = await request("/mcp", token, call());
+    const { result } = (await res.json()) as {
+      result: { isError: boolean; content: { text: string }[] };
+    };
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(result.content[0]!.text);
+    expect(body).toMatchObject({
+      status: 402,
+      cost: 0,
+      reason: "oauth_key_disabled",
+      message:
+        "Your API key for this organization is disabled — re-enable or rotate it at https://zevium.dev/app/settings/keys",
+      recovery: expect.stringContaining("no reconnect needed"),
+      actions: { createKey: "https://zevium.dev/app/settings/keys" },
+    });
+    expect(body).not.toHaveProperty("retryAfterSeconds");
+    expect(f.upstream).not.toHaveBeenCalled();
+  });
+
+  it("refuses method-override headers on both execute tools", async () => {
+    const f = await fixture();
+    const token = await f.token();
+    for (const name of [
+      "X-HTTP-Method-Override",
+      "x-http-method",
+      "X-Method-Override",
+    ]) {
+      for (const [tool, method, message] of [
+        [
+          "call_api_read",
+          "GET",
+          `call_api_read cannot send ${name}; use call_api_write with the intended method`,
+        ],
+        [
+          "call_api_write",
+          "POST",
+          `Method override headers are not supported; set method instead of ${name}`,
+        ],
+      ] as const) {
+        const res = await request(
+          "/mcp",
+          token,
+          call("/paid", { method, headers: { [name]: "DELETE" } }, tool),
+        );
+        const { result } = (await res.json()) as {
+          result: { isError: boolean; content: { text: string }[] };
+        };
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toBe(message);
+      }
+    }
+    expect(f.upstream).not.toHaveBeenCalled();
+  });
+
+  it("refuses key arguments and methods outside each execute tool", async () => {
+    const f = await fixture();
+    const text = async (body: unknown, token: string) => {
+      const res = await request("/mcp", token, body);
+      expect(res.status).toBe(200);
+      const { result } = (await res.json()) as {
+        result: { isError: boolean; content: { text: string }[] };
+      };
+      expect(result.isError).toBe(true);
+      return result.content[0]!.text;
+    };
+    for (const token of [await f.token(), "zev_oauth_api_key"]) {
+      expect(
+        await text(call("/paid", { key: "zev_oauth_api_key" }), token),
+      ).toContain("Tool arguments cannot carry API keys");
+      expect(
+        await text(
+          call(
+            "/paid",
+            { key: "zev_oauth_api_key", method: "POST" },
+            "call_api_write",
+          ),
+          token,
+        ),
+      ).toContain("Tool arguments cannot carry API keys");
+      expect(await text(call("/paid", { method: "POST" }), token)).toBe(
+        "call_api_read does not accept POST; use call_api_write",
+      );
+      expect(
+        await text(call("/paid", { method: "get" }, "call_api_write"), token),
+      ).toBe("call_api_write does not accept GET; use call_api_read");
+      expect(
+        await text(
+          call("/paid", { method: "CONNECT" }, "call_api_write"),
+          token,
+        ),
+      ).toBe("Unsupported HTTP method");
+      expect(
+        await text(
+          call("/paid", { method: undefined }, "call_api_write"),
+          token,
+        ),
+      ).toBe("org, project, method, and path are required");
+      expect(await text(call("/paid", {}, "call_api"), token)).toBe(
+        "Unknown tool",
+      );
+    }
+    expect(f.upstream).not.toHaveBeenCalled();
   });
 
   it("keeps OAuth restricted to MCP and declines the optional SSE listener", async () => {
