@@ -294,7 +294,11 @@ describe("broker-verified keys without registry identity", () => {
         keyId,
         disabled: true,
       });
-    expect(await resolve()).toEqual({ orgId: "org_one", keyId: null });
+    expect(await resolve()).toEqual({
+      orgId: "org_one",
+      keyId: null,
+      disabled: true,
+    });
   });
   it("does not complete failed, expired, disabled or revoked rotations", async () => {
     for (const state of ["failed", "expired", "disabled", "revoked"] as const) {

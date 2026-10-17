@@ -9,7 +9,7 @@ import { getOrganization, isActive } from "./lib/identity";
 import {
   currentKey,
   insertKey,
-  membershipRemoved,
+  membershipRemovedAt,
   MCP_AUTO_KEY_NAME,
 } from "./lib/keys";
 import { verifiedKeyProjectionValidator } from "./lib/keyProjection";
@@ -27,14 +27,9 @@ async function eligible(
 ) {
   const org = await getOrganization(ctx, clerkOrgId);
   if (!org || !(await isActive(ctx, org))) return null;
-  // An infinite verifiedAt matches only account deletion, never a removal receipt.
   if (
-    await membershipRemoved(
-      ctx,
-      org.clerkOrgId,
-      userId,
-      Number.POSITIVE_INFINITY,
-    )
+    (await membershipRemovedAt(ctx, org.clerkOrgId, userId)) ===
+    Number.POSITIVE_INFINITY
   )
     return null;
   const row = await ctx.db
@@ -70,6 +65,13 @@ export const request = internalMutation({
       .collect();
     // A disabled current key still holds the member's one slot.
     if (owned.some((r) => r.kind === "key" && currentKey(r))) return false;
+    // A removed member without a newer key never auto-provisions: identity
+    // resolution already rejects the token, and Clerk would refuse anyway.
+    if (
+      (await membershipRemovedAt(ctx, org.clerkOrgId, args.userId)) !==
+      undefined
+    )
+      return false;
     const now = Date.now();
     if (row?.state === "created") return false;
     if (row?.state === "pending" && row.leaseUntil > now) return true;
