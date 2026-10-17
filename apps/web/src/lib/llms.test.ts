@@ -97,7 +97,7 @@ describe("llms.txt", () => {
     expect(text).toContain(
       "curl -fsSLo zevium https://preview.example.test/cli/zevium.mjs && chmod +x zevium",
     );
-    expect(text).toContain("Generator major 1 is supported");
+    expect(text).toContain("Generator major 2 is supported");
     expect(text).toContain(
       "https://edge.example.test/docs/{publisherHandle}/{projectSlug}",
     );

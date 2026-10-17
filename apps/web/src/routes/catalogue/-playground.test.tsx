@@ -247,12 +247,12 @@ it("sends typed form values to keyless mock and previews identical curl/MCP requ
     title: "Example",
     active: false,
   });
-  fireEvent.mouseDown(screen.getByRole("tab", { name: "MCP call_api" }), {
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "MCP" }), {
     button: 0,
     ctrlKey: false,
   });
   const args = JSON.parse(
-    screen.getByLabelText("MCP call_api arguments").textContent!,
+    screen.getByLabelText("MCP tool arguments").textContent!,
   );
   expect(args).toEqual({
     org: "publisher",
@@ -263,6 +263,7 @@ it("sends typed form values to keyless mock and previews identical curl/MCP requ
     body: JSON.parse(init.body as string),
   });
   expect(screen.getByText(/MCP has no mock mode/)).toBeTruthy();
+  expect(screen.getByText("call_api_write")).toBeTruthy();
 });
 it("validates raw JSON against the same schema and gates real calls on an API key", () => {
   const fetch = vi.fn();
@@ -342,12 +343,12 @@ it.each(
       screen.getByRole("button", { name: "Send live · 1 credit" }),
     );
     await screen.findByText("200");
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "MCP call_api" }), {
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "MCP" }), {
       button: 0,
       ctrlKey: false,
     });
     const args = JSON.parse(
-      screen.getByLabelText("MCP call_api arguments").textContent!,
+      screen.getByLabelText("MCP tool arguments").textContent!,
     );
     const operation = generateSpecContract({
       spec: bodySpec({}, value),

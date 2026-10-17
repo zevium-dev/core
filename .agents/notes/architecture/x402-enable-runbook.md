@@ -131,7 +131,7 @@ shared-secret-protected settlement projection, not a public top-up API.
    Stripe PaymentIntent **before** one Convex funding lot and one edge grant.
    Confirm 10,000 credits less call cost, session header, and `PAYMENT-RESPONSE`.
    Pending/rejected settlement and unsuccessful Stripe recording must never grant.
-6. Reuse the session for direct calls and MCP `call_api`; confirm public-only
+6. Reuse the session for direct calls and MCP `call_api_read`/`call_api_write`; confirm public-only
    access, normal debits and 95/5 earnings, no admission-time Clerk/Convex calls.
    Tampered, wrong-origin, and expired sessions must fail. Balance/MCP responses
    must not display funding expiry. Verify expiry enforcement in lot tests.
