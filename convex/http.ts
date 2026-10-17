@@ -303,7 +303,8 @@ router.route({
         args,
       );
       // Runs at gateway cache-miss/refresh time, never per paid request.
-      if (identity?.keyId === null)
+      // A disabled key keeps the member's slot, so it never provisions.
+      if (identity?.keyId === null && !identity.disabled)
         return Response.json({
           ...identity,
           provisioning: await ctx.runMutation(internal.mcpKeys.request, args),

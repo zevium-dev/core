@@ -55,17 +55,20 @@ export function currentKey(row: Key) {
     (row.expiresAt === undefined || row.expiresAt > Date.now())
   );
 }
-export async function membershipRemoved(
+/** When the member last left the org: the latest removal receipt's timestamp,
+ * +Infinity once the account is deleted, undefined if never removed. Only
+ * removals are receipted per membership, so a key verified after this is
+ * evidence of a later re-join. */
+export async function membershipRemovedAt(
   ctx: Pick<QueryCtx, "db">,
   org: string,
   user: string,
-  verifiedAt: number,
-) {
+): Promise<number | undefined> {
   const deleted = await ctx.db
     .query("users")
     .withIndex("by_clerk", (q) => q.eq("clerkUserId", user))
     .unique();
-  if (deleted?.deletedAt !== undefined) return true;
+  if (deleted?.deletedAt !== undefined) return Number.POSITIVE_INFINITY;
   const receipt = await ctx.db
     .query("webhookReceipts")
     .withIndex("by_object", (q) =>
@@ -76,7 +79,16 @@ export async function membershipRemoved(
     )
     .order("desc")
     .first();
-  return !!receipt && receipt.sourceTimestamp >= verifiedAt;
+  return receipt?.sourceTimestamp;
+}
+export async function membershipRemoved(
+  ctx: Pick<QueryCtx, "db">,
+  org: string,
+  user: string,
+  verifiedAt: number,
+) {
+  const removedAt = await membershipRemovedAt(ctx, org, user);
+  return removedAt !== undefined && removedAt >= verifiedAt;
 }
 export async function ownedKey(
   ctx: Pick<QueryCtx, "db" | "auth">,

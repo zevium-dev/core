@@ -1,6 +1,6 @@
 # Gateway (metered call path)
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-12
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-17
 > Code: `apps/gateway/src/{index,pipeline,forward}.ts`, `apps/gateway/src/next/`, `packages/shared/src/edge/`, `convex/{edgeSnapshots,edgeMaintenance,http,wallets}.ts`, `apps/gateway/scripts/next-acceptance.mjs`, `apps/gateway/test/next-wallet.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
@@ -46,6 +46,8 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
 - **Connected accounts**: `/connections` (API key) and `/connections/callback`. In the call pipeline, operations bound to a provider (`x-zevium-oauth-provider`) resolve the caller org's connection before wallet admission (failures cost 0), refuse upstream hosts outside the provider's API hosts (422), and `forward()` sets `Authorization: Bearer`. [connected-accounts](connected-accounts.md)
+
+- Method-override request headers (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`) are never forwarded (`filterRequestHeaders`): the upstream sees only the method the gateway matched and priced. Publisher-owned upstream headers are injected after filtering and may still set them.
 
 ## Decisions
 

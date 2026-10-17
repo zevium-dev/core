@@ -48,6 +48,7 @@ async function fixture(
   let unavailable = false;
   let mapped = true;
   let keyless = false;
+  let disabled = false;
   let provisioning = false;
   const identityRequests: unknown[] = [];
   const remote = vi.fn<typeof fetch>(async (input, init) => {
@@ -73,7 +74,12 @@ async function fixture(
       return Response.json(
         mapped
           ? keyless
-            ? { orgId, keyId: null, provisioning }
+            ? {
+                orgId,
+                keyId: null,
+                provisioning,
+                ...(disabled && { disabled }),
+              }
             : { orgId, keyId }
           : null,
       );
@@ -163,9 +169,10 @@ async function fixture(
     unmap: () => {
       mapped = false;
     },
-    setKeyless: (value: boolean, creating = false) => {
+    setKeyless: (value: boolean, creating = false, off = false) => {
       keyless = value;
       provisioning = creating;
+      disabled = off;
     },
   };
 }
@@ -385,7 +392,7 @@ describe("Clerk MCP OAuth resource server", () => {
     expect(await f.verifier.verify(token)).toEqual({
       status: "keyless",
       orgId: f.orgId,
-      provisioning: false,
+      keyState: "missing",
     });
     const tools = await request("/mcp", token, {
       jsonrpc: "2.0",
@@ -454,7 +461,7 @@ describe("Clerk MCP OAuth resource server", () => {
     expect(await f.verifier.verify(token)).toEqual({
       status: "keyless",
       orgId: f.orgId,
-      provisioning: true,
+      keyState: "provisioning",
     });
     const res = await request("/mcp", token, call());
     const { result } = (await res.json()) as {
@@ -472,6 +479,69 @@ describe("Clerk MCP OAuth resource server", () => {
     f.setKeyless(false);
     f.advance();
     expect(await f.verifier.verify(token)).toMatchObject({ status: "ok" });
+  });
+
+  it("points members whose key is disabled at re-enable or rotate", async () => {
+    const f = await fixture();
+    f.setKeyless(true, false, true);
+    const token = await f.token();
+    expect(await f.verifier.verify(token)).toEqual({
+      status: "keyless",
+      orgId: f.orgId,
+      keyState: "disabled",
+    });
+    const res = await request("/mcp", token, call());
+    const { result } = (await res.json()) as {
+      result: { isError: boolean; content: { text: string }[] };
+    };
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(result.content[0]!.text);
+    expect(body).toMatchObject({
+      status: 402,
+      cost: 0,
+      reason: "oauth_key_disabled",
+      message:
+        "Your API key for this organization is disabled — re-enable or rotate it at https://zevium.dev/app/settings/keys",
+      recovery: expect.stringContaining("no reconnect needed"),
+      actions: { createKey: "https://zevium.dev/app/settings/keys" },
+    });
+    expect(body).not.toHaveProperty("retryAfterSeconds");
+    expect(f.upstream).not.toHaveBeenCalled();
+  });
+
+  it("refuses method-override headers on both execute tools", async () => {
+    const f = await fixture();
+    const token = await f.token();
+    for (const name of [
+      "X-HTTP-Method-Override",
+      "x-http-method",
+      "X-Method-Override",
+    ]) {
+      for (const [tool, method, message] of [
+        [
+          "call_api_read",
+          "GET",
+          `call_api_read cannot send ${name}; use call_api_write with the intended method`,
+        ],
+        [
+          "call_api_write",
+          "POST",
+          `Method override headers are not supported; set method instead of ${name}`,
+        ],
+      ] as const) {
+        const res = await request(
+          "/mcp",
+          token,
+          call("/paid", { method, headers: { [name]: "DELETE" } }, tool),
+        );
+        const { result } = (await res.json()) as {
+          result: { isError: boolean; content: { text: string }[] };
+        };
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toBe(message);
+      }
+    }
+    expect(f.upstream).not.toHaveBeenCalled();
   });
 
   it("refuses key arguments and methods outside each execute tool", async () => {
