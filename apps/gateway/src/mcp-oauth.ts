@@ -11,9 +11,11 @@ export const MCP_SCOPES = ["user:org:read", "zevium:mcp:execute"];
 export type McpOAuthConfig = { issuer: string; resource: string };
 /** `keyless`: a verified user/org with no usable API key. The session stays
  * authenticated so clients don't loop on invalid_token; paid tools explain.
- * `provisioning`: Convex is auto-creating that member's key (first connect). */
+ * `keyState`: `provisioning` while Convex auto-creates the member's key (first
+ * connect); `disabled` when the member's current key is disabled. */
+export type KeylessState = "missing" | "provisioning" | "disabled";
 export type McpIdentityOutcome =
-  VerifyOutcome | { status: "keyless"; orgId: string; provisioning: boolean };
+  VerifyOutcome | { status: "keyless"; orgId: string; keyState: KeylessState };
 export type McpOAuthOutcome =
   McpIdentityOutcome | { status: "insufficient_scope" };
 export interface McpOAuthVerifier {
@@ -313,7 +315,12 @@ export class ClerkMcpOAuthVerifier implements McpOAuthVerifier {
         return {
           status: "keyless",
           orgId,
-          provisioning: value.provisioning === true,
+          keyState:
+            value.disabled === true
+              ? "disabled"
+              : value.provisioning === true
+                ? "provisioning"
+                : "missing",
         };
       if (typeof value.keyId !== "string" || !value.keyId)
         return { status: "unavailable" };

@@ -50,6 +50,10 @@ export const provision = internalAction({
     let keyId: string | undefined;
     try {
       if (!client) throw new Error("Clerk unavailable");
+      // Taken before the membership read: insertKey rejects the key if a
+      // removal webhook is stamped at or after it, including one that races
+      // the Clerk calls below.
+      const verifiedAt = Date.now();
       // Clerk is the live membership authority; Convex receipts can lag.
       const { data } = await client.organizations.getOrganizationMembershipList(
         {
@@ -84,7 +88,7 @@ export const provision = internalAction({
       if (
         await ctx.runMutation(internal.mcpKeys.complete, {
           ...args,
-          projection: { schemaVersion: 1, verifiedAt: Date.now(), provision },
+          projection: { schemaVersion: 1, verifiedAt, provision },
         })
       )
         return;

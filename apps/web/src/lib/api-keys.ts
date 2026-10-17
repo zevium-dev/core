@@ -52,6 +52,20 @@ function requireUserId(userId: string | null | undefined): string {
   return userId;
 }
 
+/**
+ * When the session last proved org membership: its token was minted then, and
+ * the request started no later. Convex rejects the key if a removal webhook is
+ * stamped at or after this, so it must precede every provider call.
+ */
+function membershipVerifiedAt(
+  iat: number | undefined,
+  requestedAt: number,
+): number {
+  return typeof iat === "number" && Number.isFinite(iat)
+    ? Math.min(requestedAt, iat * 1000)
+    : requestedAt;
+}
+
 function requireProjectionSecret(): string {
   const secret = process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET;
   if (!secret) {
@@ -96,7 +110,12 @@ export const createKey = createServerFn({ method: "POST" })
     return { name };
   })
   .handler(async ({ data }): Promise<CreateApiKeyResult> => {
+    const requestedAt = Date.now();
     const session = await auth();
+    const verifiedAt = membershipVerifiedAt(
+      session.sessionClaims?.iat,
+      requestedAt,
+    );
     const userId = requireUserId(session.userId);
     const orgId = session.orgId;
     if (typeof orgId !== "string" || orgId.length === 0) {
@@ -142,7 +161,7 @@ export const createKey = createServerFn({ method: "POST" })
       });
       const projection: RegistryVerifiedKeyProjection = {
         schemaVersion: 1,
-        verifiedAt: Date.now(),
+        verifiedAt,
         provision: sealed.provision,
       };
       await convex.mutation(api.keySettings.registerVerified, {
@@ -256,7 +275,12 @@ export const rotateKey = createServerFn({ method: "POST" })
     return { id: id.trim(), name, operationId };
   })
   .handler(async ({ data }): Promise<RotateApiKeyResult> => {
+    const requestedAt = Date.now();
     const session = await auth();
+    const verifiedAt = membershipVerifiedAt(
+      session.sessionClaims?.iat,
+      requestedAt,
+    );
     const userId = requireUserId(session.userId);
     const orgId = session.orgId;
     if (typeof orgId !== "string" || orgId.length === 0) {
@@ -369,7 +393,6 @@ export const rotateKey = createServerFn({ method: "POST" })
       throw new ConvexError("Key created but secret missing. Contact support.");
     }
 
-    const verifiedAt = Date.now();
     const graceUntil = verifiedAt + ROTATION_GRACE_MS;
     try {
       const oldBudget = settings.find(

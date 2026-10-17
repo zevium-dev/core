@@ -3,6 +3,8 @@ const RECOVERY: Record<string, string> = {
   missing_api_key: "Create an API key and send it as a Bearer credential.",
   oauth_key_provisioning:
     "Zevium is creating this member's API key after the first OAuth connect. Retry shortly; no reconnect needed.",
+  oauth_key_disabled:
+    "Re-enable or rotate your API key in the connected organization, then retry. OAuth uses it automatically; no reconnect needed.",
   oauth_missing_api_key:
     "Create an API key in the connected organization, then retry. OAuth uses it automatically; no reconnect needed.",
   invalid_api_key:

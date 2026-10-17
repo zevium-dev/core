@@ -4,7 +4,15 @@ import {
   signRegistryVerifiedKeyProjection,
   type RegistryVerifiedKeyProjection,
 } from "@zevium/shared";
-import { harness, seed, identity, keySecret, type Harness } from "./helpers";
+import {
+  harness,
+  seed,
+  identity,
+  keySecret,
+  webhook,
+  webhookSecret,
+  type Harness,
+} from "./helpers";
 import { SECRET } from "./fixtures";
 import { api, internal } from "../convex/_generated/api";
 
@@ -37,6 +45,24 @@ const identityRequest = (t: Harness) =>
       body: JSON.stringify(who),
     })
     .then((res) => res.json() as Promise<unknown>);
+const removeMember = async (t: Harness, at: number) =>
+  expect(
+    (
+      await webhook(
+        t,
+        `membership-${at}`,
+        "organizationMembership.deleted",
+        {
+          id: "mem_one",
+          created_at: at - 86_400_000,
+          updated_at: at - 86_400_000,
+          organization: { id: "org_one" },
+          public_user_data: { user_id: who.userId },
+        },
+        at,
+      )
+    ).status,
+  ).toBe(200);
 const settle = (t: Harness) =>
   t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimersAsync());
 const keys = (t: Harness) =>
@@ -50,6 +76,7 @@ beforeEach(() => {
   vi.stubEnv("GATEWAY_INTERNAL_SECRET", SECRET);
   vi.stubEnv("CLERK_SECRET_KEY", "sk_test_fixture");
   vi.stubEnv("REGISTRY_KEY_PROJECTION_HMAC_SECRET", keySecret);
+  vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", webhookSecret);
   clerk.created = 0;
   clerk.role = "org:member";
   clerk.apiKeys.create.mockImplementation(
@@ -132,13 +159,17 @@ describe("MCP key auto-creation on first OAuth connect", () => {
     expect(await identityRequest(t)).toEqual({
       orgId: "org_one",
       keyId: null,
-      provisioning: false,
+      disabled: true,
     });
     await member.mutation(api.keySettings.revokePrevious, {
       keyId: "ak_mcp_1",
     });
     vi.advanceTimersByTime(7_200_000);
-    expect(await identityRequest(t)).toMatchObject({ provisioning: false });
+    expect(await identityRequest(t)).toEqual({
+      orgId: "org_one",
+      keyId: null,
+      provisioning: false,
+    });
     await settle(t);
     expect(clerk.apiKeys.create).toHaveBeenCalledTimes(1);
   });
@@ -176,7 +207,7 @@ describe("MCP key auto-creation on first OAuth connect", () => {
     expect(await identityRequest(t)).toEqual({
       orgId: "org_one",
       keyId: null,
-      provisioning: false,
+      disabled: true,
     });
     await settle(t);
     expect(clerk.apiKeys.create).not.toHaveBeenCalled();
@@ -244,6 +275,44 @@ describe("MCP key auto-creation on first OAuth connect", () => {
       orgId: "org_one",
       keyId: "key_web",
     });
+  });
+
+  it("rejects a removed member's token and never provisions for them", async () => {
+    const t = harness();
+    await seed(t);
+    await removeMember(t, Date.now());
+    vi.advanceTimersByTime(1000);
+    expect(await identityRequest(t)).toBeNull();
+    expect(await t.mutation(internal.mcpKeys.request, who)).toBe(false);
+    await settle(t);
+    expect(
+      clerk.organizations.getOrganizationMembershipList,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("catches a removal that lands while Clerk creates the key", async () => {
+    const t = harness();
+    await seed(t);
+    expect(await t.mutation(internal.mcpKeys.request, who)).toBe(true);
+    clerk.apiKeys.create.mockImplementationOnce(async () => {
+      // Clerk passed the membership read; the removal is stamped after it,
+      // and creation returns later still.
+      vi.advanceTimersByTime(1000);
+      await removeMember(t, Date.now());
+      vi.advanceTimersByTime(1000);
+      return {
+        id: "ak_mcp_raced",
+        name: "MCP (auto-created)",
+        secret: "s".repeat(32),
+      };
+    });
+    await settle(t);
+    expect(await keys(t)).toEqual([]);
+    expect(clerk.apiKeys.revoke).toHaveBeenCalledWith({
+      apiKeyId: "ak_mcp_raced",
+      revocationReason: "Zevium MCP key auto-creation failed",
+    });
+    expect(await identityRequest(t)).toBeNull();
   });
 
   it("ignores unknown or inactive organizations", async () => {

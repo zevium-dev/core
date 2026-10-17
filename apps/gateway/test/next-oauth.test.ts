@@ -101,7 +101,7 @@ it("keeps keyless identities warm so a new key applies without reconnecting", as
       expect(await coordinator.read(token)).toEqual({
         status: "keyless",
         orgId: "org_keyless",
-        provisioning: false,
+        keyState: "missing",
       });
       expect([...(await ctx.storage.list()).keys()].sort()).toEqual([
         "authority",

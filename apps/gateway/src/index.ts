@@ -298,7 +298,7 @@ async function dispatchRequest(
         );
       // OAuth identity is injected only here, never inferred inside the paid pipeline.
       if (outcome.status === "keyless")
-        mcp.keylessOAuth = { provisioning: outcome.provisioning };
+        mcp.keylessOAuth = { keyState: outcome.keyState };
       else if (!apiKey) mcp.pipeline.authenticatedKey = outcome.key;
       // Stateless Streamable HTTP does not provide an SSE listener.
       if (request.method === "GET")

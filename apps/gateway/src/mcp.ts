@@ -30,6 +30,8 @@ import { callParameterSchemas, callTarget } from "./mcp-call-params";
 import { paymentRequiredResponse } from "./payment-required";
 import type { CatalogueSearchSource } from "./catalogue-search";
 import { extractApiKey } from "./key-verifier";
+import { METHOD_OVERRIDE_HEADERS } from "./headers";
+import type { KeylessState } from "./mcp-oauth";
 import {
   handleGatewayRequest,
   type GatewayRoute,
@@ -59,8 +61,8 @@ export type McpDeps = {
   pipelineEnv: PipelineEnv;
   gatewayOrigin: string;
   /** Verified OAuth session whose user has no usable key in the consented org.
-   * `provisioning`: Convex is creating that member's key; it applies on refresh. */
-  keylessOAuth?: { provisioning: boolean };
+   * See `KeylessState`; a created or re-enabled key applies on identity refresh. */
+  keylessOAuth?: { keyState: KeylessState };
 };
 
 type JsonRpcId = string | number | null;
@@ -161,7 +163,8 @@ function callApiToolDef(name: CallApiTool): ToolDef {
             }),
         headers: {
           type: "object",
-          description: "Optional extra headers to forward upstream",
+          description:
+            "Optional extra headers to forward upstream. Method-override headers (X-HTTP-Method-Override, X-HTTP-Method, X-Method-Override) are refused; set method instead.",
           additionalProperties: { type: "string" },
         },
       },
@@ -523,20 +526,25 @@ async function handleCallApi(
       "/app/settings/keys",
       deps.pipelineEnv.APP_ORIGIN ?? "https://zevium.dev",
     ).href;
-    const { provisioning } = deps.keylessOAuth;
+    const { keyState } = deps.keylessOAuth;
     const response = paymentRequiredResponse(
       crypto.randomUUID(),
-      provisioning
+      keyState === "provisioning"
         ? "Zevium is creating the API key for this connection. Retry in about 15 seconds."
-        : `No API key for this organization — create one at ${keys}`,
+        : keyState === "disabled"
+          ? `Your API key for this organization is disabled — re-enable or rotate it at ${keys}`
+          : `No API key for this organization — create one at ${keys}`,
       {
-        reason: provisioning
-          ? "oauth_key_provisioning"
-          : "oauth_missing_api_key",
+        reason:
+          keyState === "provisioning"
+            ? "oauth_key_provisioning"
+            : keyState === "disabled"
+              ? "oauth_key_disabled"
+              : "oauth_missing_api_key",
       },
       deps.pipelineEnv.APP_ORIGIN,
     );
-    if (provisioning) response.headers.set("Retry-After", "15");
+    if (keyState === "provisioning") response.headers.set("Retry-After", "15");
     return paymentToolError(response);
   }
 
@@ -604,8 +612,16 @@ async function handleCallApi(
   if (isRecord(args.headers)) {
     for (const [hk, hv] of Object.entries(args.headers)) {
       if (typeof hv === "string" && hv.length > 0) {
-        // Never let tool headers clobber the consumer key.
         const lower = hk.toLowerCase();
+        // The upstream would run the overridden method, bypassing the
+        // read/write split; refuse so the agent picks the right tool instead.
+        if (METHOD_OVERRIDE_HEADERS.has(lower))
+          return toolError(
+            tool === CALL_API_READ
+              ? `call_api_read cannot send ${hk}; use call_api_write with the intended method`
+              : `Method override headers are not supported; set method instead of ${hk}`,
+          );
+        // Never let tool headers clobber the consumer key.
         if (
           lower === "authorization" ||
           lower === "x-api-key" ||

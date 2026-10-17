@@ -21,6 +21,9 @@ describe("request header forwarding", () => {
       Cookie: "session=consumer-secret",
       Host: "gateway.example",
       "Content-Length": "17",
+      "X-HTTP-Method-Override": "DELETE",
+      "X-HTTP-Method": "DELETE",
+      "x-method-override": "DELETE",
     };
     const source = new Headers(stripped);
     const before = Array.from(source.entries());

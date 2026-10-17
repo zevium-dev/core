@@ -4,7 +4,7 @@ import { walletTables } from "./schema/wallet";
 import { settlementTables } from "./schema/settlement";
 import { readTables } from "./schema/read";
 import { connectionTables } from "./schema/connections";
-// 37 application tables; component-owned tables are enumerated in contracts/tables.json.
+// 38 application tables; component-owned tables are enumerated in contracts/tables.json.
 export default defineSchema({
   ...identityTables,
   ...walletTables,

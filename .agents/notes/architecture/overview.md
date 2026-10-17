@@ -90,7 +90,7 @@ Call pipeline detail: [gateway](../features/gateway.md). Credit gate (wallet DO)
 
 `convex/schema.ts` is authoritative; this table is a map, not a schema.
 
-PR 7 replaces the legacy control plane with 36 application tables and component-owned rate-limiter/Resend storage. Registry outbox/streams, machine-payment/session and deployment-proof tables are deleted. Signed snapshots and permanent route tombstones replace the registry transport. Snapshot, admission and transport keys are separate; destinations and deployment IDs must match. Root `contracts/` retains the reviewed frozen inventory and completion mapping. There is no mode switch or fallback to legacy execution.
+PR 7 replaces the legacy control plane with what is now 38 application tables and component-owned rate-limiter/Resend storage. Registry outbox/streams, machine-payment/session and deployment-proof tables are deleted. Signed snapshots and permanent route tombstones replace the registry transport. Snapshot, admission and transport keys are separate; destinations and deployment IDs must match. Root `contracts/` retains the reviewed frozen inventory and completion mapping. There is no mode switch or fallback to legacy execution.
 
 Cold cache/bootstrap recovery may read the paired Convex HTTP surface; warm admission uses bounded local authority and the wallet DO. Wallet source reservations, terminal settlement and close/drain evidence survive restart. Expired authority fails closed. x402, per-token dispatch and capability routing stay disabled.
 
