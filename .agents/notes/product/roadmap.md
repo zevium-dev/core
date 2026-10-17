@@ -1,6 +1,6 @@
 # Roadmap and backlog
 
-> Updated: 2026-10-11 (owner decisions; existing implementation status retained)
+> Updated: 2026-10-17 (closed-issue sweep against GitHub; owner decisions 2026-10-11 retained)
 > This file owns priority. Work is tracked as GitHub issues in `zevium-dev/core` (labels `P0`/`P1`/`P2`, `area:*`); `#N` below = issue number. Feature notes own detail and status. Keep both in sync in the same change.
 
 Status legend: **built** · **partial** · **planned**. Status is set by each feature note after checking code; if this table disagrees with a feature note, the feature note wins — fix this table.
@@ -11,35 +11,20 @@ Status legend: **built** · **partial** · **planned**. Status is set by each fe
 2. #315 **Prove real payment and settlement journey.** Configure staging env/secrets for the payment drill (`e2e/04-payment-drill.sh`, run in the preview E2E suite; the `payment-drill.yml` workflow named in older notes does not exist); manually run authenticated publish/call plus real Stripe Checkout, refund, and Connect settlement drill. Scheduled drills run deterministic tests only. → [wallet-billing](../features/wallet-billing.md), [earnings-payouts](../features/earnings-payouts.md)
 3. #315 **Finish external production gates.** Written Stripe approval for pooled prepaid credits across independent publishers; accept platform/MoR legal and tax obligations; fix supported countries/currency; write refund, dispute, debt, risk-hold, and payout policies; complete operational runbook from [stripe-connect-discovery](../research/stripe-connect-discovery.md).
 
-## Dogfood regressions — 2026-10-10
+## Dogfood regressions — 2026-10-10 (all closed)
 
-Round 2 on `75633792`: [verification, new issues and limits](../findings/dogfood-2026-10-10-round-2.md). Ten requested round-one findings passed; #396 reopened for incomplete monthly-cap recovery. #385 was excluded from standalone re-verification. New work:
-
-- **P1 #417 (implemented):** recovery actions now target the configured local/preview/production web origin. → [agent-surface](../features/agent-surface.md)
-- **P2 #416:** organization creation leaves notifications in a persistent authentication error. → [webhooks-notifications](../features/webhooks-notifications.md)
-
-The original baseline findings below are historical; use the round-two report for their current retest status.
-
-Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-10.md). Issues are new findings, not completed fixes.
-
-- **P0:** #385 key issuance/deployment blocked by missing index; #389 credentialed publication blocked after passing health check. → [api-keys](../features/api-keys.md), [publishing-specs](../features/publishing-specs.md)
-- **P1:** #384 broken seed; #387 local Convex blocked by CSP. → [dev-environment](../architecture/dev-environment.md)
-- **P1:** #392 incorrect local discovery origin; #395 MCP query parameters fail; #396 MCP 402 loses recovery metadata. → [agent-surface](../features/agent-surface.md)
-- **P1:** #393 publisher visibility webhook omitted. → [webhooks-notifications](../features/webhooks-notifications.md)
-- **P2:** #386 docs main landmark; #397 app navigation/heading accessibility; #398 fractional earnings display; #399 invalid inline-price recovery. → [landing-docs](../features/landing-docs.md), [accounts-orgs](../features/accounts-orgs.md), [publisher-analytics](../features/publisher-analytics.md), [publishing-specs](../features/publishing-specs.md)
+Every issue from both rounds is closed: #384–#387, #389, #392, #393, #395–#399, #416, #417. Reports: [baseline](../findings/dogfood-2026-10-10.md), [round 2](../findings/dogfood-2026-10-10-round-2.md).
 
 ## Next — P0 product gaps
 
 1. **Public quality signals and automated listing gates** — mostly built (probes, gates, detail-page badges; catalogue card badges + publisher quality view #331). Remaining: admin quality dashboard with auto-delist, per-API status pages, security scan. → [quality-signals](../features/quality-signals.md)
 2. **Production acceptance journey** — separate publisher and consumer orgs: publish → buy credits → issue key → paid gateway call → usage ingest → 95/5 earnings → Connect transfer. Also verify keyless mock and MCP calls against same listing. → [wallet-billing](../features/wallet-billing.md)
 
-## Codebase reset (do first) — [decision](../decisions/2026-10-10-codebase-reset.md)
+## Codebase reset — [decision](../decisions/2026-10-10-codebase-reset.md)
 
-1. #365 #366 Prune tooling/CI
-2. #354 Delete Convex migration/rollout code
-3. #359 #360 #361 Gateway restructure
-4. #353 Convex rebuild — PR 7 root cutover implemented; local/browser/CI evidence and owner-only activation tracked in [runbook](../architecture/convex-activation.md). No shared deployment performed. Rebuild (carries bugs #355–#358, #334); fold in P0 #430 traceable dust-lot merge, 32-slice bound, accepted DO authority/freeze-drain, daily risk release and anonymous breakage recognition — [decisions](../sessions/2026-10-11-owner-decisions.md)
-5. #362 #363 #364 #367 Web fixes
+Done: #365 #366 tooling/CI, #354 migration deletion, #359–#361 gateway restructure, #362–#364 #367 web fixes, carried bugs #355–#358 #334, #430 dust-lot merge.
+
+Open: **#353 Convex rebuild activation** — root cutover merged; owner-only activation per [runbook](../architecture/convex-activation.md). No shared deployment performed.
 
 ## Build queue — updated 2026-10-11
 
@@ -49,7 +34,7 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 Small, decided items. Each links to its decision; build in any order unless noted.
 
 1. #316 Built — unpriced operations hidden + not callable; explicit `0` = free — [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
-2. **Pending P0 #426** restrict $1 grant to signup auto-created personal org, once per user; #317 broader implementation remains until fixed — [decision](../decisions/2026-10-11-signup-credit-eligibility.md)
+2. **Built** #426 $1 grant restricted to signup auto-created personal org, once per user (supersedes #317) — [decision](../decisions/2026-10-11-signup-credit-eligibility.md)
 3. #318 Estimated checkout card fee, no true-up, full paid-amount refund including fee (legal check first) — [decision](../decisions/2026-10-11-card-fee-and-refunds.md)
 4. **Built** #319 Review eligibility includes free-tier callers — [decision](../decisions/2026-10-10-review-eligibility.md)
 5. #320 Email via Resend (built; dormant until owner configures verified sender + API key) — [decision](../decisions/2026-10-10-email-resend.md)
@@ -61,21 +46,21 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 
 ### P0 — a working, honest loop is table stakes
 
-| #   | Item                                                                                                                                  | Feature                                                                                                |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 1   | Core loop: publish → public catalogue listing → key issuance → paid metered call                                                      | [gateway](../features/gateway.md)                                                                      |
-| 2   | All agent tooling routes through metering — no unmetered side doors                                                                   | [agent-surface](../features/agent-surface.md)                                                          |
-| 3   | Publisher upstream credentials attached to forwarded calls                                                                            | [upstream-credentials](../features/upstream-credentials.md)                                            |
-| 4   | Time-to-first-call < 60s, fully self-serve                                                                                            | [accounts-orgs](../features/accounts-orgs.md)                                                          |
-| 5   | Usage dashboard (org wallet, per-member/key/endpoint, projections) + activity log                                                     | [wallet-billing](../features/wallet-billing.md)                                                        |
-| 6   | Publisher analytics (calls, revenue, p95/p99, error breakdown)                                                                        | [publisher-analytics](../features/publisher-analytics.md)                                              |
-| 7   | Catalogue quality signals + semantic search                                                                                           | [quality-signals](../features/quality-signals.md), [catalogue-search](../features/catalogue-search.md) |
-| 7b  | #322–#326 Agent distribution: `llms.txt`, OAuth on `/mcp`, Claude Connectors Directory, MCP Registry, one-click installs (2026-10-10) | [agent-surface](../features/agent-surface.md)                                                          |
-| 7d  | #313 #314 House listings through permitted sources, ordinary publisher 95/5; RapidAPI excluded; optional cap P2 #429                  | [publishing-specs](../features/publishing-specs.md)                                                    |
-| 7e  | #425 Hide/disable per-token LLM listings, retain code                                                                                 | [pricing](../features/pricing.md)                                                                      |
-| 7f  | #428 converter + #451 Node CLI built (owner release pending); listing-scoped MCP #110, SDKs #350 P2                                   | [agent-surface](../features/agent-surface.md)                                                          |
-| 7g  | #426 Signup personal-org-only $1 grant, once per user                                                                                 | [accounts-orgs](../features/accounts-orgs.md)                                                          |
-| 7h  | #353 #430 Rebuild authority/lots, traceable dust merge, daily release and breakage accounting                                         | [wallet-billing](../features/wallet-billing.md)                                                        |
+| #   | Item                                                                                                                                                | Feature                                                                                                |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1   | Core loop: publish → public catalogue listing → key issuance → paid metered call                                                                    | [gateway](../features/gateway.md)                                                                      |
+| 2   | All agent tooling routes through metering — no unmetered side doors                                                                                 | [agent-surface](../features/agent-surface.md)                                                          |
+| 3   | Publisher upstream credentials attached to forwarded calls                                                                                          | [upstream-credentials](../features/upstream-credentials.md)                                            |
+| 4   | Time-to-first-call < 60s, fully self-serve                                                                                                          | [accounts-orgs](../features/accounts-orgs.md)                                                          |
+| 5   | Usage dashboard (org wallet, per-member/key/endpoint, projections) + activity log                                                                   | [wallet-billing](../features/wallet-billing.md)                                                        |
+| 6   | Publisher analytics (calls, revenue, p95/p99, error breakdown)                                                                                      | [publisher-analytics](../features/publisher-analytics.md)                                              |
+| 7   | Catalogue quality signals + semantic search                                                                                                         | [quality-signals](../features/quality-signals.md), [catalogue-search](../features/catalogue-search.md) |
+| 7b  | Agent distribution: #323 OAuth on `/mcp` + #326 one-click installs built; open #322 `llms.txt`, #324 Claude Connectors Directory, #325 MCP Registry | [agent-surface](../features/agent-surface.md)                                                          |
+| 7d  | #313 #314 House listings through permitted sources, ordinary publisher 95/5; RapidAPI excluded; optional cap P2 #429                                | [publishing-specs](../features/publishing-specs.md)                                                    |
+| 7e  | #425 Built — per-token LLM listings hidden/disabled, code retained                                                                                  | [pricing](../features/pricing.md)                                                                      |
+| 7f  | #428 converter + #451 Node CLI built (owner release pending); listing-scoped MCP #110, SDKs #350 P2                                                 | [agent-surface](../features/agent-surface.md)                                                          |
+| 7g  | #426 Built — signup personal-org-only $1 grant, once per user                                                                                       | [accounts-orgs](../features/accounts-orgs.md)                                                          |
+| 7h  | #353 #430 Rebuild authority/lots, traceable dust merge, daily release and breakage accounting                                                       | [wallet-billing](../features/wallet-billing.md)                                                        |
 
 ### P1 — the agent-first bet + trust plumbing
 
@@ -83,7 +68,7 @@ Agent distribution remains P0. x402 activation and capability routing move to P2
 | --- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | 8   | Org-scoped wallets                                                                                        | [wallet-billing](../features/wallet-billing.md)                 |
 | 9   | Per-API agent tooling + machine-readable discovery/pricing index                                          | [agent-surface](../features/agent-surface.md)                   |
-| 10  | #424 Disable x402 and retain enablement runbook; activation is P2 #109                                    | [machine-payments](../features/machine-payments.md)             |
+| 10  | #424 Built — x402 disabled, enablement runbook retained; activation P2                                    | [machine-payments](../features/machine-payments.md)             |
 | 11  | Free tier enforcement (publisher-funded) + tiered pricing                                                 | [pricing](../features/pricing.md)                               |
 | 12  | Spend caps, threshold alerts, budget webhooks                                                             | [wallet-billing](../features/wallet-billing.md)                 |
 | 13  | Key-management API with zero-downtime rotation                                                            | [api-keys](../features/api-keys.md)                             |
