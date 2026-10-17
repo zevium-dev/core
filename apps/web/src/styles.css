@@ -76,6 +76,7 @@ body {
   --dur-page: 400ms;
   --dist: 16px;
   --dur-slow: 600ms;
+  --stagger: 50ms;
 }
 
 .dark {
@@ -370,6 +371,101 @@ html[data-view-transition-kind="swap"]::view-transition-old(shared-card) {
   background-size: 100% 1px;
 }
 
+/* WIP page illustration (components/wip-page.tsx). Base styles are the
+   finished drawing; keyframes only define the starting state, so removing the
+   animation always leaves the complete illustration. */
+.wip-art
+  :is(
+    .wip-rise,
+    .wip-write,
+    .wip-pop,
+    .wip-latch,
+    .wip-sign,
+    .wip-pen,
+    .wip-signal
+  ) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease);
+  animation-fill-mode: backwards;
+  animation-delay: calc(var(--i, 0) * var(--stagger));
+  transform-box: fill-box;
+}
+
+.wip-art .wip-rise {
+  animation-name: wip-rise;
+}
+
+.wip-art :is(.wip-write, .wip-sign) {
+  animation-name: wip-write;
+  transform-origin: left center;
+}
+
+.wip-art .wip-pop {
+  animation-name: wip-pop;
+  animation-duration: var(--dur-base);
+  transform-origin: center;
+}
+
+.wip-art .wip-latch {
+  animation-name: wip-latch;
+  animation-duration: var(--dur-base);
+}
+
+.wip-art .wip-pen {
+  animation-name: wip-pen;
+}
+
+.wip-art .wip-signal {
+  animation-name: wip-signal;
+  transform-box: view-box;
+  transform-origin: 100px 76px;
+}
+
+.wip-art[data-static] *,
+.wip-art[data-static] {
+  animation: none !important;
+}
+
+@keyframes wip-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--dist));
+  }
+}
+
+@keyframes wip-write {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes wip-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes wip-latch {
+  from {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes wip-pen {
+  from {
+    opacity: 0;
+    transform: translateX(-56px);
+  }
+}
+
+@keyframes wip-signal {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
 /* Static documentation code highlighting */
 .shj-syn-kwd,
 .shj-syn-section {
@@ -424,6 +520,7 @@ html[data-view-transition-kind="swap"]::view-transition-old(shared-card) {
   }
 
   .content-enter,
+  .wip-art *,
   ::view-transition-old(root),
   ::view-transition-new(root),
   ::view-transition-group(*),
