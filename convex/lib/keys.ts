@@ -6,6 +6,8 @@ import { requireActiveOrg } from "./auth";
 import { isPrivilegedOrgRole } from "@zevium/shared";
 import { provisionHash, type Provision } from "./keyProjection";
 export type Key = Extract<Doc<"apiKeys">, { kind: "key" }>;
+/** Name of the key auto-created on a member's first OAuth MCP connect. */
+export const MCP_AUTO_KEY_NAME = "MCP (auto-created)";
 export type Rotation = Extract<Doc<"apiKeys">, { kind: "rotation" }>;
 export function keyDto(row: Key) {
   return {

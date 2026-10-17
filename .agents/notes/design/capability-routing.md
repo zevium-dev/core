@@ -320,7 +320,7 @@ MCP changes keep search-then-load:
 
 - `search_apis` adds typed capability entries (`kind: capability`, ID, exact version, description, provider count, listed price range, available quality evidence, `requiresMaxCost: true`) beside existing listing results. Derive them from the edge snapshot; only eligible explicitly priced public operations count. No per-provider tool explosion.
 - `get_api_docs` accepts either the existing listing selector or an exact capability/version selector. Capability docs return normalized schemas, routing controls, cost-cap semantics, pagination limits, and provider IDs for pin/exclude. Registry text is trusted; publisher text stays under `publisherData`.
-- `call_api` accepts either its existing direct target or `{capability, version, input, routing}`. Reject mixed selectors. The capability branch invokes the same internal router as HTTP and returns normalized results with routing metadata. Existing key transport remains; derive wallet identity from verified auth. Mark capability docs as read-only and describe repeated-call billing. Do not mark the whole mixed direct/capability tool read-only when direct operations may mutate state.
+- `call_api_read`/`call_api_write` (split from `call_api` 2026-10-17) accept either their existing direct target or `{capability, version, input, routing}`. Reject mixed selectors. The capability branch invokes the same internal router as HTTP and returns normalized results with routing metadata. Existing key transport remains; derive wallet identity from verified auth. Mark capability docs as read-only and describe repeated-call billing. Do not mark the whole mixed direct/capability tool read-only when direct operations may mutate state.
 
 ## 5. Edge snapshot and delivery
 

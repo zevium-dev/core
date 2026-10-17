@@ -68,7 +68,7 @@ export class EdgeOAuthDO extends DurableObject<NextEnv> {
     }
     if (!state || state.expiresAt <= Date.now())
       return { status: "unavailable" };
-    if (state.outcome.status === "ok") {
+    if (state.outcome.status === "ok" || state.outcome.status === "keyless") {
       const touched = (await this.ctx.storage.get<number>("lastRead")) ?? 0;
       if (Date.now() - touched > 15_000)
         await this.ctx.storage.put("lastRead", Date.now());
@@ -159,7 +159,11 @@ export class EdgeOAuthDO extends DurableObject<NextEnv> {
       const outcome = await verifier.verify(token);
       signal.throwIfAborted();
       if (outcome.status === "unavailable") return;
-      if (outcome.status !== "ok" || expiresAt <= Date.now()) {
+      // Keyless sessions refresh like verified ones, so a new key applies within ~15s.
+      if (
+        (outcome.status !== "ok" && outcome.status !== "keyless") ||
+        expiresAt <= Date.now()
+      ) {
         await this.ctx.storage.deleteAll();
         await this.ctx.storage.put("authority", {
           outcome: expiresAt <= Date.now() ? { status: "invalid" } : outcome,

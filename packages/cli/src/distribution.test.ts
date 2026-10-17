@@ -185,7 +185,7 @@ describe("single-file CLI distribution", () => {
             id: 1,
             method: "tools/call",
             params: {
-              name: "call_api",
+              name: "call_api_read",
               arguments: {
                 org: "acme",
                 project: "pets",

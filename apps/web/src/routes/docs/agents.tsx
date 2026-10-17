@@ -80,11 +80,11 @@ function DocsAgentsPage() {
       </p>
       <p>
         Docs and help need no key. Execution uses authenticated, credit-gated
-        <code> call_api</code>; set <code>ZEVIUM_API_KEY</code> and fund your
-        organization first. <code>ZEVIUM_GATEWAY_URL</code> selects a different
-        gateway (default: <code>https://gateway.zevium.dev</code>). Generator
-        major 1 is supported; unknown majors stop before execution and ask you
-        to update.
+        <code> call_api_read</code> or <code>call_api_write</code>; set{" "}
+        <code>ZEVIUM_API_KEY</code> and fund your organization first.{" "}
+        <code>ZEVIUM_GATEWAY_URL</code> selects a different gateway (default:{" "}
+        <code>https://gateway.zevium.dev</code>). Generator major 2 is
+        supported; unknown majors stop before execution and ask you to update.
       </p>
 
       <h2>Discovery index</h2>
@@ -106,7 +106,12 @@ function DocsAgentsPage() {
       <DocsCodeBlock lang="bash" code={`curl "${LISTING_DOCS_URL}"`} />
 
       <h2>Tools</h2>
-      <p>Search for an API first, read its reference, then call an endpoint:</p>
+      <p>
+        Search for an API first, read its reference, then call an endpoint. Both
+        call tools authenticate with the MCP connection itself: OAuth, or your
+        key in the request’s <code>Authorization</code> header. Keys are never
+        tool arguments, so they stay out of the model’s context.
+      </p>
       <ul>
         <li>
           <code>search_apis</code> — search the public catalogue. Returns
@@ -122,12 +127,19 @@ function DocsAgentsPage() {
           <code>org</code>, <code>project</code>.
         </li>
         <li>
-          <code>call_api</code> — execute a metered API call through the
-          gateway. Requires a consumer key (Authorization on the MCP request, or
-          a <code>key</code> argument). Credits reserve and settle like any
-          gateway call. Inputs: <code>org</code>, <code>project</code>,{" "}
-          <code>method</code>, <code>path</code>, optional <code>body</code>,{" "}
-          <code>headers</code>, <code>key</code>.
+          <code>call_api_read</code> — execute a metered <code>GET</code> or{" "}
+          <code>HEAD</code> call through the gateway. Inputs: <code>org</code>,{" "}
+          <code>project</code>, <code>path</code>, optional <code>method</code>{" "}
+          (defaults to <code>GET</code>), <code>pathParams</code>,{" "}
+          <code>query</code>, <code>headers</code>.
+        </li>
+        <li>
+          <code>call_api_write</code> — execute a metered call with any other
+          method (<code>POST</code>, <code>PUT</code>, <code>PATCH</code>,{" "}
+          <code>DELETE</code>, …). It may change data at the publisher’s API.
+          Inputs: <code>org</code>, <code>project</code>, <code>method</code>,{" "}
+          <code>path</code>, optional <code>pathParams</code>,{" "}
+          <code>query</code>, <code>body</code>, <code>headers</code>.
         </li>
       </ul>
       <p>
@@ -145,9 +157,9 @@ function DocsAgentsPage() {
 
       <h2>Credit gating</h2>
       <p>
-        <code>call_api</code> reserves credits before contacting the publisher
-        and settles the charge on a successful response. If your wallet is empty
-        or cannot cover the call, the tool returns an error result with{" "}
+        Each call tool reserves credits before contacting the publisher and
+        settles the charge on a successful response. If your wallet is empty or
+        cannot cover the call, the tool returns an error result with{" "}
         <code>status: 402</code>. Its body contains{" "}
         <code>payment_required</code>, a reason, and links to create a key or
         add credits.

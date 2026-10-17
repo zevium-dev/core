@@ -103,7 +103,7 @@ describe("zevium CLI", () => {
     ).toContain("Cost: 3 credits");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
-  it("executes generated flags solely through authenticated MCP call_api", async () => {
+  it("executes generated GET flags solely through authenticated MCP call_api_read", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(docs())
@@ -130,7 +130,7 @@ describe("zevium CLI", () => {
     });
     expect(JSON.parse(String(init?.body))).toMatchObject({
       params: {
-        name: "call_api",
+        name: "call_api_read",
         arguments: {
           org: "acme",
           project: "pets",
@@ -165,6 +165,7 @@ describe("zevium CLI", () => {
     expect(JSON.parse(String(fetchImpl.mock.calls[1]![1]?.body))).toMatchObject(
       {
         params: {
+          name: "call_api_write",
           arguments: {
             body: { name: "cat" },
             headers: { "content-type": "application/json" },
@@ -246,8 +247,8 @@ describe("zevium CLI", () => {
       "unsupported_parameter_location",
     );
   });
-  it.each([0, 2, 9000, -1, 1.1])(
-    "rejects unsupported numeric generator major %s before call_api",
+  it.each([0, 1, 3, 9000, -1, 1.1])(
+    "rejects unsupported numeric generator major %s before call_api_*",
     async (generatorVersion) => {
       const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
         toolResult(
@@ -259,7 +260,7 @@ describe("zevium CLI", () => {
       await expect(
         runCli(["acme", "pets", "get_ping_3"], { ...opts, fetchImpl }),
       ).rejects.toThrow(
-        `listing uses generator major ${generatorVersion}; this CLI supports 1; download the latest CLI`,
+        `listing uses generator major ${generatorVersion}; this CLI supports 2; download the latest CLI`,
       );
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
@@ -285,7 +286,7 @@ describe("zevium CLI", () => {
     },
   );
   it.each([
-    ...["1", "1.0.0", null, undefined].map((generatorVersion) => ({
+    ...["2", "1.0.0", null, undefined].map((generatorVersion) => ({
       publisherData: { generated: { ...contract, generatorVersion } },
     })),
     {},
@@ -300,7 +301,21 @@ describe("zevium CLI", () => {
     ).rejects.toThrow(/^invalid contract$/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
-  it("accepts additive fields within supported major 1", async () => {
+  it("rejects a generated call whose tool does not match its method", async () => {
+    const generated = structuredClone(contract);
+    const get = generated.operations.find((op) => op.method === "GET")!;
+    get.call.tool = "call_api_write";
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        toolResult(JSON.stringify({ publisherData: { generated } })),
+      );
+    await expect(
+      runCli(["acme", "pets", get.command.name], { ...opts, fetchImpl }),
+    ).rejects.toThrow(/^invalid contract$/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it("accepts additive fields within supported major 2", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -309,7 +324,7 @@ describe("zevium CLI", () => {
             publisherData: {
               generated: {
                 ...contract,
-                generatorVersion: 1,
+                generatorVersion: 2,
                 futureOptionalField: true,
               },
             },
@@ -340,7 +355,7 @@ describe("zevium CLI", () => {
           ),
       }),
     ).rejects.toThrow(
-      "listing uses generator major 9000; this CLI supports 1; download the latest CLI",
+      "listing uses generator major 9000; this CLI supports 2; download the latest CLI",
     );
   });
 });

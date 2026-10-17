@@ -298,9 +298,17 @@ router.route({
         z.strictObject({ userId: text, orgId: text }),
         16_384,
       );
-      return Response.json(
-        await ctx.runQuery(internal.keySettings.resolveMcpIdentity, args),
+      const identity = await ctx.runQuery(
+        internal.keySettings.resolveMcpIdentity,
+        args,
       );
+      // Runs at gateway cache-miss/refresh time, never per paid request.
+      if (identity?.keyId === null)
+        return Response.json({
+          ...identity,
+          provisioning: await ctx.runMutation(internal.mcpKeys.request, args),
+        });
+      return Response.json(identity);
     } catch {
       return new Response("Identity unavailable", { status: 503 });
     }
