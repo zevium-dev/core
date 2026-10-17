@@ -84,6 +84,7 @@ Owner release steps (not executed by this implementation):
 
 ## Decisions
 
+- 2026-10-17 — ACCEPTED: official MCP Registry name `dev.zevium/mcp`, owner-approved; permanent once published. [Decision](../decisions/2026-10-17-mcp-registry-name.md).
 - 2026-10-17 — DEFERRED: Claude Connectors Directory submission parked by owner; #324 code kept. [Decision](../decisions/2026-10-17-connectors-directory-deferred.md).
 - 2026-10-13 — ACCEPTED: Node >=22.12.0 chosen to support Node 22 LTS. [Decision](../decisions/2026-10-13-cli-node-22-lts.md).
 

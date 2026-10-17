@@ -25,7 +25,9 @@ jobs:
     if: >-
       vars.MCP_REGISTRY_PUBLISH_ENABLED == 'true' &&
       ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop') ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'))
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'develop' &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: mcp-registry
@@ -66,13 +68,28 @@ jobs:
           remote="$(jq -r '.remotes[0].url' server.json)"
           test -n "$PRODUCTION_GATEWAY_URL"
           test "$remote" = "$PRODUCTION_GATEWAY_URL/mcp"
-          curl --fail --silent --show-error --output .initialize.json \
+          # Keyless initialize: 200 when MCP OAuth is off; once it is on, the
+          # gateway answers 401 with a challenge naming its protected-resource
+          # metadata, which must resolve to this remote.
+          status="$(curl --silent --show-error --output .initialize.json \
+            --dump-header .initialize.headers --write-out '%{http_code}' \
             --connect-timeout 5 --max-time 20 \
             --header 'content-type: application/json' \
             --header 'accept: application/json, text/event-stream' \
             --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"zevium-mcp-registry-publish","version":"1"}}}' \
-            "$remote"
-          jq -e '.result.serverInfo.name == "zevium-gateway"' .initialize.json > /dev/null
+            "$remote")"
+          case "$status" in
+            200)
+              jq -e '.result.serverInfo.name == "zevium-gateway"' .initialize.json > /dev/null
+              ;;
+            401)
+              metadata="$PRODUCTION_GATEWAY_URL/.well-known/oauth-protected-resource/mcp"
+              grep -iqF "www-authenticate: Bearer resource_metadata=\"$metadata\"" .initialize.headers
+              curl --fail --silent --show-error --connect-timeout 5 --max-time 20 "$metadata" \
+                | jq -e --arg r "$remote" '.resource == $r and (.authorization_servers | length > 0)' > /dev/null
+              ;;
+            *) echo "MCP initialize returned HTTP $status" >&2; exit 1 ;;
+          esac
 
       - name: Install mcp-publisher
         if: steps.listing.outputs.published == 'false'

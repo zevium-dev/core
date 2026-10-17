@@ -25,7 +25,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Zevium API key from https://www.zevium.dev/app/settings/keys, for clients without OAuth. OAuth clients need no key. Needed for call_api_read/call_api_write; search_apis and get_api_docs work without it.",
+          "description": "Zevium API key from https://www.zevium.dev/app/settings/keys. Not needed if your client connects with OAuth; otherwise required for call_api_read/call_api_write.",
           "isRequired": false,
           "isSecret": true,
           "value": "Bearer {zevium_api_key}",

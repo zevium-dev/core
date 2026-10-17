@@ -38,7 +38,7 @@ test("remote is the production gateway MCP endpoint", () => {
     [["streamable-http", `https://${route}/mcp`]],
   );
   for (const header of server.remotes[0].headers ?? []) {
-    // A required header would block keyless search/docs and OAuth clients.
+    // A required header would make OAuth clients demand a static key.
     assert.equal(header.isRequired, false);
     assert.equal(header.isSecret, true);
   }

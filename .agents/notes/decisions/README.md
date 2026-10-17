@@ -77,3 +77,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-17 | [MCP tools take no `key` argument](2026-10-17-mcp-no-key-argument.md)                                | accepted (built)                       |
 | 2026-10-17 | [First OAuth MCP connect auto-creates the key](2026-10-17-mcp-auto-created-key.md)                   | accepted (built)                       |
 | 2026-10-17 | [Claude Connectors Directory submission deferred](2026-10-17-connectors-directory-deferred.md)       | deferred                               |
+| 2026-10-17 | [MCP Registry server name `dev.zevium/mcp`](2026-10-17-mcp-registry-name.md)                         | accepted (built, not published)        |
