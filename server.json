@@ -25,7 +25,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Zevium API key from https://www.zevium.dev/app/settings/keys. Needed for call_api; search_apis and get_api_docs work without it.",
+          "description": "Zevium API key from https://www.zevium.dev/app/settings/keys, for clients without OAuth. OAuth clients need no key. Needed for call_api_read/call_api_write; search_apis and get_api_docs work without it.",
           "isRequired": false,
           "isSecret": true,
           "value": "Bearer {zevium_api_key}",
@@ -54,12 +54,17 @@
             "description": "Read endpoint definitions, prices and usage notes for one API."
           },
           {
-            "name": "call_api",
-            "description": "Call an API endpoint through the metered gateway using prepaid org credits."
+            "name": "call_api_read",
+            "description": "Call a GET or HEAD endpoint through the metered gateway using prepaid org credits."
+          },
+          {
+            "name": "call_api_write",
+            "description": "Call a POST, PUT, PATCH, DELETE, OPTIONS or TRACE endpoint; may change upstream data. Uses prepaid org credits."
           }
         ],
         "billing": "Prepaid org-scoped credits; zero balance blocks the call.",
-        "discovery": "https://gateway.zevium.dev/discovery"
+        "discovery": "https://gateway.zevium.dev/discovery",
+        "auth": "OAuth on /mcp (first connect auto-creates the member's MCP key) or an Authorization: Bearer API key header; tools take no key argument."
       }
     }
   }

@@ -8,7 +8,7 @@ Zevium's remote `/mcp` server is described by root `server.json` and listed in t
 
 - Schema `2025-12-11` (current per `mcp-publisher` 1.8.1 `CurrentSchemaVersion`). The registry rejects deprecated schema URLs on publish, so read the registry's `docs/reference/server-json/CHANGELOG.md` before bumping it.
 - One `streamable-http` remote: `https://gateway.zevium.dev/mcp`. The registry lets each remote URL belong to one server name, and it does not check URL ownership.
-- An optional secret `Authorization: Bearer {zevium_api_key}` header. It stays optional because `search_apis`/`get_api_docs` work without a key, `call_api` also accepts a `key` argument, and OAuth clients (once activated) send no static key. A required header would make clients demand a key up front.
+- An optional secret `Authorization: Bearer {zevium_api_key}` header. It stays optional because `search_apis`/`get_api_docs` work without a key and OAuth clients (once activated) send no static key: first connect auto-creates their MCP key. Tools take no `key` argument, so `call_api_read`/`call_api_write` are paid by the OAuth session or this header. A required header would make clients demand a key up front.
 - The server.json format has no tools field. Tool names and one-line summaries go under `_meta["io.modelcontextprotocol.registry/publisher-provided"]["dev.zevium"]`. That is the only `_meta` key the registry keeps, and it is capped at 4 KiB.
 - `version` is the listing version, independent of gateway `SERVER_INFO.version` and of releases. Registry versions are immutable: a listing change must bump `version` (semver), or it is never published.
 
@@ -56,6 +56,6 @@ Optional manual login check before step 5: `mcp-publisher login dns --domain zev
 
 ## Open questions
 
-- Server name `dev.zevium/mcp` is permanent once published (only status can change, e.g. deprecated). Alternatives: `dev.zevium/zevium`, `dev.zevium/marketplace`.
+- Resolved 2026-10-17: owner confirmed server name `dev.zevium/mcp`. It is permanent once published (only status can change, e.g. deprecated).
 - Icon uses `https://www.zevium.dev/logo.svg`; `logo512.png` returns 404 on production today. Some clients render only PNG/JPEG.
-- After OAuth activation, the header description could mention OAuth. The registry has no OAuth field: clients discover it from `/mcp` protected-resource metadata.
+- Header description mentions OAuth as the alternative to a key. The registry has no OAuth field: clients discover it from `/mcp` protected-resource metadata.

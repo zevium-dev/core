@@ -269,7 +269,7 @@ try {
         id: 1,
         method: "tools/call",
         params: {
-          name: "call_api",
+          name: "call_api_write",
           arguments: {
             org: oauth.handle,
             project: "echo",
@@ -329,7 +329,7 @@ try {
       id: 2,
       method: "tools/call",
       params: {
-        name: "call_api",
+        name: "call_api_write",
         arguments: {
           org: safe.handle,
           project: "echo",

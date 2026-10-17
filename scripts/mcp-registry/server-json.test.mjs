@@ -51,9 +51,16 @@ test("publisher metadata stays within registry limits and matches gateway tools"
   const source = read("apps/gateway/src/mcp.ts");
   const start = source.indexOf("const TOOLS");
   const tools = source.slice(start, source.indexOf("\n];", start));
-  const gatewayTools = [...tools.matchAll(/^ {4}name: "([a-z_]+)",$/gm)].map(
-    (m) => m[1],
-  );
+  // Execute tools are built by `callApiToolDef(CONST)`; resolve the constant
+  // from the shared module so a rename fails here too.
+  const shared = read("packages/shared/src/mcp-call-tools.ts");
+  const constant = (name) =>
+    new RegExp(`export const ${name} = "([a-z_]+)";`).exec(shared)?.[1];
+  const gatewayTools = [
+    ...tools.matchAll(
+      /^ {4}name: "([a-z_]+)",$|^ {2}callApiToolDef\(([A-Z_]+)\),$/gm,
+    ),
+  ].map((m) => m[1] ?? constant(m[2]));
   assert.deepEqual(
     meta["dev.zevium"].tools.map((t) => t.name),
     gatewayTools,

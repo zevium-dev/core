@@ -9,6 +9,7 @@
     "specVersions",
     "upstreamCredentials",
     "apiKeys",
+    "mcpKeyProvisions",
     "wallets",
     "walletEntries",
     "fundingLots",

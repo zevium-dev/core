@@ -409,11 +409,16 @@ describe("MCP /mcp", () => {
     expect(Array.isArray(body.tools)).toBe(true);
     if (!Array.isArray(body.tools)) return;
     expect(body.tools).toEqual(
-      expect.arrayContaining(["search_apis", "get_api_docs", "call_api"]),
+      expect.arrayContaining([
+        "search_apis",
+        "get_api_docs",
+        "call_api_read",
+        "call_api_write",
+      ]),
     );
   });
 
-  it("tools/list returns three tools", async () => {
+  it("tools/list returns four tools", async () => {
     await installAgentFixtures({ clerkOrgId: "org_mcp_list" });
     const rpc: unknown = await mcpCall("tools/list");
     expect(isRecord(rpc)).toBe(true);
@@ -430,23 +435,100 @@ describe("MCP /mcp", () => {
     const names = result.tools
       .map((t) => (isRecord(t) && typeof t.name === "string" ? t.name : null))
       .filter((n): n is string => n !== null);
-    expect(names).toEqual(
-      expect.arrayContaining(["search_apis", "get_api_docs", "call_api"]),
-    );
-    expect(names).toHaveLength(3);
+    expect(names).toEqual([
+      "search_apis",
+      "get_api_docs",
+      "call_api_read",
+      "call_api_write",
+    ]);
+    const params = expect.objectContaining({
+      pathParams: expect.objectContaining({ type: "object" }),
+      query: expect.objectContaining({ type: "object" }),
+    });
     expect(result.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: "call_api",
+          name: "call_api_read",
+          inputSchema: expect.objectContaining({
+            properties: params,
+            required: ["org", "project", "path"],
+          }),
+        }),
+        expect.objectContaining({
+          name: "call_api_write",
           inputSchema: expect.objectContaining({
             properties: expect.objectContaining({
-              pathParams: expect.objectContaining({ type: "object" }),
-              query: expect.objectContaining({ type: "object" }),
+              body: expect.any(Object),
             }),
+            required: ["org", "project", "method", "path"],
           }),
         }),
       ]),
     );
+    const schemas = result.tools.map((t) =>
+      isRecord(t) && isRecord(t.inputSchema) ? t.inputSchema : {},
+    );
+    // Directory review: no catch-all method parameter; secrets never as arguments.
+    expect(schemas[2]?.properties).toMatchObject({
+      method: { enum: ["GET", "HEAD"] },
+    });
+    expect(schemas[3]?.properties).toMatchObject({
+      method: {
+        enum: ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"],
+      },
+    });
+    expect(schemas[2]?.properties).not.toHaveProperty("body");
+    for (const schema of schemas)
+      expect(schema.properties).not.toHaveProperty("key");
+  });
+
+  it("tools/list annotates every tool for directory review", async () => {
+    await installAgentFixtures({ clerkOrgId: "org_mcp_annotations" });
+    const rpc: unknown = await mcpCall("tools/list");
+    if (!isRecord(rpc) || !isRecord(rpc.result)) throw new Error("bad rpc");
+    const tools = rpc.result.tools;
+    if (!Array.isArray(tools)) throw new Error("tools missing");
+
+    const read = {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    };
+    expect(tools).toEqual([
+      expect.objectContaining({
+        name: "search_apis",
+        title: "Search APIs",
+        annotations: { title: "Search APIs", ...read },
+      }),
+      expect.objectContaining({
+        name: "get_api_docs",
+        title: "Get API docs",
+        annotations: { title: "Get API docs", ...read },
+      }),
+      expect.objectContaining({
+        name: "call_api_read",
+        title: "Call API: read (spends credits)",
+        annotations: {
+          title: "Call API: read (spends credits)",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      }),
+      expect.objectContaining({
+        name: "call_api_write",
+        title: "Call API: write (spends credits)",
+        annotations: {
+          title: "Call API: write (spends credits)",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      }),
+    ]);
   });
 
   it("initialize returns protocol + capabilities", async () => {
@@ -671,8 +753,23 @@ describe("MCP /mcp", () => {
       arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
     });
     const docs = JSON.parse(toolText(rpc));
-    expect(docs.publisherData.generated.generatorVersion).toBe(1);
+    expect(docs.publisherData.generated.generatorVersion).toBe(2);
     expect(docs.publisherData.generated.operations).toHaveLength(2);
+    expect(
+      docs.publisherData.generated.operations.map(
+        (op: { method: string; call: { tool: string } }) => [
+          op.method,
+          op.call.tool,
+        ],
+      ),
+    ).toEqual(
+      docs.publisherData.generated.operations.map((op: { method: string }) => [
+        op.method,
+        ["GET", "HEAD"].includes(op.method)
+          ? "call_api_read"
+          : "call_api_write",
+      ]),
+    );
     expect(
       docs.publisherData.generated.operations[0].tool.description,
     ).toContain("Cost: 3 credits");
