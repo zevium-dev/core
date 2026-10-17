@@ -40,19 +40,23 @@ export const CREDIT_PACKS = [
 ] as const;
 type PackId = (typeof CREDIT_PACKS)[number]["id"];
 /**
- * Legal #318 gate: off unless the owner enables it. The estimate is configured
- * per pack and never recalculated against the actual charge; null means the
- * enabled fee is misconfigured, so the pack cannot be sold.
+ * Single pack quote for billing state and Checkout. Legal #318 gate: the fee is
+ * off unless the owner enables it, configured per pack and never recalculated
+ * against the actual charge. null means the pack is misconfigured (no credit
+ * price, or an enabled fee without amount/price), so it cannot be sold.
  */
-export function cardFeeQuote(packId: PackId) {
-  const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
-  if (!enabled) return { enabled, feeCents: 0, feeLinePriceId: undefined };
+export function packQuote(packId: PackId) {
   const key = packId.toUpperCase();
+  const creditPriceId = process.env[`NEXT_STRIPE_PRICE_${key}`];
+  if (!creditPriceId) return null;
+  const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
+  if (!enabled)
+    return { creditPriceId, enabled, feeCents: 0, feeLinePriceId: undefined };
   const feeCents = Number(process.env[`NEXT_STRIPE_FEE_${key}_CENTS`]);
   const feeLinePriceId = process.env[`NEXT_STRIPE_FEE_${key}_PRICE`];
   if (!Number.isSafeInteger(feeCents) || feeCents <= 0 || !feeLinePriceId)
     return null;
-  return { enabled, feeCents, feeLinePriceId };
+  return { creditPriceId, enabled, feeCents, feeLinePriceId };
 }
 export const prepareCheckoutIntent = internalMutation({
   args: { packId: pack, customerId: v.string() },
@@ -62,12 +66,14 @@ export const prepareCheckoutIntent = internalMutation({
     if (org.stripeCustomerId !== args.customerId)
       throw new ConvexError("Checkout customer mismatch");
     const selected = CREDIT_PACKS.find((p) => p.id === args.packId)!;
-    const stripeCreditPriceId =
-      process.env[`NEXT_STRIPE_PRICE_${args.packId.toUpperCase()}`];
-    if (!stripeCreditPriceId) throw new ConvexError("Credit pack unavailable");
-    const quote = cardFeeQuote(args.packId);
-    if (!quote) throw new ConvexError("Fee quote unavailable");
-    const { feeCents: fee, feeLinePriceId, enabled } = quote;
+    const quote = packQuote(args.packId);
+    if (!quote) throw new ConvexError("Credit pack unavailable");
+    const {
+      creditPriceId: stripeCreditPriceId,
+      feeCents: fee,
+      feeLinePriceId,
+      enabled,
+    } = quote;
     const now = Date.now();
     const id = await ctx.db.insert("checkoutIntents", {
       organizationId: org._id,
@@ -119,6 +125,14 @@ export const attachCheckoutSession = internalMutation({
     });
   },
 });
+class CheckoutPriceMismatch extends Error {
+  constructor(
+    readonly priceId: string,
+    readonly check: string,
+  ) {
+    super("Stripe price does not match configured amount");
+  }
+}
 export const createCheckout = action({
   args: { packId: pack },
   handler: async (
@@ -152,16 +166,18 @@ export const createCheckout = action({
       const prices = await Promise.all(
         lines.map(([id]) => stripe.prices.retrieve(id)),
       );
-      if (
-        prices.some(
-          (p, i) =>
-            !p.active ||
-            p.type !== "one_time" ||
-            p.currency !== intent.currency ||
-            p.unit_amount !== lines[i]![1],
-        )
-      )
-        throw new Error("Stripe price does not match configured amount");
+      prices.forEach((p, i) => {
+        const failed = !p.active
+          ? "inactive"
+          : p.type !== "one_time"
+            ? "not one_time"
+            : p.currency !== intent.currency
+              ? "currency"
+              : p.unit_amount !== lines[i]![1]
+                ? "unit_amount"
+                : null;
+        if (failed) throw new CheckoutPriceMismatch(lines[i]![0], failed);
+      });
       const session = await stripe.checkout.sessions.create(
         {
           mode: "payment",
@@ -172,7 +188,7 @@ export const createCheckout = action({
                 custom_text: {
                   submit: {
                     message:
-                      "Processing fee is an estimate. Your total will not change after payment.",
+                      "Estimated card fee is included. Your total will not change after payment.",
                   },
                 },
               }
@@ -197,7 +213,16 @@ export const createCheckout = action({
         sessionId: session.id,
       });
       return { url: session.url, checkoutIntentId: intent._id };
-    } catch {
+    } catch (e) {
+      // Ids and check names only: Stripe error bodies stay out of logs.
+      console.error(
+        "createCheckout failed",
+        e instanceof CheckoutPriceMismatch
+          ? { priceId: e.priceId, check: e.check }
+          : e instanceof ConvexError
+            ? { reason: String(e.data) }
+            : { error: e instanceof Error ? e.name : "unknown" },
+      );
       throw new ConvexError("Checkout is unavailable. Please try again.");
     }
   },
@@ -486,7 +511,7 @@ export const getBillingState = query({
       },
       packs: access.capabilities.manageBilling
         ? CREDIT_PACKS.map((p) => {
-            const feeCents = cardFeeQuote(p.id)?.feeCents;
+            const feeCents = packQuote(p.id)?.feeCents;
             return {
               packId: p.id,
               priceCents: p.amount,

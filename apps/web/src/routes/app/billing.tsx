@@ -339,7 +339,7 @@ function BillingContent({
               <p className="text-sm text-muted-foreground">
                 $1 buys 10,000 credits. Choose a one-time top-up below.
                 {billing.packs.some((pack) => pack.feeCents > 0)
-                  ? " A separate estimated card fee is shown before payment. It buys no credits and never changes after payment; refunds return it."
+                  ? " A separate estimated card fee is shown before payment. It buys no credits and never changes after payment; a full refund returns it."
                   : null}
               </p>
             </div>
