@@ -30,7 +30,7 @@ import {
 import { requestClose, finishClose } from "../convex/money/barrier";
 import { grantLot } from "../convex/money/lots";
 import { beginDustMerge, moveDustPage } from "../convex/money/dust";
-import { internal } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import { NOW, SECRET, organization } from "./fixtures";
 import type { Id } from "../convex/_generated/dataModel";
 import {
@@ -1582,5 +1582,57 @@ describe("Checkout fee legal gate", () => {
         }),
     ).rejects.toThrow("Org admin or owner role required");
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("quotes principal, estimated fee and total before payment; misconfigured fee blocks the pack", async () => {
+    const t = harness();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", organization("checkout-quote"));
+    });
+    const admin = t.withIdentity({
+      subject: "user_quote",
+      org_id: "org_checkout-quote",
+      org_role: "org:admin",
+    });
+    const pack10 = async () =>
+      (await admin.query(api.billing.getBillingState, {})).packs.find(
+        (p) => p.packId === "pack_10",
+      );
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "");
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_CENTS", "42");
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "price_fee");
+    expect(await pack10()).toMatchObject({
+      priceCents: 1000,
+      feeCents: 0,
+      totalCents: 1000,
+      available: true,
+    });
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "true");
+    expect(await pack10()).toMatchObject({
+      priceCents: 1000,
+      credits: 100000,
+      feeCents: 42,
+      totalCents: 1042,
+      available: true,
+    });
+    vi.stubEnv("NEXT_STRIPE_FEE_PACK_10_PRICE", "");
+    expect(await pack10()).toMatchObject({ available: false });
+  });
+  it("replays the snapshotted price after fee configuration changes, crediting principal only", async () => {
+    const t = harness(),
+      f = await t.run((ctx) => financeFixture(ctx));
+    vi.stubEnv("NEXT_CARD_FEE_ENABLED", "");
+    for (let i = 0; i < 2; i++)
+      expect(await t.run((ctx) => projectPaid(ctx, f.paid))).toBe(f.paymentId);
+    const p = (await t.run((ctx) => ctx.db.get(f.paymentId)))!;
+    expect(p).toMatchObject({
+      amountPaidCents: 1020,
+      creditFaceValueCents: 1000,
+      processingFeeChargedCents: 20,
+      processingFeeActualCents: 35,
+      credits: 100000,
+    });
+    expect((await t.run((ctx) => assertWallet(ctx, f.walletId))).balance).toBe(
+      100000,
+    );
   });
 });

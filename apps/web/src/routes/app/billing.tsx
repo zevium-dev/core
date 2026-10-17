@@ -52,6 +52,7 @@ import {
 import {
   checkoutDisplay,
   checkoutPackButton,
+  checkoutPackPrice,
   checkoutStartFailureMessage,
   checkoutStateFromStatus,
   paymentStatusLabel,
@@ -67,7 +68,14 @@ type PackId = "pack_10" | "pack_50" | "pack_100";
 type BillingStateData = {
   access: OrgCapabilityProjection;
   wallet: { balance: number };
-  packs: Array<{ packId: PackId; credits: number; priceCents: number }>;
+  packs: Array<{
+    packId: PackId;
+    credits: number;
+    priceCents: number;
+    available: boolean;
+    feeCents: number;
+    totalCents: number;
+  }>;
   checkout: { status: string } | null;
   payments: Array<{
     status: string;
@@ -330,16 +338,20 @@ function BillingContent({
               </h2>
               <p className="text-sm text-muted-foreground">
                 $1 buys 10,000 credits. Choose a one-time top-up below.
+                {billing.packs.some((pack) => pack.feeCents > 0)
+                  ? " A separate estimated card fee is shown before payment. It buys no credits and never changes after payment; refunds return it."
+                  : null}
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {billing.packs.map((pack) => {
-                const price = formatMoney(pack.priceCents, "USD");
+                const price = checkoutPackPrice(pack);
                 const button = checkoutPackButton(
                   pack.packId,
                   checkoutPackId,
                   checkoutPending,
-                  price,
+                  price.total,
+                  pack.available,
                 );
                 return (
                   <Card
@@ -354,9 +366,28 @@ function BillingContent({
                         </span>
                       </CardTitle>
                       <CardDescription>
-                        {price} one-time purchase
+                        {formatMoney(pack.priceCents, "USD")} one-time purchase
                       </CardDescription>
                     </CardHeader>
+                    {price.lines.length > 0 ? (
+                      <CardContent>
+                        <dl className="flex flex-col gap-1 text-sm">
+                          {price.lines.map((line, index) => (
+                            <div
+                              key={line.label}
+                              className={
+                                index === price.lines.length - 1
+                                  ? "flex justify-between gap-3 border-t pt-1 font-medium"
+                                  : "flex justify-between gap-3 text-muted-foreground"
+                              }
+                            >
+                              <dt>{line.label}</dt>
+                              <dd className="tabular-nums">{line.amount}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </CardContent>
+                    ) : null}
                     <CardFooter>
                       <Button
                         className="w-full"

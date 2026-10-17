@@ -38,6 +38,22 @@ export const CREDIT_PACKS = [
   { id: "pack_50", amount: 5000, credits: 500000 },
   { id: "pack_100", amount: 10000, credits: 1000000 },
 ] as const;
+type PackId = (typeof CREDIT_PACKS)[number]["id"];
+/**
+ * Legal #318 gate: off unless the owner enables it. The estimate is configured
+ * per pack and never recalculated against the actual charge; null means the
+ * enabled fee is misconfigured, so the pack cannot be sold.
+ */
+export function cardFeeQuote(packId: PackId) {
+  const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
+  if (!enabled) return { enabled, feeCents: 0, feeLinePriceId: undefined };
+  const key = packId.toUpperCase();
+  const feeCents = Number(process.env[`NEXT_STRIPE_FEE_${key}_CENTS`]);
+  const feeLinePriceId = process.env[`NEXT_STRIPE_FEE_${key}_PRICE`];
+  if (!Number.isSafeInteger(feeCents) || feeCents <= 0 || !feeLinePriceId)
+    return null;
+  return { enabled, feeCents, feeLinePriceId };
+}
 export const prepareCheckoutIntent = internalMutation({
   args: { packId: pack, customerId: v.string() },
   handler: async (ctx, args) => {
@@ -49,22 +65,9 @@ export const prepareCheckoutIntent = internalMutation({
     const stripeCreditPriceId =
       process.env[`NEXT_STRIPE_PRICE_${args.packId.toUpperCase()}`];
     if (!stripeCreditPriceId) throw new ConvexError("Credit pack unavailable");
-    // Legal #318 gate. Estimate is configured, never recalculated against the actual charge.
-    const enabled = process.env.NEXT_CARD_FEE_ENABLED === "true";
-    const fee = enabled
-      ? Number(
-          process.env[`NEXT_STRIPE_FEE_${args.packId.toUpperCase()}_CENTS`],
-        )
-      : 0;
-    const feeLinePriceId = enabled
-      ? process.env[`NEXT_STRIPE_FEE_${args.packId.toUpperCase()}_PRICE`]
-      : undefined;
-    if (
-      !Number.isSafeInteger(fee) ||
-      fee < 0 ||
-      (enabled && (!feeLinePriceId || fee === 0))
-    )
-      throw new ConvexError("Fee quote unavailable");
+    const quote = cardFeeQuote(args.packId);
+    if (!quote) throw new ConvexError("Fee quote unavailable");
+    const { feeCents: fee, feeLinePriceId, enabled } = quote;
     const now = Date.now();
     const id = await ctx.db.insert("checkoutIntents", {
       organizationId: org._id,
@@ -138,6 +141,27 @@ export const createCheckout = action({
         internal.billing.prepareCheckoutIntent,
         { ...args, customerId },
       );
+      // Paid webhook rejects any line that differs from the intent and grants
+      // nothing, so a misconfigured env must fail here, before money moves.
+      const lines = [
+        [intent.stripeCreditPriceId, intent.creditFaceValueCents],
+        ...(intent.feeLinePriceId
+          ? [[intent.feeLinePriceId, intent.processingFeeQuotedCents] as const]
+          : []),
+      ] as const;
+      const prices = await Promise.all(
+        lines.map(([id]) => stripe.prices.retrieve(id)),
+      );
+      if (
+        prices.some(
+          (p, i) =>
+            !p.active ||
+            p.type !== "one_time" ||
+            p.currency !== intent.currency ||
+            p.unit_amount !== lines[i]![1],
+        )
+      )
+        throw new Error("Stripe price does not match configured amount");
       const session = await stripe.checkout.sessions.create(
         {
           mode: "payment",
@@ -461,11 +485,17 @@ export const getBillingState = query({
         lockedCredits: wallet?.lockedCredits ?? 0,
       },
       packs: access.capabilities.manageBilling
-        ? CREDIT_PACKS.map((p) => ({
-            packId: p.id,
-            priceCents: p.amount,
-            credits: p.credits,
-          }))
+        ? CREDIT_PACKS.map((p) => {
+            const feeCents = cardFeeQuote(p.id)?.feeCents;
+            return {
+              packId: p.id,
+              priceCents: p.amount,
+              credits: p.credits,
+              available: feeCents !== undefined,
+              feeCents: feeCents ?? 0,
+              totalCents: p.amount + (feeCents ?? 0),
+            };
+          })
         : [],
       checkout,
       payments: payments.map((p) => ({
