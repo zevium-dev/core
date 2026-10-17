@@ -47,6 +47,8 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 
 - **Connected accounts**: `/connections` (API key) and `/connections/callback`. In the call pipeline, operations bound to a provider (`x-zevium-oauth-provider`) resolve the caller org's connection before wallet admission (failures cost 0), refuse upstream hosts outside the provider's API hosts (422), and `forward()` sets `Authorization: Bearer`. [connected-accounts](connected-accounts.md)
 
+- Paired acceptance (`scripts/next-acceptance.mjs`) seeds tenants faster than the per-isolate cold budget refills; its `seed()` helper refills the budget through the fixture's `/test/cold-budget`. [Finding](../findings/edge-acceptance-cold-budget.md).
+
 - Method-override request headers (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`) are never forwarded (`filterRequestHeaders`): the upstream sees only the method the gateway matched and priced. Publisher-owned upstream headers are injected after filtering and may still set them.
 
 ## Decisions
