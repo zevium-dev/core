@@ -447,7 +447,7 @@ try {
   assert.equal(
     scopedEarly,
     null,
-    `Scoped admission failed: ${scopedEarly?.status}`,
+    `Scoped admission failed: ${scopedEarly?.status} ${scopedEarly ? await scopedEarly.clone().text() : ""}`,
   );
   await convex("review", { paymentId: scoped.paymentId });
   assert.equal(
