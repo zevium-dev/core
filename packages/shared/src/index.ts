@@ -1,9 +1,6 @@
 // Shared between apps/web and apps/gateway: OpenAPI spec parsing,
 // x-zevium-* extension extraction, credit math. Grows with the build.
 
-/** $1 = 10,000 credits (.agents/notes/features/pricing.md). One global constant, never per-API. */
-export const CREDITS_PER_DOLLAR = 10_000;
-
 /** Platform cut: 5%. Publishers keep 95%. */
 export const PLATFORM_CUT = 0.05;
 
@@ -13,6 +10,7 @@ export const MAX_USAGE_INGEST_EVENTS = 100;
 export { isTokenPricingEnabled } from "./pricing-policy.js";
 
 export {
+  CREDITS_PER_DOLLAR,
   MAX_DAILY_FREE_TIER_CALLS,
   MAX_ENDPOINT_COST_CREDITS,
   type EndpointPricing,
@@ -167,3 +165,14 @@ export {
   type FormValidation,
   type RequestParameter,
 } from "./request-form.js";
+
+export {
+  API_KEY_PLACEHOLDER,
+  buildClaudeCodeInstall,
+  buildCodexConfigSnippet,
+  buildLlmsText,
+  discoveryEndpointUrl,
+  llmsResponse,
+  mcpEndpointUrl,
+  tryItBaseUrl,
+} from "./llms.js";

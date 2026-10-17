@@ -14,10 +14,9 @@ import {
   API_KEY_PLACEHOLDER,
   buildClaudeCodeInstall,
   buildCodexConfigSnippet,
-  buildCursorInstallUrl,
-  buildMcpConfigSnippet,
   mcpEndpointUrl,
-} from "#/lib/landing";
+} from "@zevium/shared";
+import { buildCursorInstallUrl, buildMcpConfigSnippet } from "#/lib/landing";
 
 /** One install surface shared by landing, docs, and listing agent panels. */
 export function AgentInstall({ gatewayOrigin }: { gatewayOrigin: string }) {

@@ -1,7 +1,7 @@
 # Agent surface (MCP + discovery)
 
-> Status: shared MCP/CLI/docs converter #428 and single-file CLI distribution #451 built; owner release/activation pending · Updated: 2026-10-13
-> Code: `packages/shared/src/spec-generation/`, `packages/cli/{src,scripts/build.mjs,package.json,README.md}`, `apps/web/scripts/build.mjs`, `apps/web/src/server{,.test}.ts`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/lib/llms.ts`, `apps/gateway/src/generated-contract.ts`, `apps/gateway/src/{mcp,mcp-oauth,discovery,mcp-api-docs,mcp-call-params}.ts`, `apps/gateway/src/next/`, `convex/{search,http,keySettings}.ts`
+> Status: shared MCP/CLI/docs converter #428, single-file CLI distribution #451 and web + gateway `/llms.txt` #322 built; owner release/activation pending · Updated: 2026-10-17
+> Code: `packages/shared/src/spec-generation/`, `packages/cli/{src,scripts/build.mjs,package.json,README.md}`, `apps/web/scripts/build.mjs`, `apps/web/src/server{,.test}.ts`, `apps/web/src/routes/docs/agents.tsx`, `packages/shared/src/llms.ts`, `apps/web/src/lib/llms{,.test}.ts`, `apps/gateway/test/llms.test.ts`, `apps/gateway/src/generated-contract.ts`, `apps/gateway/src/{mcp,mcp-oauth,discovery,mcp-api-docs,mcp-call-params}.ts`, `apps/gateway/src/next/`, `convex/{search,http,keySettings}.ts`
 > Related: [gateway](gateway.md), [machine-payments](machine-payments.md), [catalogue-search](catalogue-search.md), [quality-signals](quality-signals.md), [api-keys](api-keys.md), [mock-sandbox](mock-sandbox.md), [landing-docs](landing-docs.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 The differentiator: AI agents discover published APIs, evaluate per-endpoint cost before calling, read call docs, and execute through the same API-key- or verified-MCP-OAuth-authenticated, credit-gated gateway as human traffic. Agents are a consumer type with the same billing model as human developers.
@@ -44,12 +44,19 @@ Item 4 (machine-native payments, x402): [machine-payments](machine-payments.md).
 - With OAuth enabled, connect at the canonical `/mcp` URL, sign in through Clerk, choose the funded organization, and consent to API spending. Create a current API key in that org first at `/app/settings/keys`; OAuth shares its cap and lifecycle.
 - `call_api` auth: Zevium key via MCP request `Authorization: Bearer` / `x-api-key`, or a `key` tool argument for API-key clients; OAuth binds the consented user/org to their current key and rejects `key` overrides. A complete successful result settles the charge; failed or oversized results and execution timeouts release the reservation.
 - `/docs/agents`: in-app guide — MCP config, discovery URL, tool list, mock URL pattern.
+- `/llms.txt` on web and gateway: one link an agent can read to set itself up — what Zevium is, key + credits steps, Claude Code / Codex install commands, MCP tools, CLI, call pattern, pricing, error recovery, keyless mock, example prompts. Both origins serve identical text pointing at the same web and gateway URLs.
 
 ## Tech
 
 Discovery, MCP docs and calls use published scalar OpenAPI and paired signed authority. Semantic search preserves gateway org/key budgets. OAuth verification runs in its bounded coordinator and maps a verified session to an active org key; provider activation is owner-only. Direct API keys remain the default. MCP prepares bounded results before finalization; rejected buffering yields zero debit. No wallet sessions, x402 or token execution exist. Real workerd/Convex acceptance covers cold OAuth, negative caching and signed settlement.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
+
+### `/llms.txt` (#322)
+
+- `packages/shared/src/llms.ts` owns `buildLlmsText({ web, gateway })` plus the URL/install helpers it shares with web UI (`mcpEndpointUrl`, `discoveryEndpointUrl`, `tryItBaseUrl`, `buildClaudeCodeInstall`, `buildCodexConfigSnippet`, `API_KEY_PLACEHOLDER`). Pure string building from two origins and `CREDITS_PER_DOLLAR`; no key, wallet or listing reads, no new Worker dependency. Gateway base trims a trailing `/gateway`.
+- Web route `apps/web/src/routes/llms[.]txt.ts`: web = request origin, gateway = `VITE_GATEWAY_URL`. Gateway `GET|HEAD /llms.txt` in `apps/gateway/src/index.ts`: gateway = request origin, web = `APP_ORIGIN` (fallback `https://zevium.dev`, same as payment recovery links); other methods 405.
+- Sync tests: `apps/gateway/test/llms.test.ts` asserts the exact set of advertised gateway URLs and drives each through the real Worker — `/mcp` `tools/list` names all appear in the text, `/discovery` and `/docs/acme/demo` 200, `/mock/...` 200 with `x-zevium-mock: 1`, `/gateway/...` 402 whose `reason` and every `actions.*` key/href appear in the text. `apps/web/src/lib/llms.test.ts` checks every web URL against `routeTree.gen.ts` (plus static `/cli/zevium.mjs`). Error-code list audited against `next/pipeline.ts`, `next/wallet.ts`, `connections.ts`, `payment-required.ts` on 2026-10-17 (removed never-emitted `organization_archived`; added `pathParams`/`query`/`key` call args, connection 403/409, 410, 502, 503, success headers). New gateway reason codes still need a manual text update; the tests only enforce the 402 envelope.
 
 ### Shared published-contract conversion (#428)
 
@@ -89,7 +96,7 @@ Owner release steps (not executed by this implementation):
 - 2026-10-11 — ACCEPTED: x402 off; enforcement #424 pending and activation #109 P2. [Decision](../decisions/2026-10-11-x402-disabled.md).
 - 2026-10-11 — ACCEPTED: Per-token LLM listings must leave discovery and callable tools in #425; revival #431 P2. [Decision](../decisions/2026-10-11-llm-deferred.md).
 
-- 2026-10-10 — Web distribution implementation of [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md): #326 client installs share one component; #322 serves web `/llms.txt`, with gateway-side copy deferred to avoid concurrent gateway restructuring. Catalogue changes are limited to the agent panel.
+- 2026-10-10 — Web distribution implementation of [P0 agent bet](../decisions/2026-10-10-p0-agent-bet.md): #326 client installs share one component; #322 serves web `/llms.txt`, with gateway-side copy deferred to avoid concurrent gateway restructuring (gateway copy built 2026-10-17 from the same shared builder). Catalogue changes are limited to the agent panel.
 
 - 2026-10-10 — #323 implementation: use Clerk as authorization server, hosted org consent, JWT/JWKS validation plus cached opaque-token verification for revocable grants, and the existing current member key for billing. Production activation and live claude.ai acceptance remain owner actions.
 
@@ -115,7 +122,7 @@ Owner release steps (not executed by this implementation):
 
 Source: [research](../research/agent-api-marketplace-landscape.md). Accepted items: see Decisions. Capability routing moved to [capability-routing](capability-routing.md).
 
-- **`llms.txt`** — Stripe's agent seller Directory asks for an `llms.txt` and example prompts ("Demand" section). Web `/llms.txt` is built (#322); gateway-side copy remains deferred.
+- **`llms.txt`** — Stripe's agent seller Directory asks for an `llms.txt` and example prompts ("Demand" section). Web and gateway `/llms.txt` built (#322) from one shared builder.
 - **Claude Connectors Directory submission** — called the highest-leverage free channel: listings are eligible for in-chat Suggested Connectors ranked by usage; self-submission reportedly opened ~2026-09-25; annotate every tool readOnly/destructive and publish a privacy policy (common rejection causes) ("Demand"). Unknown per report: whether Anthropic's directory policy allows credit-gated connectors.
 - **OAuth on `/mcp`** (implemented in #323; activation above) enables claude.ai custom connectors alongside bearer API keys; live acceptance requires owner configuration above.
 - **Official MCP Registry listing** — so Glama, Kong and other aggregators pick Zevium up downstream; optionally a Zevium sub-registry speaking the open registry API ("Demand"; "Priority stack: Now").

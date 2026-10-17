@@ -1,7 +1,8 @@
 import {
   serializeRequestParameters,
-  validateFormValue,
+  tryItBaseUrl,
   type RequestParameter,
+  validateFormValue,
 } from "@zevium/shared";
 import { SchemaField, SchemaBody } from "#/components/schema-form";
 import { CopyButton } from "#/components/copy-button";
@@ -76,7 +77,7 @@ import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import type { ApiDetailSearch } from "#/lib/catalogue-detail-search";
 import { creditsLabel } from "#/lib/credits-label";
-import { resolveGatewayOrigin, tryItBaseUrl } from "#/lib/landing";
+import { resolveGatewayOrigin } from "#/lib/landing";
 import {
   parsePublishedEndpoints,
   readableSuccessResponse,
