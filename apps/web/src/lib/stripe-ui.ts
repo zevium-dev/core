@@ -1,6 +1,7 @@
 import type { VariantProps } from "class-variance-authority";
 
 import type { badgeVariants } from "#/components/ui/badge";
+import { formatMoney } from "#/lib/format";
 
 type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
@@ -72,13 +73,41 @@ export function checkoutPackButton(
   selectedPackId: string | null,
   isPending: boolean,
   priceLabel: string,
+  available = true,
 ): { disabled: boolean; label: string } {
   return {
-    disabled: isPending,
-    label:
-      isPending && selectedPackId === packId
+    disabled: isPending || !available,
+    label: !available
+      ? "Unavailable"
+      : isPending && selectedPackId === packId
         ? "Redirecting to Stripe…"
         : `Buy ${priceLabel}`,
+  };
+}
+
+/**
+ * Pre-payment price breakdown. Credits buy only the principal; the estimated
+ * card fee is a separate line and the total is what the card is charged.
+ */
+export function checkoutPackPrice(pack: {
+  priceCents: number;
+  feeCents: number;
+  totalCents: number;
+}): {
+  total: string;
+  lines: Array<{ label: string; amount: string }>;
+} {
+  const usd = (cents: number) => formatMoney(cents, "USD");
+  return {
+    total: usd(pack.totalCents),
+    lines:
+      pack.feeCents > 0
+        ? [
+            { label: "Credits", amount: usd(pack.priceCents) },
+            { label: "Estimated card fee", amount: usd(pack.feeCents) },
+            { label: "Total", amount: usd(pack.totalCents) },
+          ]
+        : [],
   };
 }
 

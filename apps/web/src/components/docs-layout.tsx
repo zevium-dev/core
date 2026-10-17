@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { PublicHeader } from "#/components/public-header";
+import { SiteFooter } from "#/components/site-footer";
 import { Button } from "#/components/ui/button";
 import {
   Sheet,
@@ -71,6 +72,7 @@ export function DocsPage({ title, description, children }: DocsPageProps) {
           </main>
         </div>
       </div>
+      <SiteFooter />
     </div>
   );
 }
