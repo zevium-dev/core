@@ -46,6 +46,8 @@ import type * as lib_stripe from "../lib/stripe.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
 import type * as lib_webhookTransport from "../lib/webhookTransport.js";
 import type * as lifecycleNotices from "../lifecycleNotices.js";
+import type * as mcpKeys from "../mcpKeys.js";
+import type * as mcpKeysNode from "../mcpKeysNode.js";
 import type * as money_adjustments from "../money/adjustments.js";
 import type * as money_barrier from "../money/barrier.js";
 import type * as money_dust from "../money/dust.js";
@@ -134,6 +136,8 @@ declare const fullApi: ApiFromModules<{
   "lib/webhookDelivery": typeof lib_webhookDelivery;
   "lib/webhookTransport": typeof lib_webhookTransport;
   lifecycleNotices: typeof lifecycleNotices;
+  mcpKeys: typeof mcpKeys;
+  mcpKeysNode: typeof mcpKeysNode;
   "money/adjustments": typeof money_adjustments;
   "money/barrier": typeof money_barrier;
   "money/dust": typeof money_dust;

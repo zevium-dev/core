@@ -1,4 +1,6 @@
 import {
+  CALL_API_WRITE,
+  callApiTool,
   serializeRequestParameters,
   tryItBaseUrl,
   type RequestParameter,
@@ -669,12 +671,12 @@ function subscribeStoredApiKey(onChange: () => void) {
   return () => window.removeEventListener("storage", onChange);
 }
 
-/** call_api accepts JSON-serializable bodies; keep non-JSON text verbatim. */
+/** call_api_write accepts JSON-serializable bodies; keep non-JSON text verbatim. */
 function mcpBody(text: string, contentType: string): unknown {
   if (!contentType.toLowerCase().includes("json")) return text;
   try {
     const value: unknown = JSON.parse(text);
-    // call_api passes strings through and treats null as absent.
+    // call_api_write passes strings through and treats null as absent.
     return typeof value === "string" || value === null ? text : value;
   } catch {
     return text;
@@ -979,6 +981,7 @@ export function TryItPanel({
       : "";
   }
   const { authorization: _auth, ...mcpHeaders } = previewHeaders;
+  const mcpTool = callApiTool(endpoint?.method ?? "GET") ?? CALL_API_WRITE;
   const mcpText = JSON.stringify(
     {
       org: publisherHandle,
@@ -1260,7 +1263,7 @@ export function TryItPanel({
             <Tabs defaultValue="curl">
               <TabsList aria-label="Request preview">
                 <TabsTrigger value="curl">curl</TabsTrigger>
-                <TabsTrigger value="mcp">MCP call_api</TabsTrigger>
+                <TabsTrigger value="mcp">MCP</TabsTrigger>
               </TabsList>
               <TabsContent value="curl">
                 <pre
@@ -1272,15 +1275,16 @@ export function TryItPanel({
               </TabsContent>
               <TabsContent value="mcp">
                 <FieldDescription>
-                  call_api always makes a live, metered call. Authenticate the
-                  MCP connection with your Zevium key.{" "}
+                  Arguments for <code>{mcpTool}</code>, which always makes a
+                  live, metered call. Authenticate the MCP connection with OAuth
+                  or your Zevium key.{" "}
                   {mock
                     ? "These arguments describe the equivalent live request; MCP has no mock mode."
                     : "Your key is never included in this preview."}
                 </FieldDescription>
                 <pre
                   className="max-h-80 overflow-auto rounded-md border p-3 text-xs"
-                  aria-label="MCP call_api arguments"
+                  aria-label="MCP tool arguments"
                 >
                   {mcpText}
                 </pre>
@@ -1418,7 +1422,7 @@ function ConnectAgentPanel({
   const notes = `// Agent notes for ${publisherHandle}/${projectSlug}
 // 1. Search catalogue with tool search_apis({ query })
 // 2. Load docs with get_api_docs({ org: "${publisherHandle}", project: "${projectSlug}" })
-// 3. Call an endpoint with call_api using your Zevium key and prepaid wallet
+// 3. Call an endpoint with call_api_read (GET/HEAD) or call_api_write (other methods); the connection's OAuth session or key pays from the prepaid wallet
 // Gateway base: ${tryItBaseUrl(gatewayBaseUrl(), false)}/${publisherHandle}/${projectSlug}`;
 
   return (

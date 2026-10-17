@@ -22,7 +22,8 @@ illustrative. `ZEVIUM_GATEWAY_URL` defaults to `https://gateway.zevium.dev` and
 accepts HTTPS origins or HTTP loopback for local development. API keys stay in the
 environment, never command flags. Redirects fail rather than forwarding credentials.
 
-Docs/help load `get_api_docs`. Execution sends one `call_api` request to the same
+Docs/help load `get_api_docs`. Execution sends one request to the operation's
+generated tool (`call_api_read` for GET/HEAD, `call_api_write` otherwise) on the same
 MCP endpoint with the key in its Authorization header. Gateway authentication,
 credit reservation, settlement, rate limits, and refunds apply unchanged. The CLI
 never reads publisher server URLs and never retries execution automatically.
@@ -35,10 +36,12 @@ operations appear in docs with diagnostic codes and have no generated command.
 
 ## Contract compatibility
 
-`GENERATOR_VERSION` is a positive integer **wire-format major**, currently `1`,
+`GENERATOR_VERSION` is a positive integer **wire-format major**, currently `2`,
 independent of the CLI package version and listing version. The CLI explicitly
-supports major `1`; it does not automatically follow the shared producer constant.
-Additive optional fields can retain major 1 and are ignored by older clients.
+supports major `2`; it does not automatically follow the shared producer constant.
+Major 2 added the required `call.tool` field when MCP execution split into
+`call_api_read` and `call_api_write`; major-1 CLIs stop with an upgrade message.
+Additive optional fields can retain the major and are ignored by older clients.
 Changes to required fields, flag encoding, or call-binding semantics require a
 new major and an explicit client compatibility review. Unsupported numeric majors fail before execution with an upgrade message.
 Unavailable generation reports its reason and points to listing Markdown; malformed

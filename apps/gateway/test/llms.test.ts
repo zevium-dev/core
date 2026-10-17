@@ -122,7 +122,16 @@ describe("gateway /llms.txt", () => {
       (await mcp.json()) as { result: { tools: { name: string }[] } }
     ).result.tools.map((tool) => tool.name);
     for (const tool of tools) expect(text).toContain(`${tool}(`);
-    expect(tools.sort()).toEqual(["call_api", "get_api_docs", "search_apis"]);
+    expect(tools.sort()).toEqual([
+      "call_api_read",
+      "call_api_write",
+      "get_api_docs",
+      "search_apis",
+    ]);
+    expect(text).not.toMatch(/\bcall_api\b/);
+    // Keyless OAuth MCP sessions return these 402 reasons from call_api_*.
+    expect(text).toContain("oauth_missing_api_key");
+    expect(text).toContain("oauth_key_provisioning");
 
     expect((await call(`${ORIGIN}/discovery`)).status).toBe(200);
 

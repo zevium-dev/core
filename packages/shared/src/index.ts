@@ -149,6 +149,14 @@ export {
   generatedCallArguments,
   generatedToolArguments,
 } from "./spec-generation/cli.js";
+export {
+  CALL_API_READ,
+  CALL_API_WRITE,
+  CALL_API_READ_METHODS,
+  CALL_API_WRITE_METHODS,
+  callApiTool,
+  type CallApiTool,
+} from "./mcp-call-tools.js";
 
 export {
   formValueFits,

@@ -469,6 +469,16 @@ export const resolveMcpIdentity = internalQuery({
   handler: async (ctx, args) => {
     const org = await getOrganization(ctx, args.orgId);
     if (!org || !(await isActive(ctx, org))) return null;
+    // An infinite verifiedAt matches only account deletion, never a removal receipt.
+    if (
+      await membershipRemoved(
+        ctx,
+        org.clerkOrgId,
+        args.userId,
+        Number.POSITIVE_INFINITY,
+      )
+    )
+      return null;
     const rows = await ctx.db
       .query("apiKeys")
       .withIndex("by_org_owner", (q) =>
@@ -479,21 +489,25 @@ export const resolveMcpIdentity = internalQuery({
       )
       .collect();
     const keys: Key[] = [];
-    for (const row of rows)
+    for (const row of rows) {
+      if (row.kind !== "key" || !currentKey(row) || row.lifecycle !== "active")
+        continue;
       if (
-        row.kind === "key" &&
-        currentKey(row) &&
-        row.lifecycle === "active" &&
-        !(await membershipRemoved(
+        await membershipRemoved(
           ctx,
           org.clerkOrgId,
           args.userId,
           row.verifiedAt,
-        ))
+        )
       )
-        keys.push(row);
-    return keys.length === 1
-      ? { orgId: org.clerkOrgId, keyId: keys[0]!.keyId }
-      : null;
+        return null;
+      keys.push(row);
+    }
+    // insertKey keeps one current key per member per org; if that invariant is
+    // ever broken, the oldest key wins so the paying key never flips between
+    // requests. No usable key is a keyless session, not an invalid token:
+    // answering invalid_token loops OAuth clients through refresh/re-auth.
+    const key = keys.sort((a, b) => a._creationTime - b._creationTime)[0];
+    return { orgId: org.clerkOrgId, keyId: key?.keyId ?? null };
   },
 });

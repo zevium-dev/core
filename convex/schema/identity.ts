@@ -256,6 +256,21 @@ export const identityTables = {
     revision: v.number(),
     updatedAt: v.number(),
   }).index("by_project_name", ["projectId", "name"]),
+  /** One row per member+org: first-OAuth-connect key auto-creation (#324). */
+  mcpKeyProvisions: defineTable({
+    organizationId: v.id("organizations"),
+    userId: v.string(),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("created"),
+      v.literal("failed"),
+    ),
+    attempts: v.number(),
+    leaseUntil: v.number(),
+    nextAttemptAt: v.number(),
+    keyId: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_org_user", ["organizationId", "userId"]),
   apiKeys: defineTable(
     v.union(
       v.object({

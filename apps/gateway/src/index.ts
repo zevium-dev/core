@@ -166,7 +166,7 @@ function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
  * - /gateway/:publisherHandle/:projectSlug/* — metered proxy
  * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
- * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
+ * - /mcp — MCP Streamable HTTP (search / docs / metered call_api_read + call_api_write)
  * - /llms.txt — agent setup guide, same text as the web app's /llms.txt
  * - /connections — connected-account management + provider callback
  * - /internal/next-wake — authenticated wallet coordination
@@ -301,16 +301,20 @@ async function dispatchRequest(
           { status: 503 },
         );
       }
-      if (outcome.status !== "ok")
+      if (
+        outcome.status === "invalid" ||
+        outcome.status === "insufficient_scope"
+      )
         return oauthChallenge(
           oauth,
           outcome.status === "insufficient_scope"
             ? "insufficient_scope"
             : "invalid_token",
         );
-      // API key callers retain their existing tool-argument behavior. OAuth
-      // identity is injected only here, never inferred inside the paid pipeline.
-      if (!apiKey) mcp.pipeline.authenticatedKey = outcome.key;
+      // OAuth identity is injected only here, never inferred inside the paid pipeline.
+      if (outcome.status === "keyless")
+        mcp.keylessOAuth = { provisioning: outcome.provisioning };
+      else if (!apiKey) mcp.pipeline.authenticatedKey = outcome.key;
       // Stateless Streamable HTTP does not provide an SSE listener.
       if (request.method === "GET")
         return new Response(null, {

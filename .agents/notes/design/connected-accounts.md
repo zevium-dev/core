@@ -155,7 +155,7 @@ The pipeline (`execute` → `resolveCallConnection`) resolves the connection aft
 
 - The consumer token overrides a publisher `authorization` header; other publisher headers still apply.
 - `x-zevium-connection` is stripped like every `x-zevium-*` header; CORS allows and exposes it.
-- MCP `call_api` builds the same request, so it uses the single active connection automatically; it can't pick one of several yet.
+- MCP `call_api_read`/`call_api_write` build the same request, so it uses the single active connection automatically; it can't pick one of several yet.
 
 ## Storage and security
 
@@ -193,5 +193,5 @@ The pipeline (`execute` → `resolveCallConnection`) resolves the connection aft
 - Media hosting: Instagram publishes only from a public media URL; large YouTube uploads need resumable sessions beyond Worker body limits (#444).
 - Bring-your-own provider client per org (own quota and review) (#446).
 - App confirm step against link phishing.
-- MCP `call_api` choosing among several connections.
+- MCP `call_api_read`/`call_api_write` choosing among several connections.
 - Per-auth-event fee (per-call only for now). `lastUsedAt` on connections.
