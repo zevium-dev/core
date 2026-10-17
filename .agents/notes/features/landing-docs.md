@@ -1,7 +1,7 @@
 # Landing & docs
 
-> Status: partial (web + gateway `/llms.txt` #322 and shared client installs #326 built); generated docs/CLI pipeline #428 and CLI install docs #451 built · Updated: 2026-10-17
-> Code: `packages/shared/src/spec-generation/`, `packages/cli/`, `apps/gateway/src/generated-contract.ts`, `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`
+> Status: partial (web + gateway `/llms.txt` #322 and shared client installs #326 built); generated docs/CLI pipeline #428 and CLI install docs #451 built; WIP privacy/terms/support pages built · Updated: 2026-10-17
+> Code: `packages/shared/src/spec-generation/`, `packages/cli/`, `apps/gateway/src/generated-contract.ts`, `apps/web/src/routes/index.tsx`, `apps/web/src/lib/landing.ts`, `apps/web/src/components/public-header.tsx`, `apps/web/src/routes/docs/index.tsx`, `apps/web/src/routes/docs/consuming.tsx`, `apps/web/src/routes/docs/publishing.tsx`, `apps/web/src/routes/docs/agents.tsx`, `apps/web/src/components/docs-layout.tsx`, `apps/web/src/components/docs-layout.test.tsx`, `apps/web/src/components/docs-code-block.tsx`, `apps/web/src/components/catalogue-detail.tsx` (copy curl), `apps/web/src/routes/llms[.]txt.ts`, `apps/web/src/lib/llms.ts`, `apps/web/src/lib/llms.test.ts`, `apps/web/src/components/agent-install.tsx`, `apps/web/src/components/site-footer.tsx`, `apps/web/src/components/wip-page.tsx`, `apps/web/src/routes/privacy.tsx`, `apps/web/src/routes/terms.tsx`, `apps/web/src/routes/support.tsx`, `apps/web/src/routes/-wip-pages.test.tsx`, `apps/web/src/lib/contact.ts`
 > Related: [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [mock-sandbox](mock-sandbox.md), [gateway](gateway.md), [accounts-orgs](accounts-orgs.md), [webhooks-notifications](webhooks-notifications.md), [design system](../design/design-system.md), [roadmap](../product/roadmap.md)
 
 Public front door and integration help. Landing page pitches the agent-first marketplace and teases live catalogue listings; `/docs` is an in-app guide section (quickstart, consuming, publishing, agents). Integrate covers copy-paste snippets for leaving the app; generated SDKs are P2.
@@ -18,7 +18,12 @@ Public front door and integration help. Landing page pitches the agent-first mar
 - Hero: agent-first value prop, primary CTA → catalogue. Motion per DESIGN.md (staggered entrance, magnetic CTA — the page's whole delight budget) — see [design system](../design/design-system.md)
 - Proof strip: live catalogue teaser (top APIs with real pricing), "publishers keep 95%" pitch, stat row (APIs listed, calls served)
 - How-it-works: three steps per side (publish spec → set price → earn) / (find API → get key → call)
-- Footer: standard
+- Footer (landing, every docs page, legal/support pages): Catalogue, Docs, Publish, GitHub, Support, Privacy, Terms
+
+### Privacy, terms and support — `/privacy`, `/terms`, `/support`
+
+- Public pages required by the Claude Connectors Directory listing. Each is marked "In progress": a short illustration plays once, then the page says the policy is being finalized and how to reach Zevium by email. No legal text yet
+- Support offers "Email {SUPPORT_EMAIL}" and "Read the docs"; real policy text and inbox confirmation tracked in #463
 
 ### Integrate (leaving the app)
 
@@ -51,6 +56,14 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - `AgentInstall` replaces the three MCP config blocks on landing, agent docs, and listing agent tabs. Claude Code command, Cursor install link + JSON, and Codex TOML share `DocsCodeBlock` → `CopyButton` copy behavior and `ak_YOUR_API_KEY`. Listing usage notes also use that copy block. Docs mock URLs use `tryItBaseUrl` to normalize gateway origins ending in `/gateway`.
 - Publisher guide (#316) states that missing prices hide operations and prevent calls; explicit `x-zevium-cost: 0` is required for free endpoints. No default-credit fallback is documented.
 
+### WIP legal/support pages (2026-10-17)
+
+- `WipPage` (`components/wip-page.tsx`) is shared by `/privacy`, `/terms`, `/support`: `PublicHeader`, one `main#main-content` (`content-enter`, `main-content` view-transition name), `section` labelled by the `h1`, stock outline `Badge`, children for contact, `SiteFooter`. Route `head` sets `<title>` (`<Page> · Zevium`) + description.
+- `WipIllustration` is inline, `aria-hidden` SVG (decorative; heading carries meaning). Variants: privacy = sheet whose lines write in, then a lock seal pops and its shackle latches; terms = same sheet, then a signature reveals left→right under a mask while a pen nib travels with it; support = chat bubble, typing dots pop in sequence, then two pairs of signal arcs open outward. Colors are `currentColor` under `text-muted-foreground` / `text-primary` plus `fill-card`, `stroke-border`, `fill-background`, so light and dark both work.
+- Motion is CSS in `styles.css` (`.wip-art`): transform/opacity only, `--dur-slow`/`--dur-base`, `--ease`, delays `calc(var(--i) * var(--stagger))` (`--stagger` mirrors `STAGGER`). Base styles are the finished drawing and keyframes only define the start, so any `animation: none` leaves the complete art. Reduced motion: global media kill switch (covers SSR/pre-hydration) plus `data-static` from `useHydratedReducedMotion()`. Plays once; no loops.
+- `SUPPORT_EMAIL` (`lib/contact.ts`) is the only place the address lives; `support@zevium.dev` is a placeholder pending owner confirmation.
+- `SiteFooter` extracted from landing; `DocsPage` now renders it too. Tests: `routes/-wip-pages.test.tsx` (single main, `h1`, mailto, decorative SVG, footer links, `<title>`, reduced-motion `data-static`), public-path cases in `lib/provider-scope.test.ts`.
+
 ### Code map (observed)
 
 - Landing data: `catalogue.listPublic` via `convexQuery`; `pickLandingTeasers(liveItems, 3)` maps live items only. Empty → "No public APIs yet" card with "Publish an API" CTA; error → "Catalogue unavailable" + Retry. Skeleton only while pending with no items.
@@ -65,6 +78,8 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 - Consuming guide error list documents #336: 60-request burst / one request per second refill, `429` + `Retry-After`, monthly spend cap `402`, disabled key `403`.
 
 ## Decisions
+
+- 2026-10-17 — ACCEPTED: privacy, terms and support ship as work-in-progress pages with no invented legal text; support email is a placeholder pending owner confirmation. [Decision](../decisions/2026-10-17-legal-pages-wip.md).
 
 - 2026-10-11 — ACCEPTED: Generate consumer surfaces from immutable publisher OpenAPI; P0 #428, existing #110, form #427 and P2 SDK #350. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
 

@@ -22,6 +22,9 @@ describe("needsAuthenticatedProviders", () => {
     "/catalogue/acme/weather",
     "/docs",
     "/docs/publishing",
+    "/privacy",
+    "/terms",
+    "/support",
     "/application",
     "/administrator",
   ])("keeps public Convex on %s", (pathname) => {

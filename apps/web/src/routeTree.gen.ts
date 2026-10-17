@@ -14,6 +14,9 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as SupportRouteImport } from './routes/support'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminOperationsRouteImport } from './routes/admin/operations'
 import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
@@ -69,6 +72,21 @@ const CatalogueRoute = CatalogueRouteImport.update({
 const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
   id: '/llms.txt',
   path: '/llms.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SupportRoute = SupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -236,6 +254,9 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/llms.txt': typeof LlmsDottxtRoute
+  '/privacy': typeof PrivacyRoute
+  '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
@@ -271,6 +292,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/llms.txt': typeof LlmsDottxtRoute
+  '/privacy': typeof PrivacyRoute
+  '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
@@ -307,6 +331,9 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/llms.txt': typeof LlmsDottxtRoute
+  '/privacy': typeof PrivacyRoute
+  '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/admin/operations': typeof AdminOperationsRoute
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
@@ -347,6 +374,9 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/llms.txt'
+    | '/privacy'
+    | '/support'
+    | '/terms'
     | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
@@ -382,6 +412,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/llms.txt'
+    | '/privacy'
+    | '/support'
+    | '/terms'
     | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
@@ -417,6 +450,9 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/llms.txt'
+    | '/privacy'
+    | '/support'
+    | '/terms'
     | '/admin/operations'
     | '/admin/orgs'
     | '/admin/payouts'
@@ -456,6 +492,9 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   CatalogueRoute: typeof CatalogueRouteWithChildren
   LlmsDottxtRoute: typeof LlmsDottxtRoute
+  PrivacyRoute: typeof PrivacyRoute
+  SupportRoute: typeof SupportRoute
+  TermsRoute: typeof TermsRoute
   DocsAgentsRoute: typeof DocsAgentsRoute
   DocsConsumingRoute: typeof DocsConsumingRoute
   DocsPublishingRoute: typeof DocsPublishingRoute
@@ -499,6 +538,27 @@ declare module '@tanstack/react-router' {
       path: '/llms.txt'
       fullPath: '/llms.txt'
       preLoaderRoute: typeof LlmsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/support': {
+      id: '/support'
+      path: '/support'
+      fullPath: '/support'
+      preLoaderRoute: typeof SupportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -846,6 +906,9 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   CatalogueRoute: CatalogueRouteWithChildren,
   LlmsDottxtRoute: LlmsDottxtRoute,
+  PrivacyRoute: PrivacyRoute,
+  SupportRoute: SupportRoute,
+  TermsRoute: TermsRoute,
   DocsAgentsRoute: DocsAgentsRoute,
   DocsConsumingRoute: DocsConsumingRoute,
   DocsPublishingRoute: DocsPublishingRoute,
