@@ -1,0 +1,114 @@
+name: Publish MCP Registry
+
+# Lists Zevium's remote /mcp server in the official MCP Registry (#325).
+# Runs after each successful production release and publishes only when
+# server.json carries a version the registry has not seen; registry versions
+# are immutable, so listing changes ship by bumping `version`. Owner setup:
+# .agents/notes/architecture/mcp-registry.md.
+
+on:
+  workflow_run:
+    workflows: [Deploy Production]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      vars.MCP_REGISTRY_PUBLISH_ENABLED == 'true' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    environment: mcp-registry
+    env:
+      MCP_PUBLISHER_VERSION: 1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+      REGISTRY_URL: https://registry.modelcontextprotocol.io
+      REGISTRY_DOMAIN: zevium.dev
+      PRODUCTION_GATEWAY_URL: ${{ vars.PRODUCTION_GATEWAY_URL }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check whether this version is already listed
+        id: listing
+        run: |
+          name="$(jq -r .name server.json)"
+          version="$(jq -r .version server.json)"
+          url="$REGISTRY_URL/v0.1/servers/$(jq -rn --arg v "$name" '$v|@uri')/versions/$(jq -rn --arg v "$version" '$v|@uri')"
+          status="$(curl --silent --show-error --output .listing.json --write-out '%{http_code}' \
+            --connect-timeout 5 --max-time 20 "$url")"
+          case "$status" in
+            200)
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              if ! diff <(jq -S 'del(._meta)' server.json) <(jq -S '.server | del(._meta)' .listing.json) > /dev/null; then
+                echo "::warning::server.json differs from published $name@$version; bump version to publish the change"
+              fi
+              ;;
+            404) echo "published=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Registry lookup returned HTTP $status" >&2; exit 1 ;;
+          esac
+
+      - name: Verify remote is the live production MCP endpoint
+        if: steps.listing.outputs.published == 'false'
+        run: |
+          remote="$(jq -r '.remotes[0].url' server.json)"
+          test -n "$PRODUCTION_GATEWAY_URL"
+          test "$remote" = "$PRODUCTION_GATEWAY_URL/mcp"
+          curl --fail --silent --show-error --output .initialize.json \
+            --connect-timeout 5 --max-time 20 \
+            --header 'content-type: application/json' \
+            --header 'accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"zevium-mcp-registry-publish","version":"1"}}}' \
+            "$remote"
+          jq -e '.result.serverInfo.name == "zevium-gateway"' .initialize.json > /dev/null
+
+      - name: Install mcp-publisher
+        if: steps.listing.outputs.published == 'false'
+        run: |
+          archive=mcp-publisher_linux_amd64.tar.gz
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v$MCP_PUBLISHER_VERSION/$archive"
+          echo "$MCP_PUBLISHER_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" mcp-publisher
+
+      - name: Validate server.json
+        if: steps.listing.outputs.published == 'false'
+        run: '"$RUNNER_TEMP/mcp-publisher" validate'
+
+      - name: Authenticate with DNS proof
+        if: steps.listing.outputs.published == 'false'
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
+        run: |
+          test -n "$MCP_REGISTRY_PRIVATE_KEY"
+          "$RUNNER_TEMP/mcp-publisher" login dns --domain "$REGISTRY_DOMAIN" \
+            --private-key "$MCP_REGISTRY_PRIVATE_KEY"
+
+      - name: Publish
+        if: steps.listing.outputs.published == 'false'
+        run: '"$RUNNER_TEMP/mcp-publisher" publish'
+
+      - name: Verify listing
+        if: steps.listing.outputs.published == 'false'
+        run: |
+          name="$(jq -r .name server.json)"
+          version="$(jq -r .version server.json)"
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
+            "$REGISTRY_URL/v0.1/servers/$(jq -rn --arg v "$name" '$v|@uri')/versions/$(jq -rn --arg v "$version" '$v|@uri')" \
+            | jq -e --arg v "$version" '.server.version == $v' > /dev/null
+
+      - name: Remove registry token
+        if: always() && steps.listing.outputs.published == 'false'
+        run: '"$RUNNER_TEMP/mcp-publisher" logout || true'
