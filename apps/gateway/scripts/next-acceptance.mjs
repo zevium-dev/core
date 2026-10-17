@@ -178,6 +178,15 @@ const post = async (path, body) => {
   assert.equal(r.status, 200, await r.clone().text());
   return r.json();
 };
+// Every scenario's first call cold-fills ~5 new scopes (key, consumer and
+// publisher org, route, wallet) against a per-isolate budget of 20 burst +
+// 5/s. Back-to-back scenarios outrun that refill and the next tenant's first
+// call fails closed with 503, so each seeded tenant starts from a full burst.
+async function seed(args) {
+  const f = await convex("seed", args);
+  await post("/test/cold-budget", {});
+  return f;
+}
 const keyScope = (f) => createHash("sha256").update(f.secret).digest("hex");
 const call = (f) =>
   fetch(`http://127.0.0.1:${worker.port}/gateway/${f.handle}/echo/echo`, {
@@ -203,7 +212,7 @@ try {
   await start();
   const run = Date.now().toString(36);
   // A refund/archive can precede the wallet's first gateway request.
-  const cold = await convex("seed", { run: `edge-cold-close-${run}` });
+  const cold = await seed({ run: `edge-cold-close-${run}` });
   await convex("close", { walletId: cold.walletId, id: "cold-close" });
   await post("/test/fault", { path: "/wallet-activate", count: 1 });
   const wake = await fetch(
@@ -239,7 +248,7 @@ try {
     ],
     1,
   );
-  const f = await convex("seed", { run: `edge-normal-${run}` });
+  const f = await seed({ run: `edge-normal-${run}` });
   let r = await call(f);
   assert.equal(r.status, 200, await r.text());
   await flush(f);
@@ -254,7 +263,7 @@ try {
     50_000,
   );
   // Actual OAuth DO binding, provider HTTP seam, Convex identity and metered MCP call.
-  const oauth = await convex("seed", { run: `edge-oauth-${run}` });
+  const oauth = await seed({ run: `edge-oauth-${run}` });
   const bearer = `oat_${randomBytes(32).toString("hex")}`;
   oauthTokens.set(bearer, oauth);
   const mcp = (token) =>
@@ -299,7 +308,7 @@ try {
   await flush(oauth);
   // Public mock never contacts upstream; direct HTTP streams large responses,
   // while MCP refuses its bounded buffer and restores the source reservation.
-  const safe = await convex("seed", { run: `edge-buffer-${run}` });
+  const safe = await seed({ run: `edge-buffer-${run}` });
   const beforeMock = calls;
   const mock = await fetch(
     `http://127.0.0.1:${worker.port}/mock/${safe.handle}/echo/echo`,
@@ -345,7 +354,7 @@ try {
     (await convex("inspect", { walletId: safe.walletId })).wallet.balance,
     95,
   );
-  const empty = await convex("seed", {
+  const empty = await seed({
     run: `edge-empty-${run}`,
     amounts: [1],
   });
@@ -355,7 +364,7 @@ try {
   assert.equal(calls, beforeEmpty);
   // Freeze while a real upstream request is in flight. No ACK before its final.
   console.log("normal conservation passed");
-  const slow = await convex("seed", { run: `edge-slow-${run}` });
+  const slow = await seed({ run: `edge-slow-${run}` });
   const inFlight = waitForUpstream();
   const pending = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${slow.handle}/echo/echo?slow`,
@@ -413,7 +422,7 @@ try {
   await post("/test/snapshot", { kind: "keys", scope: keyScope(f) });
   assert.equal((await call(f)).status, 402);
   // Authentic admission with immutable evidence changed produces terminal exception.
-  const bad = await convex("seed", { run: `edge-exception-${run}` });
+  const bad = await seed({ run: `edge-exception-${run}` });
   const wait = waitForUpstream();
   const pendingBad = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${bad.handle}/echo/echo?slow`,
@@ -431,7 +440,7 @@ try {
   assert.equal(state.wallet.settledThroughEdgeSequence, 1);
   console.log("exceptions passed");
   // Lock only after an admitted call settles; survive restart with other funding usable.
-  const scoped = await convex("seed", {
+  const scoped = await seed({
     run: `edge-scoped-${run}`,
     paid: true,
   });
@@ -499,7 +508,7 @@ try {
     "Scoped payment quarantine, in-flight settlement and restart passed",
   );
   // Kill workerd after durable admission, while upstream has not returned.
-  const crash = await convex("seed", { run: `edge-crash-${run}` });
+  const crash = await seed({ run: `edge-crash-${run}` });
   const crashWait = waitForUpstream();
   const lost = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${crash.handle}/echo/echo?slow`,
@@ -519,7 +528,7 @@ try {
   await convex("close", { walletId: crash.walletId, id: "close-restart" });
   state = await waitDrain(crash);
   assert.ok(state.wallet.close.ackAt);
-  const depleted = await convex("seed", { run: `edge-depleted-${run}` });
+  const depleted = await seed({ run: `edge-depleted-${run}` });
   const depletedWait = waitForUpstream();
   const depletedCall = fetch(
     `http://127.0.0.1:${worker.port}/gateway/${depleted.handle}/echo/echo?slow`,
@@ -540,7 +549,7 @@ try {
     (await convex("inspect", { walletId: depleted.walletId })).wallet.close
       .ackAt,
   );
-  const replay = await convex("seed", { run: `edge-replay-${run}` });
+  const replay = await seed({ run: `edge-replay-${run}` });
   await post("/test/fault", { path: "/ingest-usage", count: 1 });
   assert.equal((await call(replay)).status, 200);
   await flush(replay);
@@ -568,7 +577,7 @@ try {
       .ackFingerprint,
     firstAck,
   );
-  const queued = await convex("seed", {
+  const queued = await seed({
     run: `edge-queued-${run}`,
     paid: true,
   });
@@ -610,7 +619,7 @@ try {
       .reduce((n, e) => n + e.clawedBackGrossCredits, 0),
     5,
   );
-  const closed = await convex("seed", {
+  const closed = await seed({
     run: `edge-closed-${run}`,
     paid: true,
   });
@@ -645,7 +654,7 @@ try {
   // Optional local browser lane. Same guarded anonymous backend and real Worker;
   // credentials remain in ignored files, never in CI artifacts or console output.
   if (process.env.CUTOVER_BROWSER === "1") {
-    const fixture = await convex("seed", {
+    const fixture = await seed({
       run: `browser-${run}`,
       house: true,
     });

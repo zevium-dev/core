@@ -1,0 +1,71 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "dev.zevium/mcp",
+  "title": "Zevium",
+  "description": "Search a pay-per-call API marketplace, read endpoint docs and prices, and call APIs with credits.",
+  "version": "1.0.0",
+  "websiteUrl": "https://www.zevium.dev/docs/agents",
+  "repository": {
+    "url": "https://github.com/zevium-dev/core",
+    "source": "github",
+    "id": "1044451612",
+    "subfolder": "apps/gateway"
+  },
+  "icons": [
+    {
+      "src": "https://www.zevium.dev/logo.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gateway.zevium.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Zevium API key from https://www.zevium.dev/app/settings/keys. Not needed if your client connects with OAuth; otherwise required for call_api_read/call_api_write.",
+          "isRequired": false,
+          "isSecret": true,
+          "value": "Bearer {zevium_api_key}",
+          "variables": {
+            "zevium_api_key": {
+              "description": "Zevium API key",
+              "isRequired": true,
+              "isSecret": true,
+              "placeholder": "zev_..."
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "dev.zevium": {
+        "tools": [
+          {
+            "name": "search_apis",
+            "description": "Search the public API catalogue with per-endpoint pricing."
+          },
+          {
+            "name": "get_api_docs",
+            "description": "Read endpoint definitions, prices and usage notes for one API."
+          },
+          {
+            "name": "call_api_read",
+            "description": "Call a GET or HEAD endpoint through the metered gateway using prepaid org credits."
+          },
+          {
+            "name": "call_api_write",
+            "description": "Call a POST, PUT, PATCH, DELETE, OPTIONS or TRACE endpoint; may change upstream data. Uses prepaid org credits."
+          }
+        ],
+        "billing": "Prepaid org-scoped credits; zero balance blocks the call.",
+        "discovery": "https://gateway.zevium.dev/discovery",
+        "auth": "OAuth on /mcp (first connect auto-creates the member's MCP key) or an Authorization: Bearer API key header; tools take no key argument."
+      }
+    }
+  }
+}

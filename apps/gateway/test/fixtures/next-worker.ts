@@ -1,5 +1,9 @@
 // Local acceptance entrypoint only; never referenced by deployment configuration.
 import worker, { type Env } from "../../src/index";
+import {
+  ColdRefreshBudget,
+  coldRefreshBudget,
+} from "../../src/next/cold-refresh";
 import { EdgeSnapshotDO as SnapshotBase } from "../../src/next/snapshots";
 import { NextWalletDO as WalletBase } from "../../src/next/wallet";
 export { EdgeOAuthDO } from "../../src/next/oauth";
@@ -62,6 +66,12 @@ export default {
       const body = (await request.json()) as { path: string; count: number };
       faults.set(body.path, body.count);
       return Response.json(Object.fromEntries(lost));
+    }
+    if (url.pathname === "/test/cold-budget") {
+      // The suite seeds a fresh tenant per scenario far faster than the
+      // per-isolate cold budget refills; start each one from a full burst.
+      Object.assign(coldRefreshBudget, new ColdRefreshBudget());
+      return Response.json({ ok: true });
     }
     if (url.pathname === "/test/snapshot") {
       const { kind, scope, expire } = (await request.json()) as {

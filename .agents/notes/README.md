@@ -29,6 +29,8 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 
 [Convex cutover activation runbook](architecture/convex-activation.md) — ordered owner-only provider setup, data reset, DO migration, browser gates and rollback.
 
+[MCP Registry runbook](architecture/mcp-registry.md) — `server.json` listing, DNS namespace proof and publish workflow.
+
 ## Current owner decisions
 
 [2026-10-11 answers](sessions/2026-10-11-owner-decisions.md) resolve rebuild PR #394 and defer capability routing/LLMs/x402. [x402 enablement runbook](architecture/x402-enablement.md) is retained for future activation. Decision acceptance does not imply implementation; feature notes and linked issues track delivery.

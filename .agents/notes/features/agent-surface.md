@@ -1,7 +1,7 @@
 # Agent surface (MCP + discovery)
 
-> Status: shared MCP/CLI/docs converter #428, single-file CLI distribution #451 and web + gateway `/llms.txt` #322 built; owner release/activation pending; Connectors Directory (#324) annotations, `call_api_read`/`call_api_write` split, `key`-argument removal and first-connect key auto-creation built, submission blocked on owner items · Updated: 2026-10-17
-> Code: `packages/shared/src/spec-generation/`, `packages/cli/{src,scripts/build.mjs,package.json,README.md}`, `apps/web/scripts/build.mjs`, `apps/web/src/server{,.test}.ts`, `apps/web/src/routes/docs/agents.tsx`, `packages/shared/src/llms.ts`, `apps/web/src/lib/llms{,.test}.ts`, `apps/gateway/test/llms.test.ts`, `apps/gateway/src/generated-contract.ts`, `apps/gateway/src/{mcp,mcp-oauth,discovery,mcp-api-docs,mcp-call-params,headers,payment-required}.ts`, `apps/gateway/src/next/`, `packages/shared/src/mcp-call-tools.ts`, `convex/{search,http,keySettings,mcpKeys,mcpKeysNode}.ts`, `tests/mcpKeys.test.ts`
+> Status: shared MCP/CLI/docs converter #428, single-file CLI distribution #451 web + gateway `/llms.txt` #322 and MCP Registry listing automation #325 built; owner release/activation pending; Connectors Directory (#324) annotations, `call_api_read`/`call_api_write` split, `key`-argument removal and first-connect key auto-creation built, submission blocked on owner items · Updated: 2026-10-17
+> Code: `packages/shared/src/spec-generation/`, `packages/cli/{src,scripts/build.mjs,package.json,README.md}`, `apps/web/scripts/build.mjs`, `apps/web/src/server{,.test}.ts`, `apps/web/src/routes/docs/agents.tsx`, `packages/shared/src/llms.ts`, `apps/web/src/lib/llms{,.test}.ts`, `apps/gateway/test/llms.test.ts`, `apps/gateway/src/generated-contract.ts`, `apps/gateway/src/{mcp,mcp-oauth,discovery,mcp-api-docs,mcp-call-params,headers,payment-required}.ts`, `apps/gateway/src/next/`, `packages/shared/src/mcp-call-tools.ts`, `convex/{search,http,keySettings,mcpKeys,mcpKeysNode}.ts`, `tests/mcpKeys.test.ts`, `apps/web/src/lib/llms.ts`, `server.json`, `.github/workflows/publish-mcp-registry.yml`, `scripts/mcp-registry/`
 > Related: [gateway](gateway.md), [machine-payments](machine-payments.md), [catalogue-search](catalogue-search.md), [quality-signals](quality-signals.md), [api-keys](api-keys.md), [mock-sandbox](mock-sandbox.md), [landing-docs](landing-docs.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 The differentiator: AI agents discover published APIs, evaluate per-endpoint cost before calling, read call docs, and execute through the same API-key- or verified-MCP-OAuth-authenticated, credit-gated gateway as human traffic. Agents are a consumer type with the same billing model as human developers.
@@ -85,8 +85,13 @@ Owner release steps (not executed by this implementation):
 3. For web release, use the normal owner-approved web deployment process. Verify `curl -fsSLo .tmp/zevium https://<site>/cli/zevium.mjs`, then `chmod +x .tmp/zevium` and `.tmp/zevium --help`. Check `/docs/agents` and `/llms.txt` reference that path. Re-download replaces an older local CLI.
 4. Optional npm release, **owner only**: confirm ownership of the `@zevium` npm scope and intended version, then `pnpm publish .tmp/zevium-cli.tgz --access public`. Do not run this as part of CI or normal builds. Only after a confirmed release advertise `pnpm add -g @zevium/cli` as an install option. This task does not publish or change registry visibility.
 
+### Official MCP Registry listing (#325)
+
+- Root `server.json` lists `/mcp` as remote `dev.zevium/mcp` (name confirmed by owner 2026-10-17; streamable HTTP, optional secret Bearer key header for clients without OAuth, tool summaries incl. `call_api_read`/`call_api_write` in publisher `_meta`). The workflow publishes after production releases only when `version` is new, using DNS namespace auth for `zevium.dev`. Format, auth choice, owner DNS/secret steps and open questions: [MCP Registry runbook](../architecture/mcp-registry.md).
+
 ## Decisions
 
+- 2026-10-17 — ACCEPTED: official MCP Registry name `dev.zevium/mcp`, owner-approved; permanent once published. [Decision](../decisions/2026-10-17-mcp-registry-name.md).
 - 2026-10-17 — DEFERRED: Claude Connectors Directory submission parked by owner; #324 code kept. [Decision](../decisions/2026-10-17-connectors-directory-deferred.md).
 - 2026-10-13 — ACCEPTED: Node >=22.12.0 chosen to support Node 22 LTS. [Decision](../decisions/2026-10-13-cli-node-22-lts.md).
 
@@ -114,6 +119,7 @@ Owner release steps (not executed by this implementation):
 
 ## Open questions
 
+- Resolved 2026-10-17: owner confirmed MCP Registry server name `dev.zevium/mcp` (#325); permanent once published.
 - Resolved 2026-10-17 (G2 follow-up): first connect auto-creates the member's key ([decision](../decisions/2026-10-17-mcp-auto-created-key.md)). The multi-key rule (oldest current key) is moot while `insertKey` allows one current key per member per org; revisit if that limit lifts.
 
 - Resolved #395: documented path/query parameters are callable through explicit schema fields or inline encoded paths/queries; regression tests cover the advertised reference, encoding, repeated values, unsafe paths, and paid settlement.
@@ -132,7 +138,7 @@ Source: [research](../research/agent-api-marketplace-landscape.md). Accepted ite
 - **`llms.txt`** — Stripe's agent seller Directory asks for an `llms.txt` and example prompts ("Demand" section). Web and gateway `/llms.txt` built (#322) from one shared builder.
 - **Claude Connectors Directory submission (#324)** — highest-leverage free channel (in-chat Suggested Connectors). Policy answered 2026-10-17 in [claude-connectors-directory](../research/claude-connectors-directory.md): credit-gated tools are not prohibited. But money transfer/crypto (4A) is excluded, so get written confirmation for per-call metering and keep x402 out. Proxied APIs need "proxied with permission" (3F). Catch-all tool rule met by the 2026-10-17 `call_api_read`/`call_api_write` split; the `key` argument is gone and first connect auto-creates a key. Annotations and G2 are built. Still open: OAuth activation, privacy policy/terms/support contact (missing in web), reviewer test account.
 - **OAuth on `/mcp`** (implemented in #323; activation above) enables claude.ai custom connectors alongside bearer API keys; live acceptance requires owner configuration above.
-- **Official MCP Registry listing** — so Glama, Kong and other aggregators pick Zevium up downstream; optionally a Zevium sub-registry speaking the open registry API ("Demand"; "Priority stack: Now").
+- **Official MCP Registry listing** — so Glama, Kong and other aggregators pick Zevium up downstream; optionally a Zevium sub-registry speaking the open registry API ("Demand"; "Priority stack: Now"). Listing + publish automation built (#325); first publish waits on owner DNS/secret setup in the [runbook](../architecture/mcp-registry.md). Sub-registry remains an idea.
 - **Claude Code plugin / skill** — source: [treg comparison](../research/treg-comparison.md) (treg ships one); landscape report lists "one-click install buttons" under Now. Note [treg-reuse](../findings/treg-reuse.md) rejected plugins as unproven for that PR.
 - **Capability-level routing with fallback + max-cost** — report: category auto-routing across substitutable suppliers (OpenRouter inverse-square price weighting, 30s outage skip) needs normalized category schemas, so it waits for several suppliers ("Later"); "up to $X" variable price where the wallet DO pre-authorizes a cap and settles actual cost; max-per-call caps ("Trust"). Roadmap P2 #22 provider fallback routing.
 - **Public leaderboards from app-attribution headers** — copy OpenRouter's loop: optional app headers feed public daily/weekly leaderboards plus a per-API "top apps" tab ("Demand"). Note: the gateway forwarding boundary drops inbound `x-zevium-*` request headers, so attribution headers would need explicit handling before filtering.

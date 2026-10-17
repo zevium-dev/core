@@ -8,6 +8,8 @@ Updated: 2026-10-11. Root `convex/` is canonical. PR 7 changes code only; shared
 
 Production workflow `.github/workflows/deploy-production.yml` requires repository variable `CONVEX_REBUILD_ACTIVATED=true`, successful `develop` CI at the exact current SHA, and approval through the protected `production` environment. Preview workflow requires `CONVEX_REBUILD_PREVIEW_ACTIVATED=true` and its existing explicit preview request. Leave both activation variables unset until the owner completes the applicable runbook. Opening this PR does not authorize deployment.
 
+After a successful production run, `.github/workflows/publish-mcp-registry.yml` publishes a new `server.json` version to the official MCP Registry (gated by `MCP_REGISTRY_PUBLISH_ENABLED`, environment `mcp-registry`). Setup: [MCP Registry runbook](mcp-registry.md).
+
 Routine production order is: build web, prove Convex target, validate paired configuration, configure Convex, deploy root Convex, upload/promote gateway, upload/promote web, then verify exact release SHA and gateway contract `2`. The production concurrency group never cancels an active release. A first-time Durable Object migration requires the owner's explicit Worker deployment before version-only uploads resume.
 
 ## Configuration ownership

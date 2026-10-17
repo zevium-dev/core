@@ -49,6 +49,7 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 
 - Charge headers (`setChargeHeaders` in `next/pipeline.ts`): `x-zevium-cost` is what was charged — the held credits on 2xx (settled), `0` on any other status (finalize released the hold). `x-zevium-free-tier: 1` only on a charged 2xx free-tier call; a non-2xx also returns the free-tier slot. Previously the held amount was stamped on every proxied response, so a 4xx/5xx upstream reported a charge that never happened (fixed 2026-10-17, PR #464).
 - Gateway `GET|HEAD /llms.txt` is served with `cache-control: public, max-age=60`, same as `/discovery`. Its error list is kept in sync by `apps/gateway/test/llms.test.ts`, which scans `apps/gateway/src` for every literal code handed to error builders and fails on any not in the text or its commented ignore list. [agent-surface](agent-surface.md#llmstxt-322)
+- Paired acceptance (`scripts/next-acceptance.mjs`) seeds tenants faster than the per-isolate cold budget refills; its `seed()` helper refills the budget through the fixture's `/test/cold-budget`. [Finding](../findings/edge-acceptance-cold-budget.md).
 
 - Method-override request headers (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`) are never forwarded (`filterRequestHeaders`): the upstream sees only the method the gateway matched and priced. Publisher-owned upstream headers are injected after filtering and may still set them.
 
