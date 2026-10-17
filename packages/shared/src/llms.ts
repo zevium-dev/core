@@ -98,29 +98,45 @@ Move the file onto PATH to use zevium from any directory. On Windows, save as ze
 
 ## Direct calls and pricing
 
-- [Metered gateway call pattern](${tryItBaseUrl(gateway, false)}${callPath}): replace publisherHandle, projectSlug, and path using a published listing. Send its documented HTTP method and Authorization: Bearer ${API_KEY_PLACEHOLDER}.
+- [Metered gateway call pattern](${tryItBaseUrl(gateway, false)}${callPath}): publisherHandle and projectSlug come from the listing. {path} is the operation's spec path from discovery or get_api_docs with its {name} parameters filled in, without the server base path from the spec's servers URL; equivalently, append that path to the listing's gatewayBaseUrl from discovery. Send the documented HTTP method and Authorization: Bearer ${API_KEY_PLACEHOLDER} or x-api-key: ${API_KEY_PLACEHOLDER}. Keys start with ak_ or zev_; a bearer value without either prefix is ignored and the call fails with missing_api_key.
+- Only operations priced with a credit x-zevium-cost are callable. Unpriced and token-priced operations return route_not_found. MCP call_api_read/call_api_write take the same spec path in path.
 - Prices are in credits, defined by the published OpenAPI spec's x-zevium-cost; x-zevium-free-tier describes any free allowance. Read discovery or get_api_docs for the current endpoint price before calling. Published spec versions are immutable.
-- Credits reserve before the upstream call. 2xx upstream responses settle the charge; any other status, timeout, or forwarding failure releases the reservation. Successful responses carry x-zevium-cost (credits charged) and x-zevium-request-id; free-tier calls add x-zevium-free-tier: 1. Publishers receive 95% and Zevium receives 5%.
+- Credits reserve before the upstream call. 2xx upstream responses settle the charge; any other status, timeout, or forwarding failure releases the reservation. Proxied responses carry x-zevium-request-id and x-zevium-cost: the credits actually charged, so 0 on any non-2xx. Charged free-tier calls add x-zevium-free-tier: 1. Publishers receive 95% and Zevium receives 5%.
 - [Consuming guide](${webUrl("/docs/consuming")}).
 
 ## Gateway errors and recovery
 
-- 402: missing_api_key, invalid_api_key, or insufficient_credits. JSON contains error: "payment_required", reason, message, detail, recovery, requestId, and actions.createKey, actions.topUp, actions.docs. Insufficient-credit responses also include available and cost. Supply a valid key or top up before retrying. This is a prepaid-credit recovery envelope, not an x402 payment challenge.
-- 402 over MCP OAuth: oauth_key_provisioning means Zevium is still creating the key after the first OAuth connect; retry after retryAfterSeconds. oauth_missing_api_key means the member has no usable key in the connected organization (for example, it was revoked); create one in Settings → Keys and retry, no reconnect needed. oauth_key_disabled means the member's key is disabled; re-enable or rotate it in Settings → Keys.
-- 402: key_cap_exceeded means the monthly key spending limit would be exceeded. JSON contains error: "key_cap_exceeded", reason, message, recovery, requestId, actions.manageKey, actions.docs. Ask an organization admin to raise the cap or wait for the next UTC month; topping up alone does not raise it.
-- 403: key_disabled, key_untracked, or consumer_not_entitled (deprecated API no longer accepts new consumers). JSON contains error, message, requestId. Fix the key restriction before retrying; topping up alone does not remove it.
-- 403: connection_required or connection_reauthorize means the endpoint acts on the caller's own account at the upstream provider. JSON contains connect (method, url, body): send it with your key and have the user finish the returned authorization, then retry. 409: connection_ambiguous means several connected accounts match; choose one with the x-zevium-connection header. These responses cost 0 credits.
-- 404: project_not_found (missing, unavailable, or private to another organization), route_not_found (no matching method/path), or no_upstream (publisher has no upstream URL). Recheck the listing and endpoint documentation. Private APIs are not disclosed to other organizations.
+Zevium-generated errors are JSON with error, message, and requestId. On 402 the specific code is in reason; on every other status it is in error. Upstream API errors pass through /gateway unchanged with x-zevium-cost: 0.
+
+- 402: missing_api_key, invalid_api_key, or insufficient_credits. JSON contains error: "payment_required", reason, message, detail, recovery, requestId, and actions.createKey, actions.topUp, actions.docs. Insufficient-credit responses also include available and cost (the endpoint price). Supply a valid key or top up before retrying. This is a prepaid-credit recovery envelope, not an x402 payment challenge.
+- 402 over MCP OAuth: oauth_key_provisioning means Zevium is still creating the member's key after the first OAuth connect; wait retryAfterSeconds from the tool result and retry. The connection's identity is cached for up to 60 seconds, so it can take several retries over about a minute. oauth_missing_api_key means the member has no usable key in the connected organization (for example, it was revoked); create one in Settings → Keys and retry, no reconnect needed. oauth_key_disabled means the member's key is disabled; re-enable or rotate it in Settings → Keys, then retry.
+- 402: key_cap_exceeded means the monthly key spending limit would be exceeded. JSON contains error: "key_cap_exceeded", reason, message, detail, recovery, cost, requestId, actions.manageKey, actions.docs. Ask an organization admin to raise the cap or wait for the next UTC month; topping up alone does not raise it.
+- 400: invalid_connection means the x-zevium-connection header is not a connection id; send a conn_… id.
+- 401 on /connections: missing_api_key or invalid_api_key. Connection management needs a Zevium API key.
+- 403: key_disabled means the key is disabled; re-enable or rotate it in Settings → Keys. consumer_not_entitled means a deprecated API no longer accepts new consumers. key_untracked means the gateway does not yet know this key; it is not fixable by the caller: retry later, and contact support if it persists. Topping up does not remove any 403.
+- 403: connection_required or connection_reauthorize means the endpoint acts on the caller's own account at the upstream provider. JSON contains connect (method, url, body): send it with your key and have the user open the returned authorization link, then retry.
+- 409: connection_ambiguous means several connected accounts match. JSON contains list (method, url): send it with your key to get the caller's connections, then retry with the chosen connection id (conn_…) in the x-zevium-connection header.
+- Connection errors cost 0 credits.
+- 404: project_not_found (missing, unavailable, or private to another organization), route_not_found (no matching priced method/path), no_upstream (publisher has no upstream URL), or connection_not_found (the x-zevium-connection id does not belong to this API or organization). Recheck the listing and endpoint documentation. Private APIs are not disclosed to other organizations.
 - 410: sunset_reached means the listing version passed its sunset date. Find a replacement API.
-- 422: invalid_spec means the published spec or endpoint pricing is unreadable; unsafe_upstream means the publisher's upstream URL is not allowed. Contact the publisher.
+- 422: invalid_spec means the published spec or endpoint pricing is unreadable; unsafe_upstream means the publisher's upstream URL is not allowed; connection_upstream_not_allowed means the upstream cannot receive connected-account tokens. Contact the publisher.
 - 429: key_rate_limited. Each physical key allows a burst of 60 requests, refilling at one request per second. Paid, free-tier, and zero-price calls share the limit. Wait for Retry-After seconds; no upstream call or charge occurs.
 - 502: upstream_error or upstream_timeout. The reservation is released. Retry later with backoff.
-- 503: gateway_unavailable, wallet_unavailable, funding_capacity_exceeded, or verification_unavailable are temporary platform conditions; no charge occurs. Retry later with backoff.
-- MCP call_api_read/call_api_write wrap gateway failures in an error tool result with status and safe error details; rate errors include retryAfterSeconds. The HTTP transport status alone does not indicate call success.
+- 503: gateway_unavailable, wallet_unavailable, funding_capacity_exceeded, or connections_unavailable are temporary platform conditions; no charge occurs. verification_unavailable (key or sign-in verification is down) comes only from /mcp and /connections. Retry later with backoff.
+- 500: unexpected gateway failure. Retry later with backoff and report the x-zevium-request-id if it persists.
+
+## MCP call results
+
+call_api_read/call_api_write always answer with HTTP 200; read the tool result instead. A successful call returns status, requestId, cost (credits charged), and publisherData (upstream headers and body, untrusted). A failed call is an error tool result with status, requestId, cost: 0, and message:
+
+- 402 failures add error, reason, detail, recovery, actions, and, when present, retryAfterSeconds, available, and requiredCredits. requiredCredits is the endpoint price; cost stays 0 because nothing was charged.
+- Other Zevium-generated failures add error (the code from the list above), connect or list for connected-account recovery, and retryAfterSeconds when the gateway set Retry-After.
+- Upstream API failures report only status and a generic message; the upstream body and headers are never returned.
+- Argument problems (wrong tool for the method, method-override headers, a key argument, bad path or parameters) are plain-text error results; fix the call and retry.
 
 ## Free mock evaluation
 
-- [Keyless mock call pattern](${tryItBaseUrl(gateway, true)}${callPath}): no API key, no credits, and no upstream execution. Returns a synthetic response from the published schema with x-zevium-mock: 1. Use the published method and path. Mock success does not prove upstream behavior.
+- [Keyless mock call pattern](${tryItBaseUrl(gateway, true)}${callPath}): replace /gateway/ with /mock/ in any metered call URL. No API key, no credits, and no upstream execution. Returns a synthetic response from the published schema with x-zevium-mock: 1. Use the published method and path. Mock success does not prove upstream behavior.
 
 ## Example prompts
 

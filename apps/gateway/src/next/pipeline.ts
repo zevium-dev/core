@@ -238,6 +238,20 @@ export function nextDeps(env: NextEnv): WorkerDeps {
       ),
   };
 }
+/**
+ * Finalize settles only 2xx; any other status releases the hold. The headers
+ * report what was charged, never what was reserved.
+ */
+export function setChargeHeaders(
+  headers: Headers,
+  status: number,
+  admission: { heldCredits: number; pricingDecision?: string },
+) {
+  const charged = status >= 200 && status < 300;
+  headers.set("x-zevium-cost", charged ? String(admission.heldCredits) : "0");
+  if (charged && admission.pricingDecision === "free_tier")
+    headers.set("x-zevium-free-tier", "1");
+}
 async function execute(
   request: Request,
   env: NextEnv & PipelineEnv,
@@ -479,10 +493,8 @@ async function execute(
     );
   const headers = filterResponseHeaders(forwarded.response.headers);
   headers.set("x-zevium-request-id", id);
-  headers.set("x-zevium-cost", String(result.admission.heldCredits));
+  setChargeHeaders(headers, status, result.admission);
   if (connection) headers.set(CONNECTION_HEADER, connection.id);
-  if (result.admission.pricingDecision === "free_tier")
-    headers.set("x-zevium-free-tier", "1");
   applyDeprecationHeaders(headers, p, route);
   return new Response(forwarded.response.body, { status, headers });
 }

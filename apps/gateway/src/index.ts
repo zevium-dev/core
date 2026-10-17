@@ -224,10 +224,13 @@ async function dispatchRequest(
         headers: { allow: "GET, HEAD, OPTIONS" },
       });
     // Same fallback as payment recovery links when APP_ORIGIN is unset.
-    return llmsResponse({
+    const response = llmsResponse({
       web: env.APP_ORIGIN ?? "https://zevium.dev",
       gateway: url.origin,
     });
+    // Public and origin-derived only; same freshness as /discovery.
+    response.headers.set("cache-control", "public, max-age=60");
+    return response;
   }
 
   // GET /discovery — public machine-readable index

@@ -74,6 +74,7 @@ describe("gateway /llms.txt", () => {
     expect(response.headers.get("content-type")).toBe(
       "text/plain; charset=utf-8",
     );
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
     const text = await response.text();
     expect(text).toContain(
       `claude mcp add --transport http zevium '${ORIGIN}/mcp'`,
@@ -164,5 +165,58 @@ describe("gateway /llms.txt", () => {
       expect(text).toContain(`actions.${action}`);
     for (const href of Object.values(body.actions))
       expect(text).toContain(href);
+  });
+
+  it("documents every error code the gateway emits", async () => {
+    const text = await (await call(`${ORIGIN}/llms.txt`)).text();
+    const sources = import.meta.glob<string>("../src/**/*.ts", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    });
+    // Literal codes handed to error builders, plus table keys mapped to statuses.
+    const emitted =
+      /(?:jsonError\(\s*[^,()]+,\s*|\bpayment\(\s*|\breject\(\s*|\b(?:reason|error|failure)\s*[:=]\s*|\bcase\s+|\?\s*|:\s*)"([a-z]+(?:_[a-z]+)+)"|^\s+([a-z]+(?:_[a-z]+)+): \[\s*\d{3}/gm;
+    const codes = new Set<string>();
+    for (const source of Object.values(sources))
+      for (const match of source.matchAll(emitted))
+        codes.add((match[1] ?? match[2])!);
+    // Not caller-facing error codes, each for a stated reason.
+    const ignored = new Set([
+      // Wallet-internal admission/settlement labels, never in a response body.
+      "client_error",
+      "free_tier",
+      "listed_price",
+      "network_error",
+      "next_settlement_failure",
+      "server_error",
+      "zero_price",
+      // Internal failure name; the response code is connection_upstream_not_allowed.
+      "upstream_not_allowed",
+      // OAuth WWW-Authenticate challenge values; MCP clients handle them.
+      "insufficient_scope",
+      "invalid_token",
+      // get_api_docs generation status, covered by the CLI/generation text.
+      "generation_unavailable",
+      "response_size_limit",
+      // Tool names, not codes.
+      "get_api_docs",
+      "search_apis",
+      // Self-explanatory request-shape errors on /connections management.
+      "invalid_body",
+      "method_not_allowed",
+      "no_oauth_scheme",
+      "scheme_required",
+      "scheme_not_found",
+      "organization_unavailable",
+      "provider_not_configured",
+      "publisher_not_allowed",
+      "too_many_pending",
+    ]);
+    expect(codes.size).toBeGreaterThan(30);
+    const missing = [...codes].filter(
+      (code) => !ignored.has(code) && !text.includes(code),
+    );
+    expect(missing).toEqual([]);
   });
 });

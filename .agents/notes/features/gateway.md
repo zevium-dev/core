@@ -1,7 +1,7 @@
 # Gateway (metered call path)
 
 > Status: root cutover implemented; owner activation pending · Updated: 2026-10-17
-> Code: `apps/gateway/src/{index,pipeline,forward}.ts`, `apps/gateway/src/next/`, `packages/shared/src/edge/`, `convex/{edgeSnapshots,edgeMaintenance,http,wallets}.ts`, `apps/gateway/scripts/next-acceptance.mjs`, `apps/gateway/test/next-wallet.test.ts`
+> Code: `apps/gateway/src/{index,pipeline,forward}.ts`, `apps/gateway/src/next/`, `packages/shared/src/edge/`, `convex/{edgeSnapshots,edgeMaintenance,http,wallets}.ts`, `apps/gateway/scripts/next-acceptance.mjs`, `apps/gateway/test/{next-wallet,headers}.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [upstream-credentials](upstream-credentials.md), [pricing](pricing.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [listing-lifecycle](listing-lifecycle.md), [architecture](../architecture/overview.md), [decision: dual-rail keys + x402](../decisions/2026-10-10-dual-rail-keys-and-x402.md)
 
 The gateway is the single metered call path: one URL per published API, authenticated by an API key (or verified MCP OAuth for agent calls), credit-gated against the caller's wallet, forwarding to the publisher's upstream and streaming the response back. Human code and agent tooling both go through it, so there is no unmetered side door. It is the product's hot path and the only data-plane component.
@@ -47,6 +47,9 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 
 - **Connected accounts**: `/connections` (API key) and `/connections/callback`. In the call pipeline, operations bound to a provider (`x-zevium-oauth-provider`) resolve the caller org's connection before wallet admission (failures cost 0), refuse upstream hosts outside the provider's API hosts (422), and `forward()` sets `Authorization: Bearer`. [connected-accounts](connected-accounts.md)
 
+- Charge headers (`setChargeHeaders` in `next/pipeline.ts`): `x-zevium-cost` is what was charged — the held credits on 2xx (settled), `0` on any other status (finalize released the hold). `x-zevium-free-tier: 1` only on a charged 2xx free-tier call; a non-2xx also returns the free-tier slot. Previously the held amount was stamped on every proxied response, so a 4xx/5xx upstream reported a charge that never happened (fixed 2026-10-17, PR #464).
+- Gateway `GET|HEAD /llms.txt` is served with `cache-control: public, max-age=60`, same as `/discovery`. Its error list is kept in sync by `apps/gateway/test/llms.test.ts`, which scans `apps/gateway/src` for every literal code handed to error builders and fails on any not in the text or its commented ignore list. [agent-surface](agent-surface.md#llmstxt-322)
+
 - Method-override request headers (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`) are never forwarded (`filterRequestHeaders`): the upstream sees only the method the gateway matched and priced. Publisher-owned upstream headers are injected after filtering and may still set them.
 
 ## Decisions
@@ -71,5 +74,6 @@ Only the reviewed signed v2 authority path executes. Cold scopes use bounded sin
 
 ## Open questions
 
+- Gateway `/llms.txt` and payment recovery links fall back to `https://zevium.dev` when `APP_ORIGIN` is unset, so a misconfigured preview/staging gateway advertises production web URLs. Pre-existing; out of scope for #464. Fail closed, or keep the fallback?
 - Machine payments are deferred; gate/enablement work is #424 (activation P2 #109); see [machine-payments](machine-payments.md).
 - Doc/code conflict: "Payment-required errors" lists `/gateway` failures as `402` or generic `404`. Code also returns `503 verification_unavailable` (Clerk unreachable), `503 wallet_unavailable` (cold wallet control snapshot unavailable; warm wallets retain last-known state, [#360 storage/refresh](wallet-billing.md#wallet-storage-and-retention-360)), `410 sunset_reached`, `422 invalid_spec`/`unsafe_upstream`, `404 no_upstream`, `500 reserve_failed`/`pricing_identity_failed`.

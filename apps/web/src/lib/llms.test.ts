@@ -84,9 +84,8 @@ describe("llms.txt", () => {
       "402: missing_api_key, invalid_api_key, or insufficient_credits",
     );
     expect(text).toContain("402: key_cap_exceeded");
-    expect(text).toContain(
-      "403: key_disabled, key_untracked, or consumer_not_entitled",
-    );
+    expect(text).toContain("403: key_disabled");
+    expect(text).toContain("key_untracked means");
     expect(text).toContain("429: key_rate_limited");
     expect(text).toContain("Retry-After");
     expect(text).toContain("404: project_not_found");
