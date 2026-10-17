@@ -73,3 +73,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-11 | [Zevium owns one OAuth client per provider](2026-10-11-zevium-owned-oauth-clients.md)                | accepted; 37th table pending sign-off  |
 | 2026-10-13 | [CLI ships as a plain Node script](2026-10-13-cli-node-script.md)                                    | accepted; built, owner release pending |
 | 2026-10-13 | [CLI supports Node 22 LTS](2026-10-13-cli-node-22-lts.md)                                            | accepted (built)                       |
+| 2026-10-17 | [Legal and support pages ship as work in progress](2026-10-17-legal-pages-wip.md)                    | accepted; built, email pending owner   |

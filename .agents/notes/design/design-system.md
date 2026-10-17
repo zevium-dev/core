@@ -55,7 +55,9 @@ CSS mirror (for CSS-only transitions):
   --dur-fast: 250ms;
   --dur-base: 350ms;
   --dur-page: 400ms;
+  --dur-slow: 600ms;
   --dist: 16px;
+  --stagger: 50ms;
 }
 ```
 

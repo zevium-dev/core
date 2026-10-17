@@ -2,10 +2,10 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 
-import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
 import { Reveal } from "#/components/motion/reveal";
 import { PublicHeader } from "#/components/public-header";
+import { SiteFooter } from "#/components/site-footer";
 import { AgentInstall } from "#/components/agent-install";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -54,8 +54,6 @@ const HOW_STEPS = [
     bodyAfter: null,
   },
 ] as const;
-
-const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
@@ -395,55 +393,7 @@ function LandingPage() {
         </section>
       </main>
 
-      <footer>
-        <Separator />
-        <div className="flex w-full flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between md:px-6">
-          <div className="flex min-w-0 flex-col gap-2">
-            <Link
-              to="/"
-              aria-label="Zevium"
-              className="flex items-center gap-0.5 rounded-md text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              <BrandMark className="h-3 w-4" />
-              <span aria-hidden="true">evium</span>
-            </Link>
-            <p className="text-xs text-muted-foreground">
-              Agent-first, per-call API marketplace.
-            </p>
-          </div>
-          <nav
-            aria-label="Footer navigation"
-            className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"
-          >
-            <Link
-              to="/catalogue"
-              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-            >
-              Catalogue
-            </Link>
-            <Link
-              to="/docs"
-              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-            >
-              Docs
-            </Link>
-            <Link
-              to="/app/projects"
-              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-            >
-              Publish
-            </Link>
-            <a
-              href={GITHUB_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-            >
-              GitHub
-            </a>
-          </nav>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
