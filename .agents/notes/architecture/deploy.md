@@ -22,6 +22,8 @@ The runbook's tables are the authoritative names-only inventory. GitHub environm
 
 ## Verification and recovery
 
+Activation gotchas (untagged versions from `wrangler secret put`, stale waiting runs holding the release queue, dashboard-only Stripe v2 secrets): [finding](../findings/production-activation-2026-10-18.md).
+
 Gateway `/health` reports `ok: true`, service `zevium-gateway`, contract `2`, and the expected release. Web HTML exposes the same `zevium-release`. Verify catalogue, project disclosure, mock response, API-key/MCP metering, wallet ledger conservation, and payment/refund exceptions using the runbook. Public curl checks do not satisfy the authenticated money journey.
 
 Default recovery after money or schema changes is roll forward. Never restore an old Worker against incompatible new schema or Durable Objects. Migration tags are append-only: `v5-next-edge` creates the accepted namespaces; `v6-control-plane-cutover` deletes `WalletSqliteDO` and its data. An old Worker version cannot resurrect deleted DO data. Owner must explicitly attest emptiness or export/reconcile old state before deletion. Detailed stop/rollback boundaries are in the activation runbook.
