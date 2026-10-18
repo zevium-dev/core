@@ -40,7 +40,7 @@
     "@edge-runtime/vm": "^5.0.0",
     "@tanstack/eslint-plugin-router": "1.162.0",
     "@types/node": "26.6.4",
-    "agent-browser": "0.38.2",
+    "agent-browser": "0.39.1",
     "concurrently": "^10.0.6",
     "convex-test": "^0.0.60",
     "eslint-plugin-security": "4.2.0",
