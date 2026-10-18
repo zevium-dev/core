@@ -1,11 +1,11 @@
 # Convex rebuild activation
 
-> Status: owner execution required; code cutover does not authorize activation. Updated: 2026-10-11.
+> Status: owner execution required; code cutover does not authorize activation. Updated: 2026-10-18 (owner sign-offs recorded; web origin fails closed).
 > Related: [rebuild plan](convex-rebuild.md), [deployment](deploy.md), [local development](dev-environment.md).
 
 PR 7 makes root `convex/` canonical. It does **not** deploy, reset shared data, create secrets, change provider settings, or approve live Stripe payments. Payments still reject live keys/objects. x402, per-token execution and capability routing are absent. Names beginning `NEXT_` remain the reviewed wire/configuration contract; there is no runtime mode switch.
 
-Every numbered step below requires the **owner** on each intended environment. Start with disposable development and Stripe test mode; repeat for the hosted production target only after its own explicit approval. Do not run the ordinary release workflow to perform the initial incompatible schema/DO cutover.
+Every numbered step below requires the **owner** on each intended environment. Start with disposable development; repeat for the hosted production target only after its own explicit approval. Every environment, production included, uses the Stripe sandbox and test keys ([decision 2026-10-18](../decisions/2026-10-18-stripe-sandbox-everywhere.md)); real money waits on #315. Do not run the ordinary release workflow to perform the initial incompatible schema/DO cutover.
 
 ## Before merge: disable alternate deployment paths
 
@@ -15,12 +15,13 @@ The live provider journey in step 7 is a **hard gate before activation**, specif
 
 ## 1. Approve evidence and stop old traffic
 
-- Review PR 7 CI, browser evidence and the remaining gates in the rebuild plan. Record owner sign-offs for [promo self-consumption](../decisions/2026-10-11-promo-self-consumption.md), [payment-review A–C](../decisions/2026-10-11-payment-review-defaults.md), and [read-surface D1–D6](../decisions/2026-10-11-read-surface-review-defaults.md) explicitly. Live Stripe requires separate approval and a reviewed removal of test-only enforcement; this runbook does not authorize it. Keep card surcharge disabled pending #318.
+- Review PR 7 CI, browser evidence and the remaining gates in the rebuild plan. Policy sign-offs are done: the owner accepted [promo self-consumption](../decisions/2026-10-11-promo-self-consumption.md), [payment-review A–C](../decisions/2026-10-11-payment-review-defaults.md) and [read-surface D1–D6](../decisions/2026-10-11-read-surface-review-defaults.md) as built on 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)). Live Stripe requires separate approval and a reviewed removal of test-only enforcement; this runbook does not authorize it. Keep card surcharge disabled pending #318.
+- Not activation gates (owner, 2026-10-18): reviewed legal text and support inbox #463 are [deferred](../decisions/2026-10-18-legal-deferred.md); house-listing resale rights #313 are a [deferred open risk](../decisions/2026-10-18-resale-rights-deferred.md); the cold refresh budget is [kept](../decisions/2026-10-18-cold-refresh-budget-kept.md) and revisited from traffic metrics before any public announcement.
 - Confirm the exact Convex deployment name/cloud URL/site URL, Clerk instance, Stripe test platform account, Worker name/route and web origin. Write them in private operator records. One environment must never ingest another environment's payments.
 - Disable incoming gateway traffic and pause Checkout, transfers and publisher writes. Disable old Clerk/Stripe destinations and account for already queued deliveries/retries. Keep their receipt IDs for reconciliation; disabling delivery is not cancellation of provider money.
 - Pin **`3d51eb9a406e6dafae03919988875f75c87e52d3`** (`3d51eb9a`, PR #442 merge) as the **last legacy release**. Verified against remote `develop` before PR #443 on 2026-10-11. Preserve its paired backend/web/Worker and migration tags v1–v5 in Git; it contains `apps/gateway/src/wallet.ts` / `wallet-storage.ts`, which PR 7 deletes.
-- **Default: discard disposable test data.** Owner decision 2026-10-11: zero users; legacy wallet data is disposable. Before v6, the owner must explicitly confirm that the exact target's legacy wallet data is disposable test data and approve its irreversible deletion by `v6-control-plane-cutover`. Record namespace IDs, selected deployment, release SHA and sign-off in private operator records. An export or an empty-journal proof is not required for this approved discard path. This decision does not authorize deleting real provider obligations; any non-test money or ambiguous provider operation must be reconciled before proceeding.
-- **Optional: preserve legacy data.** If the owner wants an export instead, follow the pinned-release procedure below **before v6**. Record completed export/reconciliation and owner sign-off before deleting storage. Neither route has sign-off implicitly from merge, CI, or this document.
+- **Default: discard disposable test data.** Owner decision 2026-10-11: zero users; legacy wallet data is disposable. **Signed off 2026-10-18 for every environment** (dev, preview, production): the owner confirmed legacy wallet data is disposable and approved its irreversible deletion by `v6-control-plane-cutover` ([decision](../decisions/2026-10-18-legacy-wallet-discard-signed.md)). Record namespace IDs, selected deployment, release SHA and sign-off in private operator records. An export or an empty-journal proof is not required for this approved discard path. This decision does not authorize deleting real provider obligations; any non-test money or ambiguous provider operation must be reconciled before proceeding.
+- **Optional: preserve legacy data.** Not chosen (owner chose discard on 2026-10-18). If the owner later wants an export instead, follow the pinned-release procedure below **before v6**. Record completed export/reconciliation and owner sign-off before deleting storage. Neither route has sign-off implicitly from merge, CI, or this document.
 - Export the old Convex deployment (including file storage if used) and retain Cloudflare version/configuration evidence privately. Existing `NextWalletDO` journals are separate from discarded legacy test data; never change deployment ID or discard referenced key versions after use.
 
 ### Optional legacy WalletSqliteDO export
@@ -51,7 +52,7 @@ Convex runtime (the validator also accepts built-in `CONVEX_URL` and `CONVEX_SIT
 - `GATEWAY_INTERNAL_SECRET`: independent, at least 32 characters; same value on Worker.
 - `REGISTRY_KEY_PROJECTION_HMAC_SECRET`: independent, at least 32 characters; same value on web. Its name survives for broker compatibility; registry outbox/transport is deleted.
 - `UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`: independent `{current, keys}` keyring; each value canonical padded base64 encoding exactly 32 bytes. Retain versions used by credential/webhook envelopes.
-- `NEXT_GATEWAY_URL`: exact gateway HTTPS origin; `NEXT_APP_ORIGIN` and `APP_ORIGIN`: identical web HTTPS origin (Checkout/Connect returns and email links).
+- `NEXT_GATEWAY_URL`: exact gateway HTTPS origin; `NEXT_APP_ORIGIN` and `APP_ORIGIN`: identical web HTTPS origin (Checkout/Connect returns and email links). No fallback: missing or invalid, Checkout and Connect onboarding refuse and email is skipped with a logged config error ([decision](../decisions/2026-10-18-app-origin-fail-closed.md)).
 - `NEXT_STRIPE_SECRET_KEY`: test restricted/secret key supported by the current integration; `NEXT_STRIPE_PLATFORM_ACCOUNT_ID`; `NEXT_STRIPE_PRICE_PACK_10`, `NEXT_STRIPE_PRICE_PACK_50`, `NEXT_STRIPE_PRICE_PACK_100`.
 - `NEXT_STRIPE_WEBHOOK_SECRET`, `NEXT_STRIPE_CONNECT_WEBHOOK_SECRET`, `NEXT_STRIPE_V2_WEBHOOK_SECRET` for the three destinations below. The replacement uses **one** v2 destination signing secret, not the legacy pair of v2 secrets.
 - Keep `NEXT_CARD_FEE_ENABLED` unset/false. Do not set fee-price/cents variables until #318 is approved. Enabling after approval: create a fixed USD Stripe price per pack for the fee line on a product named `Estimated card fee` (same label as the billing page and Checkout text), set `NEXT_STRIPE_FEE_PACK_{10,50,100}_PRICE` and matching `NEXT_STRIPE_FEE_PACK_{10,50,100}_CENTS`, then `NEXT_CARD_FEE_ENABLED=true`. A pack missing either value shows unavailable. `createCheckout` retrieves each Stripe price and refuses Checkout unless it is active, one-time, USD and equal to the configured cents, so a mismatch fails before payment instead of at the webhook; the customer sees a generic error and the server log names the price id and failed check.
@@ -61,7 +62,7 @@ Convex runtime (the validator also accepts built-in `CONVEX_URL` and `CONVEX_SIT
 Worker runtime:
 
 - `CONVEX_SITE_URL`: exact HTTP-actions origin of the new Convex deployment. `CONVEX_URL` may be retained as operator metadata; authority uses the site URL.
-- Matching `NEXT_DEPLOYMENT_ID`, three edge keyrings and `GATEWAY_INTERNAL_SECRET`; `APP_ORIGIN` equal to both Convex web-origin variables.
+- Matching `NEXT_DEPLOYMENT_ID`, three edge keyrings and `GATEWAY_INTERNAL_SECRET`; `APP_ORIGIN` equal to both Convex web-origin variables. `wrangler.jsonc` carries no default; the deploy command below must pass it. Without it, payment-required responses drop recovery links and `/llms.txt` returns 503.
 - Optional `CLERK_SECRET_KEY`, `MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE` **together**, only after step 3. Resource must equal gateway origin plus `/mcp`.
 - Release workflow supplies `ZEVIUM_RELEASE`; Wrangler supplies `CF_VERSION_METADATA`.
 - Bindings: `EDGE_SNAPSHOTS` → `EdgeSnapshotDO`, `NEXT_WALLET` → `NextWalletDO`, `EDGE_OAUTH` → `EdgeOAuthDO`. There is no `WALLET` binding.
@@ -112,7 +113,7 @@ Set Convex runtime variables on that exact target, then push **root** schema/fun
 
 ## 6. Deploy Worker migrations, then web
 
-- Reconfirm the owner signed the exact-target discard decision, or completed and signed off the optional export/reconciliation. PR 7 appends `v6-control-plane-cutover`, deleting that class and **its storage irreversibly**. Tags v1–v5 remain byte-for-byte semantically unchanged. No migration transfers old wallet balances into `NextWalletDO`.
+- Discard is signed off for every environment ([2026-10-18](../decisions/2026-10-18-legacy-wallet-discard-signed.md)); confirm the target is the one recorded privately. PR 7 appends `v6-control-plane-cutover`, deleting that class and **its storage irreversibly**. Tags v1–v5 remain byte-for-byte semantically unchanged. No migration transfers old wallet balances into `NextWalletDO`.
 - Configure Worker secrets and matched variables, then use the owner-selected `wrangler deploy --keep-vars` with canonical production or preview config to apply the new migration. **Initial DO migration cannot use `wrangler versions upload`**. Do not edit/reuse migration tags or change `NextWalletDO` identity after traffic. Verify `/health` contract `2` and exact release. Leave public traffic blocked until paired checks pass.
 - Build web with the same Convex/Worker destinations and release SHA, configure web server bindings, then deploy web. Verify its release metadata, Clerk instance, HTTP and WebSocket destinations.
 

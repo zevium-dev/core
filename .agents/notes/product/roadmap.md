@@ -1,6 +1,6 @@
 # Roadmap and backlog
 
-> Updated: 2026-10-17 (closed-issue sweep against GitHub; owner decisions 2026-10-11 retained)
+> Updated: 2026-10-18 (owner decisions 2026-10-18: policy defaults accepted, legacy discard signed, Stripe sandbox everywhere, resale rights and legal deferred, cold budget kept)
 > This file owns priority. Work is tracked as GitHub issues in `zevium-dev/core` (labels `P0`/`P1`/`P2`, `area:*`); `#N` below = issue number. Feature notes own detail and status. Keep both in sync in the same change.
 
 Status legend: **built** · **partial** · **planned**. Status is set by each feature note after checking code; if this table disagrees with a feature note, the feature note wins — fix this table.
@@ -8,9 +8,11 @@ Status legend: **built** · **partial** · **planned**. Status is set by each fe
 ## Now — launch blockers
 
 1. #91 #313 #314 **Publish initial production catalogue** (now via house listings, [accounting/source decision](../decisions/2026-10-11-house-listing-accounting.md)). Anonymous dogfood on 2026-10-10 found one public API, Markdown to HTML; initial supply is still thin. Publish 1–3 owned, reliable APIs with real upstreams, credentials, descriptions, tags, pricing, and agent-readable docs. (Landing fallback teaser cards were removed 2026-08-12, commit `85aad61`; landing now shows live listings or an empty state.) → [publishing-specs](../features/publishing-specs.md), [landing-docs](../features/landing-docs.md)
+   - **Open risk (owner, 2026-10-18):** house listings may be published before resale terms are verified. Rights clearance is deferred, not done; #313 stays open. [Decision](../decisions/2026-10-18-resale-rights-deferred.md)
 2. #315 **Prove real payment and settlement journey.** Configure staging env/secrets for the payment drill (`e2e/04-payment-drill.sh`, run in the preview E2E suite; the `payment-drill.yml` workflow named in older notes does not exist); manually run authenticated publish/call plus real Stripe Checkout, refund, and Connect settlement drill. Scheduled drills run deterministic tests only. → [wallet-billing](../features/wallet-billing.md), [earnings-payouts](../features/earnings-payouts.md)
-3. #315 **Finish external production gates.** Written Stripe approval for pooled prepaid credits across independent publishers; accept platform/MoR legal and tax obligations; fix supported countries/currency; write refund, dispute, debt, risk-hold, and payout policies; complete operational runbook from [stripe-connect-discovery](../research/stripe-connect-discovery.md).
-4. #463 **Publish reviewed privacy policy and terms, confirm support inbox.** `/privacy`, `/terms`, `/support` ship as work-in-progress pages ([decision](../decisions/2026-10-17-legal-pages-wip.md)); `support@zevium.dev` is a placeholder. → [landing-docs](../features/landing-docs.md)
+3. #315 **Finish external production gates.** Until then every environment, production included, runs on the Stripe sandbox ([decision](../decisions/2026-10-18-stripe-sandbox-everywhere.md)). Written Stripe approval for pooled prepaid credits across independent publishers; accept platform/MoR legal and tax obligations; fix supported countries/currency; write refund, dispute, debt, risk-hold, and payout policies; complete operational runbook from [stripe-connect-discovery](../research/stripe-connect-discovery.md).
+4. #463 **Publish reviewed privacy policy and terms, confirm support inbox.** Deferred by owner on 2026-10-18; no longer blocks activation ([decision](../decisions/2026-10-18-legal-deferred.md)). `/privacy`, `/terms`, `/support` stay work-in-progress pages ([decision](../decisions/2026-10-17-legal-pages-wip.md)); `support@zevium.dev` is a placeholder. → [landing-docs](../features/landing-docs.md)
+5. **Revisit cold refresh budget before any public announcement or spike.** Kept at 20 burst, 5/s for now; retune from real traffic metrics ([decision](../decisions/2026-10-18-cold-refresh-budget-kept.md), [finding](../findings/edge-acceptance-cold-budget.md)). → [gateway](../features/gateway.md)
 
 ## Dogfood regressions — 2026-10-10 (all closed)
 
@@ -25,12 +27,12 @@ Every issue from both rounds is closed: #384–#387, #389, #392, #393, #395–#3
 
 Done: #365 #366 tooling/CI, #354 migration deletion, #359–#361 gateway restructure, #362–#364 #367 web fixes, carried bugs #355–#358 #334, #430 dust-lot merge.
 
-Open: **#353 Convex rebuild activation** — root cutover merged; owner-only activation per [runbook](../architecture/convex-activation.md). No shared deployment performed.
+Open: **#353 Convex rebuild activation** — root cutover merged; owner-only activation per [runbook](../architecture/convex-activation.md). No shared deployment performed. Owner sign-offs done 2026-10-18: [policy defaults](../decisions/2026-10-18-review-defaults-accepted.md) and [legacy wallet discard](../decisions/2026-10-18-legacy-wallet-discard-signed.md) for every environment.
 
 ## Build queue — updated 2026-10-11
 
 - **Built — P1 #456:** immediate wallet reopen checkpoint refresh; next-call epoch regression replaces alarm-dependent acceptance. → [gateway](../features/gateway.md)
-- **Built — P1 #440:** scoped payment `needs_review` source quarantine implemented; unrelated funds reopen after drain. Owner policy sign-off remains required before activation. → [wallet-billing](../features/wallet-billing.md)
+- **Built — P1 #440:** scoped payment `needs_review` source quarantine implemented; unrelated funds reopen after drain. Owner accepted the policy as built 2026-10-18. → [wallet-billing](../features/wallet-billing.md)
 
 Small, decided items. Each links to its decision; build in any order unless noted.
 

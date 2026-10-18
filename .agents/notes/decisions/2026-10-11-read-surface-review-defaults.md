@@ -1,6 +1,6 @@
 # Read-surface review defaults for PR #442
 
-Status: proposed — implementation authorized for PR #442; defaults pending owner sign-off. Date: 2026-10-11.
+Status: accepted (built) — owner accepted as built on 2026-10-18 ([decision](2026-10-18-review-defaults-accepted.md)). Date: 2026-10-11.
 
 - **D1:** Show “Operated by Zevium” on next catalogue cards/detail when `houseOperated`. Label wording was already [accepted](2026-10-10-house-supply-via-aggregators.md); this records delivery scope.
 - **D2:** Require org admin for `earnings.forOrg` aggregate/per-project call counts and gross earnings, matching analytics access.

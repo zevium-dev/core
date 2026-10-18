@@ -2,7 +2,7 @@
 
 # Dev environment
 
-> Updated: 2026-10-13 (isolated verification paths; #451)
+> Updated: 2026-10-18 (web origin has no fallback)
 > Related: [deploy](deploy.md), [testing](testing.md)
 
 Facts an agent needs before running anything locally. Hard-won; keep them. If a fact stops being true, fix it here in the same change.
@@ -119,9 +119,17 @@ keep app `notificationEmailDeliveries` receipts for durable deduplication.
 ## Gateway recovery origin (#417)
 
 `mise exec -- pnpm --filter @zevium/gateway dev` passes `APP_ORIGIN` to Wrangler,
-defaulting to `http://localhost:3000`. Export `APP_ORIGIN` when using a different
-local web origin. Direct Wrangler invocations need `--var APP_ORIGIN:<web-origin>`
-or the matching `.dev.vars` setting. Production defaults to `https://zevium.dev`;
-preview CI injects its paired `zevium-web-pr-<number>.zevium-dev.workers.dev` origin.
+defaulting to `http://localhost:3000` in the script itself. Export `APP_ORIGIN` when
+using a different local web origin. Direct Wrangler invocations need
+`--var APP_ORIGIN:<web-origin>` or the matching `.dev.vars` setting.
+`wrangler.jsonc` has **no** default: production and preview deploys pass it
+explicitly. Missing or invalid, the gateway omits recovery/deprecation links and
+`/llms.txt` returns 503 ([decision](../decisions/2026-10-18-app-origin-fail-closed.md)).
+
+Convex has no fallback either. On a dev or isolated backend, set both
+`APP_ORIGIN` and `NEXT_APP_ORIGIN` to the local web origin
+(`http://localhost:3000`) with `convex env set`; otherwise Checkout and Connect
+onboarding refuse and notification email is skipped. HTTPS or loopback HTTP
+only. Tests stub fixture origins (`https://web.fixture.invalid`).
 This binding drives direct gateway and MCP recovery actions independently of the
 gateway's own discovery origin.

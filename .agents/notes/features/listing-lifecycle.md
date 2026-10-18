@@ -41,7 +41,7 @@ Publish reserves routes permanently in the same transaction. Metadata updates pa
 
 ## Decisions
 
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
 - None recorded beyond TECH.md bullets above.
 

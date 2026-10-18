@@ -40,9 +40,9 @@ Settlement writes exact original-source/day/shard 95/5 atoms and rollups without
 
 ## Decisions
 
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
-- [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C implemented as parent defaults, pending owner sign-off before activation; scoped B implemented in #440.
+- [PR 4 review defaults](../decisions/2026-10-11-payment-review-defaults.md): A/B/C accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)); scoped B implemented in #440.
 
 - 2026-10-11 — Preserve durable notification/reconciliation facts in the 34-table isolated rebuild. [Decision](../decisions/2026-10-11-convex-rebuild-durable-facts.md).
 

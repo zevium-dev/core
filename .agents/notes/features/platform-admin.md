@@ -28,7 +28,7 @@ The staff-only exception console is always available after cutover; no preview s
 
 ## Decisions
 
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
 - Admin access = env allowlist (`ADMIN_USER_IDS`), no roles table.
 - 2026-07-11 — Scope: full FLOW.md parity including admin.

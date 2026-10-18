@@ -79,6 +79,7 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 
 ## Decisions
 
+- 2026-10-18 — DEFERRED: reviewed legal text and support inbox (#463) no longer block activation; the WIP pages stay. [Decision](../decisions/2026-10-18-legal-deferred.md).
 - 2026-10-17 — ACCEPTED: privacy, terms and support ship as work-in-progress pages with no invented legal text; support email is a placeholder pending owner confirmation. [Decision](../decisions/2026-10-17-legal-pages-wip.md).
 
 - 2026-10-11 — ACCEPTED: Generate consumer surfaces from immutable publisher OpenAPI; P0 #428, existing #110, form #427 and P2 SDK #350. [Decision](../decisions/2026-10-11-openapi-as-contract.md).

@@ -1,6 +1,6 @@
 # PR 4 payment review defaults
 
-Status: proposed — implemented parent defaults, pending owner sign-off.
+Status: accepted (built) — owner accepted as built on 2026-10-18 ([decision](2026-10-18-review-defaults-accepted.md)).
 Date: 2026-10-11.
 Scope: Convex rebuild PR #439 and scoped review follow-up #440; no deployment or production activation authorized.
 

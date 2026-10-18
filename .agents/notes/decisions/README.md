@@ -64,11 +64,11 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-10 | [Capability taxonomy and normalized web search](2026-10-10-capability-taxonomy.md)                   | proposed (awaiting user)               |
 | 2026-10-11 | [Signup credit: first organization created](2026-10-11-signup-credit-first-created-org.md)           | accepted; #434                         |
 | 2026-10-11 | [Convex rebuild: preserve durable facts](2026-10-11-convex-rebuild-durable-facts.md)                 | accepted; isolated schema built        |
-| 2026-10-11 | [Promo self-consumption protection](2026-10-11-promo-self-consumption.md)                            | proposed; guard built                  |
-| 2026-10-11 | [PR 4 payment review defaults](2026-10-11-payment-review-defaults.md)                                | proposed; pending owner sign-off       |
+| 2026-10-11 | [Promo self-consumption protection](2026-10-11-promo-self-consumption.md)                            | accepted (built) 2026-10-18            |
+| 2026-10-11 | [PR 4 payment review defaults](2026-10-11-payment-review-defaults.md)                                | accepted (built) 2026-10-18            |
 | 2026-10-11 | [Edge cold fills and issuance clock skew](2026-10-11-edge-cold-fill-and-clock-skew.md)               | accepted (built in PR #441)            |
-| 2026-10-11 | [PR #442 read-surface review defaults](2026-10-11-read-surface-review-defaults.md)                   | proposed; applied in next preview      |
-| 2026-10-11 | [Legacy wallet cutover data](2026-10-11-legacy-wallet-discard.md)                                    | accepted; v6 sign-off pending          |
+| 2026-10-11 | [PR #442 read-surface review defaults](2026-10-11-read-surface-review-defaults.md)                   | accepted (built) 2026-10-18            |
+| 2026-10-11 | [Legacy wallet cutover data](2026-10-11-legacy-wallet-discard.md)                                    | accepted; v6 signed off 2026-10-18     |
 | 2026-10-11 | [Connected accounts are the OAuth priority (API only)](2026-10-11-connected-accounts-oauth.md)       | accepted; build choices superseded     |
 | 2026-10-11 | [Zevium owns one OAuth client per provider](2026-10-11-zevium-owned-oauth-clients.md)                | accepted; 37th table pending sign-off  |
 | 2026-10-13 | [CLI ships as a plain Node script](2026-10-13-cli-node-script.md)                                    | accepted; built, owner release pending |
@@ -80,3 +80,10 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-17 | [Legal and support pages ship as work in progress](2026-10-17-legal-pages-wip.md)                    | accepted; built, email pending owner   |
 | 2026-10-17 | [MCP Registry server name `dev.zevium/mcp`](2026-10-17-mcp-registry-name.md)                         | accepted (built, not published)        |
 | 2026-10-18 | [MCP Registry publish deferred](2026-10-18-mcp-registry-publish-deferred.md)                         | deferred                               |
+| 2026-10-18 | [Missing web origin fails closed](2026-10-18-app-origin-fail-closed.md)                              | accepted (built)                       |
+| 2026-10-18 | [Rebuild policy defaults accepted as built](2026-10-18-review-defaults-accepted.md)                  | accepted (built)                       |
+| 2026-10-18 | [Legacy wallet discard signed off everywhere](2026-10-18-legacy-wallet-discard-signed.md)            | accepted                               |
+| 2026-10-18 | [Stripe sandbox in every environment](2026-10-18-stripe-sandbox-everywhere.md)                       | accepted                               |
+| 2026-10-18 | [House-listing resale rights deferred](2026-10-18-resale-rights-deferred.md)                         | deferred; open risk                    |
+| 2026-10-18 | [Privacy, terms and support inbox deferred](2026-10-18-legal-deferred.md)                            | deferred                               |
+| 2026-10-18 | [Cold refresh budget kept at 20 burst, 5/s](2026-10-18-cold-refresh-budget-kept.md)                  | accepted                               |
