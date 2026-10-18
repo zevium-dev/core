@@ -1,6 +1,6 @@
 # Official MCP Registry listing (#325)
 
-Updated: 2026-10-18. Built, not activated: nothing has been published to the registry yet. Done 2026-10-18: environment `mcp-registry` (deployment branch `develop`, no required reviewer) and its `MCP_REGISTRY_PRIVATE_KEY` secret. Still open: the apex DNS TXT record (step 1), repo variables `PRODUCTION_GATEWAY_URL` and `MCP_REGISTRY_PUBLISH_ENABLED` (step 4; no repo variables exist yet), first publish (step 5).
+Updated: 2026-10-18. Built, not activated: nothing has been published to the registry yet. **Publishing is deferred by the owner** ([decision](../decisions/2026-10-18-mcp-registry-publish-deferred.md)): keep `MCP_REGISTRY_PUBLISH_ENABLED` unset and add no DNS record until that changes. Done 2026-10-18: environment `mcp-registry` (deployment branch `develop`, no required reviewer) and its `MCP_REGISTRY_PRIVATE_KEY` secret. Still open: the apex DNS TXT record (step 1), repo variables `PRODUCTION_GATEWAY_URL` and `MCP_REGISTRY_PUBLISH_ENABLED` (step 4; no repo variables exist yet), first publish (step 5).
 
 Zevium's remote `/mcp` server is described by root `server.json` and listed in the official MCP Registry (`registry.modelcontextprotocol.io`, still in preview) as `dev.zevium/mcp`. Aggregators (Glama, Kong, client marketplaces) mirror that registry, so one listing reaches all of them. Product context: [agent-surface](../features/agent-surface.md).
 
