@@ -442,9 +442,9 @@ describe("Clerk MCP OAuth resource server", () => {
         cost: 0,
         reason: "oauth_missing_api_key",
         message:
-          "No API key for this organization — create one at https://zevium.dev/app/settings/keys",
+          "No API key for this organization — create one at https://web.fixture.invalid/app/settings/keys",
         recovery: expect.stringContaining("no reconnect needed"),
-        actions: { createKey: "https://zevium.dev/app/settings/keys" },
+        actions: { createKey: "https://web.fixture.invalid/app/settings/keys" },
       });
     }
     expect(f.upstream).not.toHaveBeenCalled();
@@ -501,9 +501,9 @@ describe("Clerk MCP OAuth resource server", () => {
       cost: 0,
       reason: "oauth_key_disabled",
       message:
-        "Your API key for this organization is disabled — re-enable or rotate it at https://zevium.dev/app/settings/keys",
+        "Your API key for this organization is disabled — re-enable or rotate it at https://web.fixture.invalid/app/settings/keys",
       recovery: expect.stringContaining("no reconnect needed"),
-      actions: { createKey: "https://zevium.dev/app/settings/keys" },
+      actions: { createKey: "https://web.fixture.invalid/app/settings/keys" },
     });
     expect(body).not.toHaveProperty("retryAfterSeconds");
     expect(f.upstream).not.toHaveBeenCalled();

@@ -51,6 +51,7 @@ beforeEach(() => {
     JSON.stringify({ current: "k1", keys: { k1: SECRET } }),
   );
   vi.stubEnv("NEXT_DEPLOYMENT_ID", "next-fixture");
+  vi.stubEnv("NEXT_APP_ORIGIN", "https://web.fixture.invalid");
   vi.stubGlobal(
     "fetch",
     vi.fn(() => {
@@ -1722,6 +1723,25 @@ describe("Checkout fee legal gate", () => {
           priceId: id,
           check,
         });
+      },
+    );
+    it.each([
+      ["missing", ""],
+      ["non-HTTPS", "http://web.fixture.invalid"],
+    ])(
+      "%s NEXT_APP_ORIGIN refuses Checkout before any Stripe call",
+      async (_name, origin) => {
+        vi.stubEnv("NEXT_APP_ORIGIN", origin);
+        const { run, sessionPosts, error } = await checkout(true);
+        await expect(run).rejects.toThrow(
+          "Checkout is unavailable. Please try again.",
+        );
+        expect(sessionPosts).toHaveLength(0);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(error).toHaveBeenCalledWith(
+          "Web origin configuration missing or invalid",
+          { variable: "NEXT_APP_ORIGIN" },
+        );
       },
     );
     it("opens Checkout with credit and fee lines when the fee is enabled", async () => {

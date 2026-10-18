@@ -1,5 +1,7 @@
 import Stripe from "stripe";
 import { z } from "zod";
+import { ConvexError } from "convex/values";
+import { configuredAppOrigin } from "./appOrigin";
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
 /** Payments remain test-mode only. Live-mode activation requires separate owner approval. */
 export function stripeConfig() {
@@ -63,17 +65,14 @@ export const paidFact = z
   })
   .strict();
 export type PaidFact = z.infer<typeof paidFact>;
+/** Checkout/Connect return origin; refuses rather than guessing one. */
 export function appOrigin() {
-  const url = new URL(process.env.NEXT_APP_ORIGIN ?? "http://localhost:3000");
-  if (
-    url.protocol !== "https:" &&
-    !(
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1"].includes(url.hostname)
-    )
-  )
-    throw new Error("Invalid application origin");
-  return url.origin;
+  const origin = configuredAppOrigin("NEXT_APP_ORIGIN");
+  if (!origin)
+    throw new ConvexError(
+      "Payments are unavailable right now. Please try again later.",
+    );
+  return origin;
 }
 export function definitiveStripeFailure(error: unknown) {
   // Executed 5xx/network requests may have succeeded. Never release those allocations.

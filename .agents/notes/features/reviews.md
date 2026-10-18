@@ -23,7 +23,7 @@ Successful real paid or free calls establish active-org review eligibility; mock
 
 ## Decisions
 
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
 - 2026-07-19 — Generated SDKs and reviews/ratings stay deferred until catalogue has real supply and core paid journey is proven. Superseded in practice: reviews shipped in code (see Status).
 - 2026-10-10 — BUILT (#319): any org with at least one successful call (free-tier included) may review; tighten later (e.g. ≥$20 topped up in last year). [decision](../decisions/2026-10-10-review-eligibility.md)

@@ -32,7 +32,7 @@ Accepted settlement commits exact financial/call rollups once per ref. Summary q
 
 ## Decisions
 
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
 - Wave 4 — analytics dashboards shipped (web+convex, commit 632f6ed).
 - 2026-10-10 — ACCEPTED: two roles for now, admin + member (owner treated as admin); full permission-based access later. [decision](../decisions/2026-10-10-two-roles-admin-member.md) Analytics is admin-only — code correct, FLOW wrong.

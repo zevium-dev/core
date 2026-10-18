@@ -1,6 +1,7 @@
 import { Resend } from "@convex-dev/resend";
 import { components } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
+import { configuredAppOrigin } from "./appOrigin";
 
 // Construct at call time so missing credentials never fail module evaluation.
 export function notificationMailer(): Resend {
@@ -29,26 +30,28 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * Sender, key and link origin all configured, or null. A missing/invalid
+ * APP_ORIGIN skips email (logged) instead of linking to a guessed site.
+ */
+export function emailConfig(): { from: string; appOrigin: string } | null {
+  const from = process.env.EMAIL_FROM?.trim();
+  if (!from || !process.env.RESEND_API_KEY?.trim()) return null;
+  const appOrigin = configuredAppOrigin("APP_ORIGIN");
+  return appOrigin ? { from, appOrigin } : null;
+}
+
 /** Plain event facts, no remote assets or publisher-supplied HTML/URLs. */
 export function notificationTemplate(
   notification: Doc<"notifications">,
   organizationName: string,
+  appOrigin: string,
 ) {
-  const origin = new URL(process.env.APP_ORIGIN ?? "https://www.zevium.dev");
-  if (
-    origin.protocol !== "https:" &&
-    !(
-      origin.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)
-    )
-  ) {
-    throw new Error("Email app origin must use HTTPS");
-  }
   const destination =
     notification.publisherHandle && notification.projectSlug
       ? `/catalogue/${encodeURIComponent(notification.publisherHandle)}/${encodeURIComponent(notification.projectSlug)}`
       : (destinations[notification.kind] ?? "/app");
-  const url = new URL(destination, origin.origin).href;
+  const url = new URL(destination, appOrigin).href;
   const context = `Notification for ${organizationName}. Select this organization in Zevium to view its details.`;
   const plain = (value: string) => value.replace(/([.:@/])/g, "$1\u200b");
   const title = plain(notification.title),

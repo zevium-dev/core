@@ -8,6 +8,7 @@ import { NOW, organization } from "./fixtures";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 it("keeps Dahlia headers and recipient-scoped Accounts v2 onboarding on SDK v23", async () => {
@@ -100,6 +101,29 @@ it("keeps Dahlia headers and recipient-scoped Accounts v2 onboarding on SDK v23"
   expect(org?.connectOperation?.link?.state).toBe("complete");
   expect(linkRequest.headers.get("idempotency-key")).toBe(
     `next:link:${orgId}:${org?.connectOperation?.link?.id}`,
+  );
+});
+
+it("refuses Connect onboarding before any Stripe call when NEXT_APP_ORIGIN is missing", async () => {
+  vi.stubEnv("NEXT_STRIPE_SECRET_KEY", ["sk", "test", "fixture"].join("_"));
+  vi.stubEnv("NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_platform");
+  vi.stubEnv("NEXT_APP_ORIGIN", "");
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const t = harness();
+  await t.run((ctx) => ctx.db.insert("organizations", organization("sdk")));
+  const fetch = vi.fn(() => {
+    throw new Error("Stripe must not be called");
+  });
+  vi.stubGlobal("fetch", fetch);
+  await expect(
+    t.withIdentity(identity("sdk")).action(api.payouts.startOnboarding, {}),
+  ).rejects.toThrow(
+    "Publisher setup is unavailable or pending reconciliation. Please try again later.",
+  );
+  expect(fetch).not.toHaveBeenCalled();
+  expect(error).toHaveBeenCalledWith(
+    "Web origin configuration missing or invalid",
+    { variable: "NEXT_APP_ORIGIN" },
   );
 });
 

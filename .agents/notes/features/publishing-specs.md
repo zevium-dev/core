@@ -1,6 +1,6 @@
 # Publishing specs
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-18
 > Code: `convex/{projects,specs,publishReadiness,publishReadinessAction}.ts`, `convex/lib/{dto,publicRoutes}.ts`, `apps/web/src/components/spec-editor/`, `tests/publishing.test.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
@@ -68,8 +68,9 @@ Optional house subsidy cap #429: assessed and skipped on 2026-10-11 under the ow
 
 ## Decisions
 
+- 2026-10-18 — DEFERRED, **OPEN RISK**: house listings may be published before resale terms are verified; rights clearance stays open in #313. [Decision](../decisions/2026-10-18-resale-rights-deferred.md).
 - 2026-10-11 — ACCEPTED: `oauth2` authorization-code schemes with `x-zevium-oauth-provider` declare connected accounts; endpoints come from Zevium's registry. [Decision](../decisions/2026-10-11-zevium-owned-oauth-clients.md).
-- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md), pending owner sign-off.
+- 2026-10-11 — PR #442 applies [read-surface review defaults](../decisions/2026-10-11-read-surface-review-defaults.md); owner accepted as built 2026-10-18 ([decision](../decisions/2026-10-18-review-defaults-accepted.md)).
 
 - 2026-10-11 — ACCEPTED: Publisher spec is the contract; generated surfaces #428, existing MCP #110, form playground #427. Zevium writes house specs. [Decision](../decisions/2026-10-11-openapi-as-contract.md).
 - 2026-10-11 — ACCEPTED: Ordinary house publisher org/95/5 ledger (#314); RapidAPI excluded (#313); cap optional P2 #429. [Decision](../decisions/2026-10-11-house-listing-accounting.md).
@@ -83,6 +84,7 @@ Optional house subsidy cap #429: assessed and skipped on 2026-10-11 under the ow
 
 ## Open questions
 
+- **Open risk (2026-10-18):** house listings can go live without verified upstream resale rights. Research clears no listing end to end; RapidAPI and Brave prohibit resale. Owner deferred this ("deal with it later"); #313 stays open and must be resolved before relying on any house listing commercially.
 - FLOW routes `/app/organizations/{org}/projects/...`; code routes `/app/projects/...` (org from active session). FLOW 2.3 already says URLs do not repeat the org slug; fix FLOW route lines.
 - FLOW "spec-diff between versions": code diffs a published version against the saved draft only, not version-to-version. Rollback (P2) absent.
 - Resolved #362: the duplicate import limiter entry point was dead; the active `specImportLimits` path is documented above. The unused table remains outside this change’s schema scope.

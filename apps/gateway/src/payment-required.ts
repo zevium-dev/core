@@ -1,3 +1,5 @@
+import { webOrigin } from "./web-origin";
+
 /** Human recovery envelope for authenticated, credit-gated calls. */
 const RECOVERY: Record<string, string> = {
   missing_api_key: "Create an API key and send it as a Bearer credential.",
@@ -17,24 +19,23 @@ const RECOVERY: Record<string, string> = {
     "Reduce the prompt or output limit, or add wallet credits, then retry.",
 };
 
-/** Only platform-owned safe text belongs here; never pass upstream errors. */
+/**
+ * Only platform-owned safe text belongs here; never pass upstream errors.
+ * Without a valid APP_ORIGIN the 402 still blocks, but `actions` is omitted
+ * rather than linking to a guessed web origin.
+ */
 export function paymentRequiredResponse(
   requestId: string,
   detail: string,
   extra?: Record<string, unknown>,
-  webOrigin = "https://zevium.dev",
+  appOrigin?: string,
 ): Response {
-  const origin = new URL(webOrigin);
-  if (
-    !["http:", "https:"].includes(origin.protocol) ||
-    origin.username ||
-    origin.password
-  )
-    throw new Error("Invalid APP_ORIGIN");
-  const url = (path: string) => new URL(path, origin.origin).href;
+  const origin = webOrigin(appOrigin);
+  const url = (path: string) => new URL(path, origin).href;
   const reason = typeof extra?.reason === "string" ? extra.reason : "";
-  const actions =
-    reason === "key_cap_exceeded"
+  const actions = !origin
+    ? undefined
+    : reason === "key_cap_exceeded"
       ? { manageKey: url("/app/settings/keys"), docs: url("/docs/consuming") }
       : {
           createKey: url("/app/settings/keys"),
@@ -48,7 +49,7 @@ export function paymentRequiredResponse(
       message: detail,
       detail,
       recovery: RECOVERY[reason],
-      actions,
+      ...(actions ? { actions } : {}),
       requestId,
     }),
     {

@@ -140,6 +140,8 @@ export const createCheckout = action({
     args,
   ): Promise<{ url: string; checkoutIntentId: Id<"checkoutIntents"> }> => {
     try {
+      // Before any Stripe write: no return origin, no Checkout.
+      const origin = appOrigin();
       const owner = await ctx.runQuery(internal.billing.customerContext, {}),
         stripe = await verifiedStripe();
       const customerId =
@@ -200,8 +202,8 @@ export const createCheckout = action({
               : []),
           ],
           expires_at: Math.floor(intent.expiresAt / 1000),
-          success_url: `${appOrigin()}/app/billing?checkout_session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${appOrigin()}/app/billing`,
+          success_url: `${origin}/app/billing?checkout_session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/app/billing`,
           metadata: { checkoutIntentId: intent._id },
           payment_intent_data: { metadata: { checkoutIntentId: intent._id } },
         },

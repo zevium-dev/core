@@ -26,6 +26,7 @@ import type * as http from "../http.js";
 import type * as keyRecovery from "../keyRecovery.js";
 import type * as keySettings from "../keySettings.js";
 import type * as keyVerification from "../keyVerification.js";
+import type * as lib_appOrigin from "../lib/appOrigin.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_billingRead from "../lib/billingRead.js";
 import type * as lib_catalogue from "../lib/catalogue.js";
@@ -116,6 +117,7 @@ declare const fullApi: ApiFromModules<{
   keyRecovery: typeof keyRecovery;
   keySettings: typeof keySettings;
   keyVerification: typeof keyVerification;
+  "lib/appOrigin": typeof lib_appOrigin;
   "lib/auth": typeof lib_auth;
   "lib/billingRead": typeof lib_billingRead;
   "lib/catalogue": typeof lib_catalogue;

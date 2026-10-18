@@ -1,6 +1,6 @@
 # Promo self-consumption must not create withdrawable earnings
 
-Status: proposed — parent review direction applied in isolated PR #438; pending owner sign-off.
+Status: accepted (built) — owner accepted as built on 2026-10-18 ([decision](2026-10-18-review-defaults-accepted.md)); implemented in PR #438.
 Date: 2026-10-11
 Scope: #353 Convex rebuild, money core; live deployment unchanged.
 
@@ -10,4 +10,4 @@ PR #438 implements the verifiable same-org check. The current schema has no veri
 
 Accounting retains full gross source attribution, zero fee/net for suppressed slices, and separate platform promo-cost atoms. Suppression creates no withdrawable earning. Original-source type survives dust merges. Platform fee revenue excludes suppressed promotion.
 
-Owner sign-off is still required for the product policy before cutover. Implementation does not change the accepted ordinary house-publisher path for paid/admin funding.
+Implementation does not change the accepted ordinary house-publisher path for paid/admin funding.
