@@ -317,7 +317,7 @@ async function execute(
       "This API has reached its published sunset",
       id,
     );
-    applyDeprecationHeaders(response.headers, p, route);
+    applyDeprecationHeaders(response.headers, p, route, env.APP_ORIGIN);
     return response;
   }
   if (!p.admission.allowed)
@@ -495,6 +495,6 @@ async function execute(
   headers.set("x-zevium-request-id", id);
   setChargeHeaders(headers, status, result.admission);
   if (connection) headers.set(CONNECTION_HEADER, connection.id);
-  applyDeprecationHeaders(headers, p, route);
+  applyDeprecationHeaders(headers, p, route, env.APP_ORIGIN);
   return new Response(forwarded.response.body, { status, headers });
 }

@@ -417,6 +417,8 @@ export async function onboarding(
   ctx: ActionCtx,
   country?: string,
 ): Promise<{ url: string }> {
+  // Refuse before creating Stripe objects when return links cannot be built.
+  appOrigin();
   let org = await ctx.runMutation(internal.connect.prepare, { country });
   if (!org.connect) {
     await ctx.runAction(internal.connect.resume, { id: org._id });

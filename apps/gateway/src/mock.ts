@@ -14,6 +14,7 @@ import {
   type PublicSpecSource,
 } from "./spec-source";
 import { jsonError } from "./errors";
+import { appendDeprecationLink } from "./deprecation";
 
 export type MockDeps = {
   /** Unused since mock went keyless; kept so test deps stay uniform. */
@@ -21,6 +22,8 @@ export type MockDeps = {
   specSource: PublicSpecSource;
   idGenerator?: () => string;
   now?: () => number;
+  /** Paired web origin for deprecation links; omitted when unusable. */
+  appOrigin?: string;
 };
 
 export type MockRoute = {
@@ -80,10 +83,7 @@ export async function handleMockRequest(
         "Deprecation",
         `@${Math.floor(published.deprecatedAt / 1000)}`,
       );
-      response.headers.append(
-        "Link",
-        `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
-      );
+      appendDeprecationLink(response.headers, route, deps.appOrigin);
     }
     if (published.sunsetAt !== undefined) {
       response.headers.set(

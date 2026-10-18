@@ -21,6 +21,7 @@ beforeEach(async () => {
   vi.stubEnv("RESEND_API_KEY", "fake");
   vi.stubEnv("EMAIL_FROM", "Zevium <notifications@example.com>");
   vi.stubEnv("CLERK_SECRET_KEY", "fake");
+  vi.stubEnv("APP_ORIGIN", "https://web.fixture.invalid");
   mocks.members.mockReset();
   mocks.user.mockReset();
 });
@@ -84,7 +85,12 @@ it("delivers active email with receipts and continues past a bad recipient to la
   });
   expect(send).toHaveBeenCalledTimes(1);
   const row = (await t.run((ctx) => ctx.db.get(id!)))!;
-  const template = notificationTemplate(row, "Org");
+  const template = notificationTemplate(
+    row,
+    "Org",
+    "https://web.fixture.invalid",
+  );
+  expect(template.text).toContain("https://web.fixture.invalid/app");
   expect(template.html).not.toContain("<script>");
   expect(template.html).not.toContain("https://evil.example");
   expect(template.text).not.toContain("https://evil.example");
@@ -102,6 +108,40 @@ it("delivers active email with receipts and continues past a bad recipient to la
     emailRevision: 1,
   });
 });
+it.each([
+  ["missing", ""],
+  ["non-HTTPS", "http://web.fixture.invalid"],
+])(
+  "skips email without inventing a link when APP_ORIGIN is %s",
+  async (_label, origin) => {
+    vi.stubEnv("APP_ORIGIN", origin);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = harness(),
+      { one } = await seed(t);
+    const send = vi
+      .spyOn(Resend.prototype, "sendEmail")
+      .mockResolvedValue("fake-email-id" as EmailId);
+    const { id } = await t.run((ctx) =>
+      createNotification(ctx, {
+        organizationId: one,
+        kind: "low_balance",
+        title: "Low balance",
+        body: "Top up soon",
+        refId: "origin-test",
+      }),
+    );
+    await t.finishAllScheduledFunctions(() => vi.runOnlyPendingTimersAsync());
+    expect(send).not.toHaveBeenCalled();
+    expect(mocks.members).not.toHaveBeenCalled();
+    expect(await t.run((ctx) => ctx.db.get(id!))).toMatchObject({
+      emailState: "skipped",
+    });
+    expect(error).toHaveBeenCalledWith(
+      "Web origin configuration missing or invalid",
+      { variable: "APP_ORIGIN" },
+    );
+  },
+);
 it("restricts webhook failures to admins in inbox, unread count, marking and email", async () => {
   const t = harness(),
     { one } = await seed(t);

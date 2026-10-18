@@ -28,6 +28,7 @@ import { apiDocsFromSpec } from "./mcp-api-docs";
 import { getGeneratedContract, generationFailure } from "./generated-contract";
 import { callParameterSchemas, callTarget } from "./mcp-call-params";
 import { paymentRequiredResponse } from "./payment-required";
+import { webOrigin } from "./web-origin";
 import type { CatalogueSearchSource } from "./catalogue-search";
 import { extractApiKey } from "./key-verifier";
 import { METHOD_OVERRIDE_HEADERS } from "./headers";
@@ -537,10 +538,11 @@ async function handleCallApi(
     );
 
   if (deps.keylessOAuth) {
-    const keys = new URL(
-      "/app/settings/keys",
-      deps.pipelineEnv.APP_ORIGIN ?? "https://zevium.dev",
-    ).href;
+    // Missing APP_ORIGIN: name the settings page instead of guessing a URL.
+    const origin = webOrigin(deps.pipelineEnv.APP_ORIGIN);
+    const keys = origin
+      ? new URL("/app/settings/keys", origin).href
+      : "Zevium Settings > API keys";
     const { keyState } = deps.keylessOAuth;
     const response = paymentRequiredResponse(
       crypto.randomUUID(),

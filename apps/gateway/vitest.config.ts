@@ -14,6 +14,7 @@ export default defineConfig({
             current: "k1",
             keys: { k1: "test-only-secret-never-use-in-production" },
           }),
+          APP_ORIGIN: "https://web.fixture.invalid",
           CLERK_SECRET_KEY: "",
           CONVEX_URL: "",
           GATEWAY_INTERNAL_SECRET: "test-admission-secret",

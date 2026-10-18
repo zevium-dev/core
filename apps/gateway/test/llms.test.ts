@@ -52,11 +52,15 @@ function installFixtures() {
   });
 }
 
-async function call(url: string, init?: RequestInit): Promise<Response> {
+async function call(
+  url: string,
+  init?: RequestInit,
+  overrides: Partial<Env> = { APP_ORIGIN: "https://web.example.test" },
+): Promise<Response> {
   const ctx = createExecutionContext();
   const response = await worker.fetch(
     new Request(url, init),
-    { ...env, APP_ORIGIN: "https://web.example.test" } as Env,
+    { ...env, ...overrides } as Env,
     ctx,
   );
   await waitOnExecutionContext(ctx);
@@ -89,6 +93,35 @@ describe("gateway /llms.txt", () => {
       405,
     );
   });
+
+  it.each([
+    ["missing", undefined],
+    ["non-HTTPS", "http://web.example.test"],
+  ])(
+    "refuses the guide and omits payment links when APP_ORIGIN is %s",
+    async (_label, appOrigin) => {
+      installFixtures();
+      const guide = await call(`${ORIGIN}/llms.txt`, undefined, {
+        APP_ORIGIN: appOrigin,
+      });
+      expect(guide.status).toBe(503);
+      expect(await guide.json()).toMatchObject({
+        error: "gateway_unavailable",
+        message: "Gateway configuration is temporarily unavailable",
+      });
+      __setTestPipelineDeps(null);
+      const paid = await call(
+        `${ORIGIN}/gateway/acme/demo/example`,
+        undefined,
+        { APP_ORIGIN: appOrigin },
+      );
+      expect(paid.status).toBe(402);
+      const body = (await paid.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ error: "payment_required" });
+      expect(body).not.toHaveProperty("actions");
+      expect(JSON.stringify(body)).not.toContain("zevium.dev");
+    },
+  );
 
   it("every gateway URL it advertises reaches its real handler", async () => {
     installFixtures();

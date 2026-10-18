@@ -17,6 +17,7 @@ import {
 } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
+  emailConfig,
   notificationMailer,
   notificationTemplate,
 } from "./lib/notificationEmail";
@@ -67,10 +68,7 @@ export const tick = internalMutation({
       }
       return;
     }
-    if (
-      !process.env.RESEND_API_KEY?.trim() ||
-      !process.env.EMAIL_FROM?.trim()
-    ) {
+    if (!emailConfig()) {
       await ctx.db.patch(args.notificationId, { emailState: "skipped" });
       console.info("Notification email skipped: email configuration missing", {
         notificationId: args.notificationId,
@@ -113,8 +111,8 @@ export const enqueueRecipient = internalMutation({
   args: { ...pageArgs, clerkUserId: v.string(), email: v.string() },
   handler: async (ctx, args): Promise<void> => {
     const current = await pendingPage(ctx, args);
-    const from = process.env.EMAIL_FROM?.trim();
-    if (!current || !from || !process.env.RESEND_API_KEY?.trim()) return;
+    const config = emailConfig();
+    if (!current || !config) return;
     const preference = await ctx.db
       .query("notificationPreferences")
       .withIndex("by_org_user", (q) =>
@@ -135,9 +133,13 @@ export const enqueueRecipient = internalMutation({
       .unique();
     if (existing) return;
     const emailId = await notificationMailer().sendEmail(ctx, {
-      from,
+      from: config.from,
       to: args.email,
-      ...notificationTemplate(current.notification, current.org.name),
+      ...notificationTemplate(
+        current.notification,
+        current.org.name,
+        config.appOrigin,
+      ),
       idempotencyKey: `notification:${args.notificationId}:${args.revision}:${args.clerkUserId}`,
     });
     await ctx.db.insert("notificationEmailDeliveries", {
@@ -153,10 +155,7 @@ export const completePage = internalMutation({
   args: { ...pageArgs, nextOffset: v.union(v.number(), v.null()) },
   handler: async (ctx, args): Promise<void> => {
     if (!(await pendingPage(ctx, args))) return;
-    if (
-      !process.env.RESEND_API_KEY?.trim() ||
-      !process.env.EMAIL_FROM?.trim()
-    ) {
+    if (!emailConfig()) {
       await ctx.db.patch(args.notificationId, { emailState: "skipped" });
       console.info("Notification email skipped: email configuration missing", {
         notificationId: args.notificationId,

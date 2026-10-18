@@ -24,6 +24,8 @@ import {
 import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight } from "./cors";
+import { jsonError } from "./errors";
+import { webOrigin } from "./web-origin";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 import { handleConnectionsRequest, type ConnectionsDeps } from "./connections";
 
@@ -138,8 +140,9 @@ function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
   };
 }
 
-function mockDeps(deps: WorkerDeps): MockDeps {
+function mockDeps(deps: WorkerDeps, env: Env): MockDeps {
   return {
+    appOrigin: env.APP_ORIGIN,
     keyVerifier: deps.keyVerifier,
     specSource: deps.publicSpecSource,
     idGenerator: deps.idGenerator,
@@ -223,11 +226,16 @@ async function dispatchRequest(
         status: 405,
         headers: { allow: "GET, HEAD, OPTIONS" },
       });
-    // Same fallback as payment recovery links when APP_ORIGIN is unset.
-    const response = llmsResponse({
-      web: env.APP_ORIGIN ?? "https://zevium.dev",
-      gateway: url.origin,
-    });
+    // The guide links the web app throughout; refuse rather than guess it.
+    const web = webOrigin(env.APP_ORIGIN);
+    if (!web)
+      return jsonError(
+        503,
+        "gateway_unavailable",
+        "Gateway configuration is temporarily unavailable",
+        crypto.randomUUID(),
+      );
+    const response = llmsResponse({ web, gateway: url.origin });
     // Public and origin-derived only; same freshness as /discovery.
     response.headers.set("cache-control", "public, max-age=60");
     return response;
@@ -351,7 +359,7 @@ async function dispatchRequest(
   const mockRoute = parseMockPath(url.pathname);
   if (mockRoute) {
     const deps = buildDeps(env);
-    return await handleMockRequest(request, mockDeps(deps), mockRoute);
+    return await handleMockRequest(request, mockDeps(deps, env), mockRoute);
   }
 
   return Response.json({ error: "not found" }, { status: 404 });
