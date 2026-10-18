@@ -79,3 +79,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-17 | [Claude Connectors Directory submission deferred](2026-10-17-connectors-directory-deferred.md)       | deferred                               |
 | 2026-10-17 | [Legal and support pages ship as work in progress](2026-10-17-legal-pages-wip.md)                    | accepted; built, email pending owner   |
 | 2026-10-17 | [MCP Registry server name `dev.zevium/mcp`](2026-10-17-mcp-registry-name.md)                         | accepted (built, not published)        |
+| 2026-10-18 | [MCP Registry publish deferred](2026-10-18-mcp-registry-publish-deferred.md)                         | deferred                               |
