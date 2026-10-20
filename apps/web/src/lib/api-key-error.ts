@@ -1,5 +1,9 @@
 import { ConvexError } from "convex/values";
 
+/** Shown when a rotation fails; the current key is never replaced. */
+export const ROTATION_FAILED_MESSAGE =
+  "Key rotation could not be completed. Your current key still works.";
+
 const PUBLIC_KEY_ERRORS = new Set([
   "Verified key not found",
   "Key not found",
@@ -7,6 +11,7 @@ const PUBLIC_KEY_ERRORS = new Set([
   "Only the current key can be rotated",
   "You already have a key in this organization. Rotate or revoke it before creating another.",
   "A rotation is already in progress for this key",
+  ROTATION_FAILED_MESSAGE,
   "Key must be rotated before it can be enabled",
   "Cap must be a positive whole number of credits",
   "Key revoked. Provider cleanup will retry automatically.",

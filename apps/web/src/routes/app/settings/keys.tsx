@@ -56,7 +56,7 @@ import {
 } from "#/lib/api-keys";
 import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
-import { apiKeyError } from "#/lib/api-key-error";
+import { apiKeyError, ROTATION_FAILED_MESSAGE } from "#/lib/api-key-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
 import { DUR, EASE } from "#/lib/motion";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
@@ -199,9 +199,11 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
       setRotateTarget(null);
       rotationOperationIds.current.clear();
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, target) => {
+      // A failed operation stays failed in Convex; the next attempt needs a new id.
+      rotationOperationIds.current.delete(target.id);
       if (activePrincipalRef.current !== principalKey) return;
-      toast.error(apiKeyError(err, "Could not rotate API key"));
+      toast.error(apiKeyError(err, ROTATION_FAILED_MESSAGE));
     },
   });
 
