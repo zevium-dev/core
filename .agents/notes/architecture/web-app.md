@@ -1,6 +1,6 @@
 # Web app internals
 
-> Updated: 2026-10-11 (local Convex WebSocket CSP; #387)
+> Updated: 2026-10-20 (errored SSR queries not dehydrated)
 > Code: `apps/web/src/`
 > Related: [design system](../design/design-system.md), [app shell](../design/app-shell.md), [catalogue-search](../features/catalogue-search.md), [accounts-orgs](../features/accounts-orgs.md)
 
@@ -8,7 +8,7 @@ Cross-cutting TanStack Start + Clerk + Convex wiring. Feature-specific web notes
 
 ## Cache isolation
 
-- **Frontend cache isolation**: each SSR request and browser router owns its QueryClient. Query hashes include the Clerk user and active organization. Router dehydration carries those two identifiers, and hydration restores their namespace before hydrating queries; changing principal cancels queries and clears query and mutation caches. Tokens are not part of this cache snapshot.
+- **Frontend cache isolation**: each SSR request and browser router owns its QueryClient. Query hashes include the Clerk user and active organization. Router dehydration carries those two identifiers, and hydration restores their namespace before hydrating queries; changing principal cancels queries and clears query and mutation caches. Tokens are not part of this cache snapshot. Errored SSR queries are not dehydrated (`lib/ssr-query.ts`): the browser fetches them live instead of replaying a final error.
 
 ## Navigation and providers
 

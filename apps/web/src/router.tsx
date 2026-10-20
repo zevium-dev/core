@@ -10,6 +10,7 @@ import { getGlobalStartContext } from "@tanstack/react-start";
 import { LazyMotion, domAnimation } from "motion/react";
 
 import { RouteError } from "#/components/route-error";
+import { shouldDehydrateQuery } from "#/lib/ssr-query";
 import { routeViewTransitionTypes } from "#/lib/view-transition";
 import { configureViewTransitions } from "#/lib/vt";
 import {
@@ -66,6 +67,7 @@ export function getRouter(): AnyRouter {
           `${principalCache.currentKey}:${convexHash(queryKey)}`,
         queryFn: convexQueryClient.queryFn(),
       },
+      dehydrate: { shouldDehydrateQuery },
     },
   });
   convexQueryClient.connect(queryClient);

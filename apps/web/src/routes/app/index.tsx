@@ -52,21 +52,10 @@ import {
   shouldShowOnboarding,
 } from "#/lib/onboarding";
 
+// No SSR prefetch: /app renders the workspace skeleton on the server until
+// the browser mirror lands (app.tsx), so a server fetch can only race
+// ensureOrganization on an org's first visit.
 export const Route = createFileRoute("/app/")({
-  loader: async ({ context }) => {
-    // Browser queries start only after ConvexProviderWithClerk confirms auth.
-    // A public → app loader runs while the anonymous provider is still mounted.
-    if (typeof window !== "undefined") return;
-    if (!context.orgSlug) return;
-    await Promise.all([
-      context.queryClient.prefetchQuery(
-        convexQuery(api.analytics.orgOverview, { orgSlug: context.orgSlug }),
-      ),
-      context.queryClient.prefetchQuery(
-        convexQuery(api.wallets.getMyWallet, { orgSlug: context.orgSlug }),
-      ),
-    ]);
-  },
   component: DashboardPage,
   head: () => ({
     meta: [{ title: "Dashboard · Zevium" }],

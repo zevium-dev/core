@@ -1,7 +1,7 @@
 # Accounts & organizations
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
-> Code: `convex/{clerkWebhooks,organizations,users}.ts`, `convex/lib/{auth,identity}.ts`, `tests/{identity,money}.test.ts`
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-20
+> Code: `convex/{clerkWebhooks,organizations,users}.ts`, `convex/lib/{auth,identity}.ts`, `tests/{identity,money}.test.ts`, `apps/web/src/hooks/use-ensure-mirror.ts`, `apps/web/src/lib/ssr-query.ts`
 > Related: [wallet-billing](wallet-billing.md), [api-keys](api-keys.md), [earnings-payouts](earnings-payouts.md), [listing-lifecycle](listing-lifecycle.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [architecture overview](../architecture/overview.md), [product overview](../product/overview.md)
 
 Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped: every user belongs to at least one org (a personal org is created at signup), the org owns the wallet, and org roles decide who may run lifecycle, money, and secret actions. Auth, orgs, invitations, and roles are bought from Clerk; Convex mirrors orgs/users for app data.
@@ -57,6 +57,8 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 Public handle input synchronizes on canonical handle changes during render in `apps/web/src/routes/app/org/index.tsx`; local edits remain until the canonical value changes.
 
 Verified Svix events atomically retain receipt ordering, terminal user/org tombstones, creator claims and the once-per-user 10,000-credit promo lot/source/journal. Only signed organization.created.created_by selects the first processed creator org. Ensure calls grant nothing. Signed active-org JWTs own tenant/role checks; archive denies new reads/admissions while finance and admitted settlements remain recoverable.
+
+First-visit mirror: Convex has no `organizations` row until `ensureOrganization` runs, and org-scoped queries throw `Organization not found` before it. The browser is the only place the mirror runs: `useEnsureMirror` (`apps/web/src/hooks/use-ensure-mirror.ts`) calls `ensureUser` then `ensureOrganization` for the signed-in principal, and `/app` (`routes/app.tsx`) renders the workspace skeleton instead of `<Outlet/>` until it succeeds. Queries keep throwing for unmirrored orgs rather than returning a "not ready" state, so every org-scoped query keeps one tenant check and the client never asserts readiness. SSR always renders that skeleton, so the dashboard has no SSR loader; any other SSR prefetch that errors is not dehydrated (`lib/ssr-query.ts`), because a hydrated error is final for `useSuspenseQuery` and showed the route error screen on every org's first load (2026-10-20 production bug). The old unused SSR mirror server fn was deleted.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
