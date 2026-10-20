@@ -300,6 +300,74 @@ describe("broker-verified keys without registry identity", () => {
       disabled: true,
     });
   });
+  it("completes only a replacement that keeps the family budget revision", async () => {
+    const t = harness();
+    await seed(t);
+    const admin = t.withIdentity(identity());
+    await admin.mutation(
+      api.keySettings.registerVerified,
+      await signed(projection()),
+    );
+    // A cap change bumps the family revision; rotation must carry it unchanged.
+    await admin.mutation(api.keySettings.setCap, {
+      keyId: "key_one",
+      monthlyCapCredits: 1000,
+    });
+    const rotation = (operationId: string, budgetRevision: number) => {
+      const p: RegistryVerifiedKeyRotationProjection = {
+        schemaVersion: 1,
+        verifiedAt: Date.now(),
+        operationId,
+        oldKeyId: "key_one",
+        newProvision: {
+          ...projection("key_two").provision,
+          clerkKeyId: `key_${operationId}`,
+          secretSha256: (operationId === "bumped" ? "c" : "d").repeat(64),
+          budgetRevision,
+        },
+        graceUntil: Date.now() + 86_400_000,
+      };
+      return signRegistryVerifiedKeyRotationProjection(keySecret, p).then(
+        (signature) => ({ projection: p, signature }),
+      );
+    };
+    // Production bug 2026-10-20: the web broker signed revision + 1.
+    await admin.mutation(api.keySettings.beginRotation, {
+      operationId: "bumped",
+      oldKeyId: "key_one",
+    });
+    expect(
+      await admin.mutation(
+        api.keySettings.completeRotation,
+        await rotation("bumped", 3),
+      ),
+    ).toMatchObject({ status: "failed", newKeyId: "key_bumped" });
+    expect(await admin.query(api.keySettings.getForOrg, {})).toEqual([
+      expect.objectContaining({ keyId: "key_one", lifecycle: "active" }),
+    ]);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(provider.revoke).toHaveBeenCalledWith({
+      apiKeyId: "key_bumped",
+      revocationReason: "Zevium key revoked",
+    });
+    await admin.mutation(api.keySettings.beginRotation, {
+      operationId: "kept",
+      oldKeyId: "key_one",
+    });
+    expect(
+      await admin.mutation(
+        api.keySettings.completeRotation,
+        await rotation("kept", 2),
+      ),
+    ).toMatchObject({ status: "completed", newKeyId: "key_kept" });
+    const rows = await admin.query(api.keySettings.getForOrg, {});
+    expect(rows.map((r) => [r.keyId, r.lifecycle, r.budgetRevision])).toEqual(
+      expect.arrayContaining([
+        ["key_one", "grace", 2],
+        ["key_kept", "active", 2],
+      ]),
+    );
+  });
   it("does not complete failed, expired, disabled or revoked rotations", async () => {
     for (const state of ["failed", "expired", "disabled", "revoked"] as const) {
       const t = harness();

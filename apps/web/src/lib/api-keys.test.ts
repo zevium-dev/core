@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   revoke: vi.fn(),
   query: vi.fn(),
   mutation: vi.fn(),
+  seal: vi.fn(),
 }));
 
 vi.mock("@clerk/tanstack-react-start/server", () => ({
@@ -38,13 +39,15 @@ vi.mock("convex/browser", () => ({
   },
 }));
 vi.mock("@zevium/shared", () => ({
-  sealOneTimeExecutionKey: async () => ({ provision: {} }),
+  sealOneTimeExecutionKey: mocks.seal,
   signRegistryVerifiedKeyProjection: async () => "signature",
-  signRegistryVerifiedKeyRotationProjection: vi.fn(),
+  signRegistryVerifiedKeyRotationProjection: async () => "rotation-signature",
 }));
 
+import { getFunctionName } from "convex/server";
 import { api } from "./convex-api";
-import { createKey, revokeKey } from "./api-keys";
+import { ROTATION_FAILED_MESSAGE } from "./api-key-error";
+import { createKey, revokeKey, rotateKey } from "./api-keys";
 
 beforeEach(() => {
   vi.stubEnv("VITE_CONVEX_URL", "https://example.convex.cloud");
@@ -60,6 +63,7 @@ beforeEach(() => {
   });
   mocks.mutation.mockResolvedValue({});
   mocks.revoke.mockResolvedValue({});
+  mocks.seal.mockResolvedValue({ provision: {} });
 });
 
 afterEach(() => {
@@ -153,5 +157,84 @@ describe("API key revocation ordering", () => {
       providerCleanupPending: true,
     });
     expect(mocks.mutation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("API key rotation", () => {
+  const rotate = () =>
+    rotateKey({ data: { id: "key_old", operationId: "rotate-op-1" } });
+  const completion = (result: object) =>
+    mocks.mutation.mockImplementation(async (ref) => {
+      const name = getFunctionName(ref);
+      if (name === "keySettings:beginRotation") return { status: "reserved" };
+      if (name === "keySettings:completeRotation") return result;
+      return {};
+    });
+
+  beforeEach(() => {
+    mocks.get.mockResolvedValue({
+      id: "key_old",
+      name: "QA agent",
+      subject: "user_qa",
+      claims: { org_id: "org_qa" },
+      revoked: false,
+      expired: false,
+    });
+    mocks.query.mockResolvedValue([
+      {
+        keyId: "key_old",
+        ownerUserId: "user_qa",
+        budgetId: "budget_qa",
+        budgetRevision: 3,
+        monthlyCapCredits: 500,
+        disabled: false,
+      },
+    ]);
+    mocks.create.mockResolvedValue({
+      id: "key_new",
+      name: "QA agent (rotated)",
+      secret: "ak_new_secret",
+      createdAt: 2,
+    });
+    completion({ status: "completed" });
+  });
+
+  it("keeps the family budget revision Convex requires", async () => {
+    const result = await rotate();
+    expect(mocks.seal).toHaveBeenCalledWith(
+      expect.objectContaining({ budgetId: "budget_qa", budgetRevision: 3 }),
+      { monthlyCapCredits: 500 },
+    );
+    expect(result.secret).toBe("ak_new_secret");
+    expect(mocks.revoke).not.toHaveBeenCalled();
+  });
+
+  it("never returns the minted secret when Convex records the rotation as failed", async () => {
+    completion({ status: "failed", newKeyId: "key_new" });
+    const outcome = await rotate().then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    expect(outcome).not.toHaveProperty("value");
+    expect(String((outcome as { error: unknown }).error)).toContain(
+      ROTATION_FAILED_MESSAGE,
+    );
+    expect(JSON.stringify(outcome)).not.toContain("ak_new_secret");
+    expect(mocks.revoke).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKeyId: "key_new" }),
+    );
+    expect(mocks.mutation).toHaveBeenCalledWith(
+      api.keySettings.failRotation,
+      expect.objectContaining({
+        operationId: "rotate-op-1",
+        cleanup: expect.objectContaining({ signature: "rotation-signature" }),
+      }),
+    );
+  });
+
+  it("reports the failure even when provider cleanup fails", async () => {
+    completion({ status: "failed" });
+    mocks.revoke.mockRejectedValue(new Error("already revoked"));
+    await expect(rotate()).rejects.toThrow(ROTATION_FAILED_MESSAGE);
   });
 });

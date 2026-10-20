@@ -11,6 +11,7 @@ import {
   type RegistryVerifiedKeyRotationProjection,
 } from "@zevium/shared";
 
+import { ROTATION_FAILED_MESSAGE } from "#/lib/api-key-error";
 import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
 
@@ -394,6 +395,9 @@ export const rotateKey = createServerFn({ method: "POST" })
     }
 
     const graceUntil = verifiedAt + ROTATION_GRACE_MS;
+    let cleanup:
+      | { projection: RegistryVerifiedKeyRotationProjection; signature: string }
+      | undefined;
     try {
       const oldBudget = settings.find(
         (setting) => setting.keyId === old.id,
@@ -410,9 +414,9 @@ export const rotateKey = createServerFn({ method: "POST" })
           ownerUserId: old.subject,
           subjectUserId: old.subject,
           budgetId: oldBudget,
-          budgetRevision:
-            (settings.find((setting) => setting.keyId === old.id)
-              ?.budgetRevision ?? 0) + 1,
+          // A key family shares one budget revision (setCap bumps them
+          // together); Convex rejects a replacement that changes it.
+          budgetRevision: currentSetting.budgetRevision,
           scopes: ["gateway:execute"],
         },
         { monthlyCapCredits: currentSetting.monthlyCapCredits },
@@ -425,14 +429,22 @@ export const rotateKey = createServerFn({ method: "POST" })
         newProvision: sealed.provision,
         graceUntil,
       };
-      await convex.mutation(api.keySettings.completeRotation, {
+      cleanup = {
         projection,
-        keyName: created.name,
         signature: await signRegistryVerifiedKeyRotationProjection(
           projectionSecret,
           projection,
         ),
-      });
+      };
+      const completed = await convex.mutation(
+        api.keySettings.completeRotation,
+        { ...cleanup, keyName: created.name },
+      );
+      // Convex records a refused rotation as failed instead of throwing and
+      // queues the minted key for revocation; its secret must never be shown.
+      if (completed.status !== "completed") {
+        throw new ConvexError(ROTATION_FAILED_MESSAGE);
+      }
       return {
         id: created.id,
         name: created.name,
@@ -446,14 +458,21 @@ export const rotateKey = createServerFn({ method: "POST" })
       await convex
         .mutation(api.keySettings.revokePrevious, { keyId: created.id })
         .catch(() => undefined);
-      await client.apiKeys.revoke({
-        apiKeyId: created.id,
-        revocationReason: "Rotation lineage recording failed",
-      });
-      await convex.mutation(api.keySettings.failRotation, {
-        operationId: data.operationId,
-        message: "Lineage recording failed",
-      });
+      // Best effort: signed cleanup evidence lets Convex retry the provider
+      // revoke durably, and a cleanup failure must not mask the real error.
+      await client.apiKeys
+        .revoke({
+          apiKeyId: created.id,
+          revocationReason: "Rotation lineage recording failed",
+        })
+        .catch(() => undefined);
+      await convex
+        .mutation(api.keySettings.failRotation, {
+          operationId: data.operationId,
+          message: "Lineage recording failed",
+          cleanup,
+        })
+        .catch(() => undefined);
       throw error;
     }
   });
