@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { v } from "convex/values";
 import { internalQuery, internalMutation } from "./_generated/server";
-import { isActive } from "./lib/identity";
+import { getOrganization, isActive } from "./lib/identity";
 import { membershipRemoved } from "./lib/keys";
 import { credentialBinding, decryptSecret } from "./lib/credentialCrypto";
-import { facts } from "./money/walletLedger";
+import { ensureWallet, facts } from "./money/walletLedger";
 import { fingerprint, sign, verify } from "../contracts/transport";
 import {
   encryptHeaders,
@@ -27,11 +27,18 @@ export const activate = internalMutation({
       !/^[a-f0-9-]{36}$/.test(args.bootstrapId)
     )
       throw new Error("Invalid activation");
-    const wallet = await ctx.db
+    let wallet = await ctx.db
       .query("wallets")
       .withIndex("by_owner", (q) => q.eq("ownerKey", `org:${args.clerkOrgId}`))
       .unique();
-    if (!wallet) throw new Error("Wallet unavailable");
+    if (!wallet) {
+      // Orgs mirrored without a grant or payment have no wallet yet. An empty
+      // one makes the edge refuse with 402 top-up guidance instead of 503.
+      const org = await getOrganization(ctx, args.clerkOrgId);
+      if (!org || !(await isActive(ctx, org)))
+        throw new Error("Wallet unavailable");
+      wallet = await ensureWallet(ctx, org);
+    }
     if (wallet.edgeBootstrapId) {
       if (wallet.edgeBootstrapId !== args.bootstrapId)
         throw new Error("Wallet authority already claimed");
