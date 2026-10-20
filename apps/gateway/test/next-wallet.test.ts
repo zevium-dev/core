@@ -149,6 +149,15 @@ it("allocates promo first, stops at 32 original sources and survives eviction", 
   });
   await stop(stub);
 });
+it("a freshly bootstrapped wallet with no funding sources refuses with 402, not 503", async () => {
+  const fresh = await setup([]);
+  expect(await fresh.admit(input(5), key, Date.now() + 30_000)).toMatchObject({
+    ok: false,
+    status: 402,
+    reason: "insufficient_credits",
+  });
+  await stop(fresh);
+});
 it("zero balance blocks zero-price calls; cap, disable and rate contracts stay distinct", async () => {
   const empty = await setup([0]);
   expect(await empty.admit(input(0), key, Date.now() + 30_000)).toMatchObject({

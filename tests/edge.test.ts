@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { harness } from "./helpers";
+import { harness, identity } from "./helpers";
 import { moneyFixture, eventFor, assertWallet } from "./moneyFixtures";
 import { sign, fingerprint } from "../contracts/transport";
 import { requestClose, finishClose } from "../convex/money/barrier";
 import { headerBundle } from "../contracts/snapshots";
-import { internal } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import { sha256Hex } from "@zevium/shared";
 import {
   openProjection,
@@ -95,6 +95,80 @@ it("claims cold closing wallets once without adopting a missing journal", async 
       clerkOrgId: otherWallet.owner.clerkOrgId,
     }),
   ).rejects.toThrow("recovery required");
+});
+it("activates a mirrored org without a wallet at zero balance and no grant", async () => {
+  const t = harness();
+  await t
+    .withIdentity(identity("mirrored"))
+    .mutation(api.organizations.ensureOrganization, {
+      clerkOrgId: "org_mirrored",
+    });
+  expect(await t.run((ctx) => ctx.db.query("wallets").collect())).toEqual([]);
+  const args = {
+    clerkOrgId: "org_mirrored",
+    deploymentId: "next-fixture",
+    bootstrapId: crypto.randomUUID(),
+  };
+  await t.mutation(internal.edgeSnapshots.activate, args);
+  await t.mutation(internal.edgeSnapshots.activate, args);
+  const wallets = await t.run((ctx) => ctx.db.query("wallets").collect());
+  expect(wallets).toHaveLength(1);
+  expect(wallets[0]).toMatchObject({
+    ownerKey: "org:org_mirrored",
+    balance: 0,
+    promoCredits: 0,
+    sequence: 0,
+    epoch: 1,
+    gateState: "open",
+    edgeBootstrapId: args.bootstrapId,
+  });
+  expect(await t.run((ctx) => ctx.db.query("walletEntries").collect())).toEqual(
+    [],
+  );
+  expect(await t.run((ctx) => ctx.db.query("fundingLots").collect())).toEqual(
+    [],
+  );
+  const page = walletPage.parse(
+    (
+      await t.query(internal.edgeSnapshots.read, {
+        now: Date.now(),
+        kind: "wallet",
+        scope: "org_mirrored",
+      })
+    ).payload,
+  );
+  expect(page.checkpoint).toMatchObject({ balance: 0, sources: [] });
+  await t.run(async (ctx) => {
+    const org = (name: string) => ({
+      clerkOrgId: `org_${name}`,
+      slug: name,
+      name,
+      publicHandle: name,
+      lastClerkEventAt: 0,
+      revision: 1,
+    });
+    await ctx.db.insert("organizations", {
+      ...org("archived"),
+      archivedAt: Date.now(),
+    });
+    await ctx.db.insert("organizations", org("tomb"));
+    await ctx.db.insert("orgTombstones", {
+      clerkOrgId: "org_tomb",
+      sourceTimestamp: Date.now(),
+      archivedAt: Date.now(),
+    });
+  });
+  for (const clerkOrgId of ["org_archived", "org_tomb", "org_unknown"])
+    await expect(
+      t.mutation(internal.edgeSnapshots.activate, {
+        ...args,
+        clerkOrgId,
+        bootstrapId: crypto.randomUUID(),
+      }),
+    ).rejects.toThrow("Wallet unavailable");
+  expect(await t.run((ctx) => ctx.db.query("wallets").collect())).toHaveLength(
+    1,
+  );
 });
 it("authenticates the complete final across signing rotation and replay", async () => {
   vi.stubEnv(
