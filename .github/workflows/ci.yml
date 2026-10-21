@@ -15,8 +15,38 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+  # `pnpm ci:pr`, split into parallel slices. Keep the slices covering every
+  # step of ci:pr. Every slice ends with routes:check and diff:check because
+  # schema:check and the web build regenerate tracked files.
+  quality:
+    name: quality (${{ matrix.slice }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slice: static
+            runner: blacksmith-2vcpu-ubuntu-2404
+            command: pnpm ci:static
+          - slice: test
+            runner: blacksmith-2vcpu-ubuntu-2404
+            command: pnpm test
+          - slice: build
+            runner: blacksmith-2vcpu-ubuntu-2404
+            command: pnpm build:ci
+          - slice: control-plane
+            runner: blacksmith-2vcpu-ubuntu-2404
+            command: >-
+              pnpm ci:control-plane:checks &&
+              RACES_SUITE=occ pnpm test:races &&
+              NEXT_EDGE_ONLY=1 pnpm test:races
+          # The paced 10,001-bucket reconciliation is the critical path:
+          # ~4 min of serial mutations plus fixed pacing sleeps. 8 vCPU cut
+          # test:races from 7m30s to 5m42s in run 39644198207; 16 vCPU did not
+          # improve on 8.
+          - slice: races-scale
+            runner: blacksmith-8vcpu-ubuntu-2404
+            command: RACES_SUITE=scale pnpm test:races
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -24,10 +54,33 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup
-      - name: Run uncached PR quality gate
+      # PRs restore turbo results from their own branch and develop. Every
+      # other event (the develop push that gates production) runs uncached
+      # and only writes the cache.
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ matrix.slice }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ matrix.slice }}-
+      - name: Run ${{ matrix.slice }} slice
         env:
           VITEST_MAX_WORKERS: "2"
-          TURBO_FORCE: "true"
+          TURBO_CACHE_DIR: .turbo/cache
+          TURBO_FORCE: ${{ github.event_name != 'pull_request' }}
           CI: "true"
           CONVEX_AGENT_MODE: anonymous
-        run: pnpm ci:pr
+        run: ${{ matrix.command }}
+      - name: Check generated files and whitespace
+        run: pnpm routes:check && pnpm diff:check
+
+  # Single required check and the job the production deploy's CI run depends on.
+  ci:
+    if: always()
+    needs: [quality]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - name: Require every slice to pass
+        env:
+          RESULT: ${{ needs.quality.result }}
+        run: test "$RESULT" = success
