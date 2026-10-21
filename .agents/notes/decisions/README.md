@@ -87,4 +87,5 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-18 | [House-listing resale rights deferred](2026-10-18-resale-rights-deferred.md)                         | deferred; open risk                    |
 | 2026-10-18 | [Privacy, terms and support inbox deferred](2026-10-18-legal-deferred.md)                            | deferred                               |
 | 2026-10-18 | [Cold refresh budget kept at 20 burst, 5/s](2026-10-18-cold-refresh-budget-kept.md)                  | accepted                               |
+| 2026-10-21 | [MCP OAuth binds by audience, not a custom scope](2026-10-21-mcp-oauth-audience-not-custom-scope.md) | accepted                               |
 | 2026-10-21 | [CI split into parallel slices; turbo cache on PRs only](2026-10-21-ci-parallel-cached-prs.md)       | accepted (built)                       |
