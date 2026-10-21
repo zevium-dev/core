@@ -29,6 +29,7 @@ import { getGeneratedContract, generationFailure } from "./generated-contract";
 import { callParameterSchemas, callTarget } from "./mcp-call-params";
 import { paymentRequiredResponse } from "./payment-required";
 import { webOrigin } from "./web-origin";
+import { trustedClientIp } from "@zevium/shared/edge/search-identity";
 import type { CatalogueSearchSource } from "./catalogue-search";
 import { extractApiKey } from "./key-verifier";
 import { METHOD_OVERRIDE_HEADERS } from "./headers";
@@ -399,6 +400,9 @@ async function handleSearchApis(
           caller === undefined
             ? undefined
             : { orgId: caller.orgId, keyId: caller.keyId },
+          caller === undefined
+            ? (trustedClientIp(request) ?? undefined)
+            : undefined,
         )
       : { items: [], degraded: query.length > 0 };
   // Bounded first-page fallback; never walk the whole catalogue or fetch specs.

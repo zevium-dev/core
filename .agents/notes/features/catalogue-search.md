@@ -1,6 +1,6 @@
 # Catalogue and search
 
-> Status: root cutover and generated Try it form implemented; owner activation pending · Updated: 2026-10-12
+> Status: root cutover and generated Try it form implemented; owner activation pending · Updated: 2026-10-21
 > Code: `convex/{catalogue,search,lib/catalogue}.ts`, `apps/web/src/components/{catalogue-browser,catalogue-detail}.tsx`, `apps/web/src/lib/catalogue-search.server.ts`, `tests/readSurfaces.test.ts`
 > Related: [quality-signals](quality-signals.md), [reviews](reviews.md), [mock-sandbox](mock-sandbox.md), [agent-surface](agent-surface.md), [pricing](pricing.md), [publishing-specs](publishing-specs.md), [listing-lifecycle](listing-lifecycle.md), [landing-docs](landing-docs.md), [web-app](../architecture/web-app.md)
 
@@ -51,7 +51,7 @@ The detail playground derives typed parameters and JSON body controls from the i
 
 Catalogue price chips and detail labels contain only scalar per-call prices; dead `hasTokenPricing` / `tokenPricing` display branches are removed. Code: `apps/web/src/lib/catalogue-card.ts` and `apps/web/src/components/catalogue-detail.tsx`.
 
-Root indexed browse/tag pages and facet counters are canonical. Query embeddings use a separate non-vector fenced cache; cache misses consume sharded trusted budgets. Direct anonymous actions degrade before buying embeddings; web connects through an authenticated server/IP-budget boundary when configured. Public hydration rechecks current visibility and omits unpriced/token operations. Combined filters can return short pages with continuations; totals describe selected tag/global catalogue, not arbitrary filter matches. Cards and detail render Operated by Zevium from server-owned houseOperated.
+Root indexed browse/tag pages and facet counters are canonical. Query embeddings use a separate non-vector fenced cache; cache misses consume sharded trusted budgets. Direct anonymous actions degrade before buying embeddings; web and keyless MCP `search_apis` connect through an authenticated server/IP-budget boundary: both send an HMAC of the Cloudflare-trusted client network (`packages/shared/src/edge/search-identity.ts`; IPv6 per /64; no `request.cf` means no key). `/gateway-search` accepts that `anonymousKey` only without a key `caller`. Before 2026-10-21 the gateway sent neither for keyless callers, so keyless MCP search was always keyword-only. Public hydration rechecks current visibility and omits unpriced/token operations. Combined filters can return short pages with continuations; totals describe selected tag/global catalogue, not arbitrary filter matches. Cards and detail render Operated by Zevium from server-owned houseOperated.
 
 [Activation gates and configuration](../architecture/convex-activation.md). [PR 1–6 design/review evidence](../architecture/convex-rebuild.md).
 
@@ -67,7 +67,7 @@ Root indexed browse/tag pages and facet counters are canonical. Query embeddings
 
 - Resolved #330: MCP discovery reuses semantic search and cache; paraphrases produce the same ranked listings through public and gateway entry points.
 
-- Resolved #358: semantic requests are rate-limited and query embeddings cached. Anonymous callers share one bucket until a trusted edge-derived identity becomes available; legitimate anonymous bursts can therefore use keyword fallback.
+- Resolved #358: semantic requests are rate-limited and query embeddings cached. Anonymous web and keyless MCP callers get a per-network bucket from the edge-derived identity; the global cache-miss budget still caps provider spend.
 
 - FLOW sort "relevance / popularity / recently updated"; code sorts `newest`/`name`/`cheapest` (relevance only in semantic mode). No popularity sort.
 - FLOW filter "price range"; code has max cost only.

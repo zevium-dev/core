@@ -1,26 +1,12 @@
 import { getRequest } from "@tanstack/react-start/server";
 
 import { searchRead, type SearchRead } from "@zevium/shared/edge/read";
+import {
+  anonymousSearchKey,
+  trustedClientIp,
+} from "@zevium/shared/edge/search-identity";
 import { readBoundedJson } from "@zevium/shared/edge/transport";
-export function searchNetwork(ip: string): string {
-  if (!ip.includes(":")) return ip;
-  const canonical = new URL(`https://[${ip}]/`).hostname.slice(1, -1);
-  const [left, right] = canonical.split("::");
-  const head = left ? left.split(":") : [];
-  const tail = right ? right.split(":") : [];
-  const words =
-    right === undefined
-      ? head
-      : [
-          ...head,
-          ...Array<string>(8 - head.length - tail.length).fill("0"),
-          ...tail,
-        ];
-  return `${words
-    .slice(0, 4)
-    .map((w) => w.padStart(4, "0"))
-    .join(":")}/64`;
-}
+
 /** Only an actual Cloudflare request supplies trustworthy connection metadata. */
 export async function trustedCatalogueSearch(
   query: string,
@@ -30,26 +16,10 @@ export async function trustedCatalogueSearch(
   const settings = process.env;
   const secret = settings.NEXT_WEB_SEARCH_SECRET,
     site = settings.CONVEX_SITE_URL;
-  const ip =
-    "cf" in request && request.cf && request.headers.get("cf-connecting-ip");
-  if (!site || !secret || typeof ip !== "string" || ip.length > 64)
-    return degraded;
+  const ip = trustedClientIp(request);
+  if (!site || !secret || ip === null) return degraded;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    const digest = await crypto.subtle.sign(
-      "HMAC",
-      key,
-      new TextEncoder().encode(searchNetwork(ip)),
-    );
-    const anonymousKey = Array.from(new Uint8Array(digest), (b) =>
-      b.toString(16).padStart(2, "0"),
-    ).join("");
+    const anonymousKey = await anonymousSearchKey(secret, ip);
     const response = await fetch(new URL("/web-search", site), {
       method: "POST",
       headers: {

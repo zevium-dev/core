@@ -668,6 +668,36 @@ describe("MCP /mcp", () => {
     },
   );
 
+  it("gives keyless searches a network budget only behind Cloudflare", async () => {
+    const { fetchImpl, calls } = makeFetchMock(() =>
+      Response.json({ items: [LISTING], degraded: false }),
+    );
+    await installAgentFixtures({
+      clerkOrgId: "org_keyless",
+      searchSource: new InternalHttpCatalogueSearch({
+        siteUrl: "https://control.test",
+        internalSecret: "test-internal",
+        fetchImpl,
+      }),
+    });
+    const search = (init: RequestInit) =>
+      mcpCall(
+        "tools/call",
+        { name: "search_apis", arguments: { query: "currency conversion" } },
+        init,
+      );
+    await search({
+      headers: { "cf-connecting-ip": "2001:db8:1:2:3:4:5:6" },
+      cf: { country: "US" },
+    } as RequestInit);
+    await search({ headers: { "cf-connecting-ip": "2001:db8:1:2:ffff::1" } });
+    const sent = (await calls[0]!.json()) as Record<string, unknown>;
+    expect(sent.caller).toBeUndefined();
+    expect(sent.anonymousKey).toMatch(/^[a-f0-9]{64}$/);
+    // A spoofable header without Cloudflare connection metadata buys nothing.
+    expect(await calls[1]!.json()).toEqual({ query: "currency conversion" });
+  });
+
   it.each(["limited", "unavailable", "malformed", "timeout"])(
     "flags keyword fallback when semantic search is %s",
     async (failure) => {

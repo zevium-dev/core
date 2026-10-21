@@ -408,9 +408,11 @@ for (const path of ["/gateway-search", "/web-search"] as const)
           }),
           16384,
         );
+        // Web is always anonymous; the gateway sends either a verified key
+        // caller or, for keyless MCP, its HMAC of the Cloudflare client network.
         if (
           (path === "/web-search" && (!args.anonymousKey || args.caller)) ||
-          (path === "/gateway-search" && args.anonymousKey)
+          (path === "/gateway-search" && args.anonymousKey && args.caller)
         )
           return new Response("Invalid search", { status: 400 });
         return Response.json(

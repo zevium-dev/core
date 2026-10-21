@@ -1,6 +1,7 @@
 /** Semantic discovery via the authenticated control-plane route. No result cache:
  * each request must pass caller admission and recheck listing visibility. */
 import { trimTrailingSlashes } from "@zevium/shared";
+import { anonymousSearchKey } from "@zevium/shared/edge/search-identity";
 import { parseCataloguePage, type CatalogueListing } from "./catalogue-source";
 import type { VerifiedKey } from "./key-verifier";
 
@@ -9,9 +10,12 @@ export type CatalogueSearchResult = {
   degraded: boolean;
 };
 export interface CatalogueSearchSource {
+  /** Keyless callers pass the Cloudflare-trusted client IP so anonymous
+   * semantic search gets a per-network budget instead of always degrading. */
   search(
     query: string,
     caller?: Pick<VerifiedKey, "orgId" | "keyId">,
+    clientIp?: string,
   ): Promise<CatalogueSearchResult>;
 }
 
@@ -27,8 +31,13 @@ export class InternalHttpCatalogueSearch implements CatalogueSearchSource {
   async search(
     query: string,
     caller?: Pick<VerifiedKey, "orgId" | "keyId">,
+    clientIp?: string,
   ): Promise<CatalogueSearchResult> {
     try {
+      const anonymousKey =
+        caller === undefined && clientIp !== undefined
+          ? await anonymousSearchKey(this.options.internalSecret, clientIp)
+          : undefined;
       const response = await (this.options.fetchImpl ?? fetch)(
         `${trimTrailingSlashes(this.options.siteUrl)}/gateway-search`,
         {
@@ -37,7 +46,7 @@ export class InternalHttpCatalogueSearch implements CatalogueSearchSource {
             "Content-Type": "application/json",
             "x-internal-secret": this.options.internalSecret,
           },
-          body: JSON.stringify({ query, caller }),
+          body: JSON.stringify({ query, caller, anonymousKey }),
           // Leave time for keyword fallback within the MCP tool's 10s deadline.
           signal: AbortSignal.timeout(8_000),
         },

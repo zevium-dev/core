@@ -688,12 +688,22 @@ it("exercises web and gateway HTTP secrets, attribution, cache-hit budgets and c
         await request("/gateway-search", {
           query: "query",
           anonymousKey: "a".repeat(64),
+          caller: { orgId: "forged", keyId: "forged" },
         })
       ).status,
     ).toBe(400);
     expect(
       await (await request("/gateway-search", { query: "query" })).json(),
     ).toMatchObject({ degraded: true });
+    // Keyless MCP: the gateway's network HMAC buys an anonymous budget.
+    expect(
+      await (
+        await request("/gateway-search", {
+          query: "cached",
+          anonymousKey: "b".repeat(64),
+        })
+      ).json(),
+    ).toMatchObject({ degraded: false });
     for (let i = 0; i < 180; i++) {
       const result = await request("/web-search", {
         query: "cached",
