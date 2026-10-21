@@ -60,7 +60,7 @@ const server = createServer(async (req, res) => {
               revoked: false,
               expired: false,
               expiration: Math.floor(Date.now() / 1000) + 3600,
-              scopes: ["user:org:read", "zevium:mcp:execute"],
+              scopes: ["user:org:read"],
               aud: ["https://gateway.test/mcp"],
             }
           : {},

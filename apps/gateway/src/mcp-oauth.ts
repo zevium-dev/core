@@ -7,7 +7,9 @@ import {
   type VerifyOutcome,
 } from "./key-verifier";
 
-export const MCP_SCOPES = ["user:org:read", "zevium:mcp:execute"];
+// Clerk only issues its fixed scope set (no custom scopes), so the org scope is the
+// consent signal and the RFC 8707 audience (exact `/mcp` resource) binds the token to MCP.
+export const MCP_SCOPES = ["user:org:read"];
 export type McpOAuthConfig = { issuer: string; resource: string };
 /** `keyless`: a verified user/org with no usable API key. The session stays
  * authenticated so clients don't loop on invalid_token; paid tools explain.

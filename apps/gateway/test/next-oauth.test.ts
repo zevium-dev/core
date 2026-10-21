@@ -77,7 +77,7 @@ it("keeps keyless identities warm so a new key applies without reconnecting", as
           revoked: false,
           expired: false,
           expiration: Math.floor(Date.now() / 1000) + 3600,
-          scopes: ["user:org:read", "zevium:mcp:execute"],
+          scopes: ["user:org:read"],
           aud: [resource],
         });
       if (url.endsWith("/oauth/userinfo"))
