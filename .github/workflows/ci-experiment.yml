@@ -1,0 +1,43 @@
+name: CI runner experiment
+
+on:
+  push:
+    branches: ["ci/faster-quality-gate"]
+
+permissions:
+  contents: read
+
+jobs:
+  races:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - blacksmith-2vcpu-ubuntu-2404
+          - blacksmith-4vcpu-ubuntu-2404
+          - blacksmith-8vcpu-ubuntu-2404
+          - blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Races timing
+        env:
+          CI: "true"
+          CONVEX_AGENT_MODE: anonymous
+        run: |
+          nproc
+          start=$(date +%s)
+          /usr/bin/time -v pnpm test:races 2>&1 | tail -n 400
+          echo "RACES_WALL_SECONDS=$(( $(date +%s) - start ))"
+      - name: Tests timing
+        env:
+          CI: "true"
+          TURBO_FORCE: "true"
+        run: |
+          start=$(date +%s)
+          pnpm test
+          echo "TEST_WALL_SECONDS=$(( $(date +%s) - start ))"
