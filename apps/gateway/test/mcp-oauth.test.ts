@@ -274,11 +274,7 @@ describe("Clerk MCP OAuth resource server", () => {
       { tokenState: { aud: ["https://other.test/mcp"] } },
       401,
     ],
-    [
-      "missing spending scope",
-      { tokenState: { scopes: ["user:org:read"] } },
-      403,
-    ],
+    ["missing org scope", { tokenState: { scopes: ["openid", "email"] } }, 403],
     ["missing org", { userInfo: { sub: userId } }, 401],
     [
       "different user",
@@ -311,11 +307,20 @@ describe("Clerk MCP OAuth resource server", () => {
     expect((await request("/mcp", token, call())).status).toBe(401);
   });
 
-  it("requests consent for missing spending scope with HTTP 403", async () => {
+  it("refuses JWTs minted for another resource", async () => {
+    const f = await fixture();
+    for (const aud of ["https://other.test/mcp", "https://gateway.test/"])
+      expect(
+        (await request("/mcp", await f.token({ aud }), call())).status,
+      ).toBe(401);
+    expect(f.upstream).not.toHaveBeenCalled();
+  });
+
+  it("requests consent for missing org scope with HTTP 403", async () => {
     const f = await fixture();
     const res = await request(
       "/mcp",
-      await f.token({ scope: "user:org:read" }),
+      await f.token({ scope: "openid email" }),
       call(),
     );
     expect(res.status).toBe(403);

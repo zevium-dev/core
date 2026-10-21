@@ -35,6 +35,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
       CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+      MCP_OAUTH_ISSUER: ${{ vars.PRODUCTION_MCP_OAUTH_ISSUER }}
+      MCP_OAUTH_RESOURCE: ${{ vars.PRODUCTION_MCP_OAUTH_RESOURCE }}
       VITE_BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
       VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
       VITE_CONVEX_URL: ${{ vars.PRODUCTION_CONVEX_URL }}
@@ -131,7 +133,9 @@ jobs:
             const write = (name, keys) => writeFileSync(".tmp/" + name,
               JSON.stringify(Object.fromEntries(keys.map(k => [k, process.env[k] || ""]))), { mode: 0o600 });
             write("web-secrets.json", ["REGISTRY_KEY_PROJECTION_HMAC_SECRET", "NEXT_WEB_SEARCH_SECRET", "CONVEX_SITE_URL"]);
-            write("gateway-secrets.json", ["NEXT_SNAPSHOT_KEYS", "NEXT_ADMISSION_KEYS", "NEXT_TRANSPORT_KEYS", "GATEWAY_INTERNAL_SECRET"]);
+            write("gateway-secrets.json", ["NEXT_SNAPSHOT_KEYS", "NEXT_ADMISSION_KEYS", "NEXT_TRANSPORT_KEYS", "GATEWAY_INTERNAL_SECRET",
+              // MCP OAuth verification needs Clerk Backend API access; only shipped when OAuth is configured.
+              ...(process.env.MCP_OAUTH_ISSUER ? ["CLERK_SECRET_KEY"] : [])]);
           '
 
       - name: Deploy Convex
@@ -144,8 +148,13 @@ jobs:
         run: |
           remote="$(git ls-remote origin refs/heads/develop)"
           test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
+          # MCP OAuth is on only when both repository variables are set (see mcp-oauth decision).
+          oauth=()
+          if test -n "$MCP_OAUTH_ISSUER" && test -n "$MCP_OAUTH_RESOURCE"; then
+            oauth=(--var "MCP_OAUTH_ISSUER:$MCP_OAUTH_ISSUER" --var "MCP_OAUTH_RESOURCE:$MCP_OAUTH_RESOURCE")
+          fi
           pnpm --filter @zevium/gateway exec wrangler versions upload --strict --keep-vars \
-            --secrets-file ../../.tmp/gateway-secrets.json \
+            --secrets-file ../../.tmp/gateway-secrets.json "${oauth[@]}" \
             --var "NEXT_DEPLOYMENT_ID:$NEXT_DEPLOYMENT_ID" \
             --var "APP_ORIGIN:$APP_ORIGIN" \
             --tag "$RELEASE_TAG" \
