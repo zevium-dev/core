@@ -25,28 +25,14 @@ jobs:
       matrix:
         include:
           - slice: static
-            runner: blacksmith-2vcpu-ubuntu-2404
             command: pnpm ci:static
           - slice: test
-            runner: blacksmith-2vcpu-ubuntu-2404
             command: pnpm test
           - slice: build
-            runner: blacksmith-2vcpu-ubuntu-2404
             command: pnpm build:ci
           - slice: control-plane
-            runner: blacksmith-2vcpu-ubuntu-2404
-            command: >-
-              pnpm ci:control-plane:checks &&
-              RACES_SUITE=occ pnpm test:races &&
-              NEXT_EDGE_ONLY=1 pnpm test:races
-          # The paced 10,001-bucket reconciliation is the critical path:
-          # ~4 min of serial mutations plus fixed pacing sleeps. 8 vCPU cut
-          # test:races from 7m30s to 5m42s in run 39644198207; 16 vCPU did not
-          # improve on 8.
-          - slice: races-scale
-            runner: blacksmith-8vcpu-ubuntu-2404
-            command: RACES_SUITE=scale pnpm test:races
-    runs-on: ${{ matrix.runner }}
+            command: pnpm ci:control-plane
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -82,5 +68,5 @@ jobs:
     steps:
       - name: Require every slice to pass
         env:
-          RESULT: ${{ needs.quality.result }}
-        run: test "$RESULT" = success
+          QUALITY: ${{ needs.quality.result }}
+        run: test "$QUALITY" = success

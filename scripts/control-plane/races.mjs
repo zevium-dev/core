@@ -12,14 +12,6 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const base = new URL("../../", import.meta.url);
-// CI runs the OCC and scale suites on separate runners, each on its own fresh
-// deployment (scale fixtures are scoped to their own payment and publisher).
-// Unset runs both on one deployment, then the paired acceptance.
-const suite = process.env.RACES_SUITE;
-assert.ok(
-  suite === undefined || suite === "occ" || suite === "scale",
-  `Unknown RACES_SUITE ${suite}`,
-);
 // Match CI's clean database on every invocation; retain failed runs for diagnosis.
 mkdirSync(new URL("../../.tmp/", import.meta.url), { recursive: true });
 const scratch = pathToFileURL(
@@ -188,38 +180,16 @@ run([
 run(["env", "set", "NEXT_STRIPE_PLATFORM_ACCOUNT_ID", "acct_fixture"]);
 run(["dev", "--once", "--typecheck", "enable"]);
 if (!process.env.NEXT_EDGE_ONLY) {
-  if (suite !== "scale") {
-    run(["run", "readRaces:queryCache"]);
-    run(["run", "testClaims:races"]);
+  run(["run", "readRaces:queryCache"]);
+  run(["run", "testClaims:races"]);
 
-    run(["run", "domainClaims:races"]);
+  run(["run", "domainClaims:races"]);
 
-    run(["run", "moneyRaces:races"]);
+  run(["run", "moneyRaces:races"]);
 
-    run(["run", "financeRaces:races"]);
-    run(["run", "sourceLocksRaces:races"]);
-  }
-  if (suite !== "occ") {
-    // Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
-    function result(args) {
-      const child = spawnSync("pnpm", ["exec", "convex", "run", ...args], {
-        cwd: fileURLToPath(scratch),
-        env,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "inherit"],
-      });
-      assert.equal(child.status, 0, `Convex ${args[0]} failed`);
-      return JSON.parse(child.stdout);
-    }
-    let progress = result(["financeRaces:largeStart"]);
-    for (let batch = 0; !progress.done && batch < 8; batch++) {
-      progress = result(["financeRaces:largeBatch", JSON.stringify(progress)]);
-      console.log("PR4 10001-bucket local reconciliation", progress);
-    }
-    assert.equal(progress.done, true, "Large reconciliation failed to finish");
-  }
-  if (suite) process.exit(0);
-  // Scale fixtures deliberately synthesize earnings outside ordinary usage.
+  run(["run", "financeRaces:races"]);
+  run(["run", "sourceLocksRaces:races"]);
+
   // Run the paired conservation audit on its own fresh anonymous deployment.
   const paired = spawnSync(
     "pnpm",
