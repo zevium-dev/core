@@ -416,7 +416,7 @@ describe("Clerk MCP OAuth resource server", () => {
       ((await search.json()) as { result: { isError?: boolean } }).result
         .isError,
     ).toBeUndefined();
-    expect(f.search).toHaveBeenCalledWith("demo", undefined);
+    expect(f.search).toHaveBeenCalledWith("demo", undefined, undefined);
     const docs = await request("/mcp", token, {
       jsonrpc: "2.0",
       id: 3,
