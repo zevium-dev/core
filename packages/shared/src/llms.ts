@@ -4,7 +4,10 @@ import { CREDITS_PER_DOLLAR } from "./pricing.js";
 export const API_KEY_PLACEHOLDER = "ak_YOUR_API_KEY";
 
 function gatewayBase(gatewayOrigin: string): string {
-  return gatewayOrigin.replace(/\/+$/, "").replace(/\/gateway$/i, "");
+  // Index scan instead of /\/+$/, which backtracks quadratically on long slash runs.
+  let end = gatewayOrigin.length;
+  while (end > 0 && gatewayOrigin.charCodeAt(end - 1) === 47) end--;
+  return gatewayOrigin.slice(0, end).replace(/\/gateway$/i, "");
 }
 
 /** MCP Streamable HTTP URL on the gateway origin. */

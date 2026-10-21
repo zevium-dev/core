@@ -129,7 +129,7 @@ describe("gateway /llms.txt", () => {
     const urls = new Set(
       Array.from(text.matchAll(/https?:\/\/[^\s)'"]+/g), (match) =>
         decodeURIComponent(match[0]),
-      ).filter((url) => url.startsWith(ORIGIN)),
+      ).filter((url) => new URL(url).origin === new URL(ORIGIN).origin),
     );
     expect(urls).toEqual(
       new Set([
