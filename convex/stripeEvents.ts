@@ -709,14 +709,24 @@ export function stripeWebhook(kind: "platform" | "connect" | "v2") {
     let data: z.infer<typeof receiptInput>;
     try {
       const raw = await rawBody(request);
-      // constructEventAsync verifies exact raw bytes; thin notifications are parsed separately below.
-      const event = await client.webhooks.constructEventAsync(
-        raw,
-        request.headers.get("stripe-signature") ?? "",
-        secret,
-        300,
-        StripeCrypto(),
-      );
+      // Both verify exact raw bytes; the SDK refuses thin v2 notifications in constructEventAsync.
+      const signature = request.headers.get("stripe-signature") ?? "";
+      const event =
+        kind === "v2"
+          ? await client.parseEventNotificationAsync(
+              raw,
+              signature,
+              secret,
+              300,
+              StripeCrypto(),
+            )
+          : await client.webhooks.constructEventAsync(
+              raw,
+              signature,
+              secret,
+              300,
+              StripeCrypto(),
+            );
       const envelope = z
         .object({
           id,
