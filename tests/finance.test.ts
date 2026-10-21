@@ -792,6 +792,43 @@ describe("provider receipts", () => {
       "complete",
     );
   });
+  it("accepts signed thin v2 account notifications", async () => {
+    const t = harness();
+    const body = JSON.stringify({
+      id: "evt_test_thin",
+      object: "v2.core.event",
+      type: "v2.core.account[requirements].updated",
+      livemode: false,
+      created: new Date(NOW).toISOString(),
+      related_object: {
+        id: "acct_thin",
+        type: "v2.core.account",
+        url: "/v2/core/accounts/acct_thin",
+      },
+    });
+    const signature = Stripe.webhooks.generateTestHeaderString({
+      payload: body,
+      secret: "fixture-v2-secret",
+      timestamp: Math.floor(NOW / 1000),
+    });
+    expect(
+      (
+        await t.fetch("/stripe-connect-v2-webhook", {
+          method: "POST",
+          body,
+          headers: { "stripe-signature": signature },
+        })
+      ).status,
+    ).toBe(200);
+    const receipt = (
+      await t.run((ctx) => ctx.db.query("webhookReceipts").collect())
+    )[0];
+    expect(receipt).toMatchObject({
+      destination: "v2",
+      eventId: "evt_test_thin",
+      objectId: "acct_thin",
+    });
+  });
   it("quarantines live events without granting", async () => {
     const t = harness();
     const body = JSON.stringify({

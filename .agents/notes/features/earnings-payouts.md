@@ -1,6 +1,6 @@
 # Earnings & payouts
 
-> Status: root cutover implemented; owner activation pending · Updated: 2026-10-11
+> Status: root cutover implemented; owner activation pending · Updated: 2026-10-21
 > Code: `convex/{earnings,payouts,connect,operators}.ts`, `convex/money/{publisherLedger,financialRollups,transfers,adjustments}.ts`, `tests/finance.test.ts`, `tests/sourceLocks.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [pricing](pricing.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
@@ -33,6 +33,8 @@ Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → ear
 ## Tech
 
 Stripe SDK 23.0.0 retains Dahlia Accounts v2 recipient-scoped onboarding (`configurations: ["recipient"]`) through a documented compatibility directive in `convex/connect.ts`. `tests/stripeSdk.test.ts` exercises the production onboarding action with fake HTTP, checking version headers, JSON payload, durable idempotency key, and completed link state. No account or API-version migration.
+
+Stripe sends Accounts v2 updates as thin event notifications to `/stripe-connect-v2-webhook`; `stripeWebhook("v2")` verifies them with `parseEventNotificationAsync`, because `webhooks.constructEventAsync` throws on thin payloads. Before 2026-10-21 every v2 delivery got 400. Covered by `tests/finance.test.ts` "accepts signed thin v2 account notifications".
 
 Settlement writes exact original-source/day/shard 95/5 atoms and rollups without per-call publisher balance writes. Risk release waits until acceptance-day end plus seven days. Whole-cent transfers retain fractional carry; ambiguous provider outcomes retain allocation and reconciliation evidence. Pending earnings reverse newest-first before released earnings; already transferred money can leave negative publisher availability. Reinstatement restores exact journals. Payment review quarantines only its original consumer funding sources after drain (#440); publisher case holds and partial clawback journals remain intact. Operator retry creates a fresh generation and restores/reapplies those effects before source unlock. Accounts v2 ownership, mode/account/capability checks and durable retry identities survive. Same-org promo self-consumption earns no withdrawable net; cross-org common ownership is not inferred. These review defaults still need owner policy sign-off before activation.
 
