@@ -8,7 +8,8 @@
   "scripts": {
     "build": "turbo build",
     "build:ci": "node scripts/quality/build-ci.mjs",
-    "ci:pr": "pnpm format:check && pnpm lint && pnpm quality:static && pnpm typecheck && pnpm test && pnpm ci:control-plane && pnpm build:ci && pnpm routes:check && pnpm diff:check",
+    "ci:static": "pnpm format:check && pnpm lint && pnpm quality:static && pnpm typecheck",
+    "ci:pr": "pnpm ci:static && pnpm test && pnpm ci:control-plane && pnpm build:ci && pnpm routes:check && pnpm diff:check",
     "build:production": "node scripts/build.mjs",
     "dev": "pnpm predev && concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "diff:check": "git diff --check",

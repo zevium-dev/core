@@ -1,12 +1,12 @@
 # Deployment after the Convex cutover
 
-Updated: 2026-10-11. Root `convex/` is canonical. PR 7 changes code only; shared development, preview, and production activation have **not** been performed.
+Updated: 2026-10-21. Root `convex/` is canonical. PR 7 changes code only; shared development, preview, and production activation have **not** been performed.
 
 **First activation requires the owner-only [Convex activation runbook](convex-activation.md).** It includes matched destinations and keyrings, Clerk/OAuth, Stripe test-mode webhook destinations, Resend, disposable-data reset, the destructive WalletSqliteDO deletion migration, deployment order, browser gates, and rollback limits. Do not run routine automation to perform that initial cutover.
 
 ## Deployment gates
 
-Production workflow `.github/workflows/deploy-production.yml` requires repository variable `CONVEX_REBUILD_ACTIVATED=true`, successful `develop` CI at the exact current SHA, and approval through the protected `production` environment. Preview workflow requires `CONVEX_REBUILD_PREVIEW_ACTIVATED=true` and its existing explicit preview request. Leave both activation variables unset until the owner completes the applicable runbook. Opening this PR does not authorize deployment.
+Production workflow `.github/workflows/deploy-production.yml` requires repository variable `CONVEX_REBUILD_ACTIVATED=true`, successful `develop` CI at the exact current SHA (every `ci.yml` slice, uncached turbo; [CI shape](testing.md#ci)), and approval through the protected `production` environment. Preview workflow requires `CONVEX_REBUILD_PREVIEW_ACTIVATED=true` and its existing explicit preview request. Leave both activation variables unset until the owner completes the applicable runbook. Opening this PR does not authorize deployment.
 
 After a successful production run, `.github/workflows/publish-mcp-registry.yml` publishes a new `server.json` version to the official MCP Registry (gated by `MCP_REGISTRY_PUBLISH_ENABLED`, environment `mcp-registry`). Setup: [MCP Registry runbook](mcp-registry.md).
 

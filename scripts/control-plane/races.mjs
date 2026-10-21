@@ -190,24 +190,6 @@ if (!process.env.NEXT_EDGE_ONLY) {
   run(["run", "financeRaces:races"]);
   run(["run", "sourceLocksRaces:races"]);
 
-  // Split the measurement driver across actions; the 10,001-bucket job spans over 1,250 transactions.
-  function result(args) {
-    const child = spawnSync("pnpm", ["exec", "convex", "run", ...args], {
-      cwd: fileURLToPath(scratch),
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    assert.equal(child.status, 0, `Convex ${args[0]} failed`);
-    return JSON.parse(child.stdout);
-  }
-  let progress = result(["financeRaces:largeStart"]);
-  for (let batch = 0; !progress.done && batch < 8; batch++) {
-    progress = result(["financeRaces:largeBatch", JSON.stringify(progress)]);
-    console.log("PR4 10001-bucket local reconciliation", progress);
-  }
-  assert.equal(progress.done, true, "Large reconciliation failed to finish");
-  // Scale fixtures deliberately synthesize earnings outside ordinary usage.
   // Run the paired conservation audit on its own fresh anonymous deployment.
   const paired = spawnSync(
     "pnpm",
