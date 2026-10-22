@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "26.6.4",
-    "typescript": "^5.9.0",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.11",
     "@zevium/shared": "workspace:*",
     "zod": "^4.6.5",
