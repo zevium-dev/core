@@ -18,7 +18,8 @@ security-alert APIs. Code scanning and secret scanning returned no open alerts.
   `solid-js@1.9.14` / `seroval-plugins@1.5.6` → `seroval@1.5.6`. The direct devtools
   packages are already at their latest registry versions. Override only
   `seroval@<1.6.3` to `1.6.8`, matching the existing patched TanStack Start/Router
-  SSR version. Solid and its plugin keep their current versions.
+  SSR version. Solid and its plugin keep their current versions. Superseded by
+  `seroval@<1.6.11: 1.6.12` in [security-alerts-2026-11-01.md](security-alerts-2026-11-01.md).
 - **#30, postcss-selector-parser:** `@tailwindcss/typography@0.5.20` pins `6.0.10`
   and has no newer registry version. Override `postcss-selector-parser@<7.1.6`
   to `7.1.6`; the web build exercises typography's selector transformations.
