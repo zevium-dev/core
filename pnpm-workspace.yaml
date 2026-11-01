@@ -43,11 +43,14 @@ packageExtensions:
 overrides:
   # Lezer NodeProp ids must come from one module across parser and highlighter.
   "@lezer/common": 1.5.3
-  undici: 7.30.0
+  undici: 7.30.1
   "jayson>uuid": 11.1.1
   postcss: 8.5.25
   # Dependabot #30–34: constrain only vulnerable transitive versions.
   "sharp@<0.35.5": 0.35.5
-  "seroval@<1.6.3": 1.6.8
+  "seroval@<1.6.11": 1.6.12
   "postcss-selector-parser@<7.1.6": 7.1.6
   js-yaml: 4.3.2
+  # 2026-11 audit: vulnerable transitive pins with no patched parent release.
+  "zod@<4.6.6": 4.6.7
+  "launch-editor@<2.14.2": 2.14.2
