@@ -15,9 +15,9 @@
   "devDependencies": {
     "@types/node": "26.6.4",
     "typescript": "^5.9.0",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "@zevium/shared": "workspace:*",
-    "zod": "^4.6.5",
+    "zod": "^4.6.7",
     "esbuild": "0.28.2"
   },
   "description": "Generated Zevium API commands through the authenticated, credit-gated MCP gateway",
